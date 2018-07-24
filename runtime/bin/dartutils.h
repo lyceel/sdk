@@ -103,7 +103,23 @@ class DartUtils {
   // Returns the boolean value of a Dart object. If the object is not
   // a boolean value an API error is propagated.
   static bool GetBooleanValue(Dart_Handle bool_obj);
-
+  // Returns the boolean value of the argument at index. If the argument
+  // is not a boolean value an API error is propagated.
+  static bool GetNativeBooleanArgument(Dart_NativeArguments args,
+                                       intptr_t index);
+  // Returns the integer value of the argument at index. If the argument
+  // is not an integer value an API error is propagated.
+  static int64_t GetNativeIntegerArgument(Dart_NativeArguments args,
+                                          intptr_t index);
+  // Returns the intptr_t value of the argument at index. If the argument
+  // is not an integer value or the value is outside the intptr_t range an
+  // API error is propagated.
+  static intptr_t GetNativeIntptrArgument(Dart_NativeArguments args,
+                                          intptr_t index);
+  // Returns the string value of the argument at index. If the argument
+  // is not a string value an API error is propagated.
+  static const char* GetNativeStringArgument(Dart_NativeArguments args,
+                                             intptr_t index);
   static Dart_Handle SetIntegerField(Dart_Handle handle,
                                      const char* name,
                                      int64_t val);
@@ -188,10 +204,8 @@ class DartUtils {
   static Dart_Handle NewError(const char* format, ...);
   static Dart_Handle NewInternalError(const char* message);
 
-  static Dart_Handle BuiltinLib() {
-    IsolateData* isolate_data =
-        reinterpret_cast<IsolateData*>(Dart_CurrentIsolateData());
-    return isolate_data->builtin_lib();
+  static Dart_Handle LookupBuiltinLib() {
+    return Dart_LookupLibrary(NewString(kBuiltinLibURL));
   }
 
   static bool SetOriginalWorkingDirectory();
@@ -282,7 +296,6 @@ class CObject {
   bool IsInt64() { return type() == Dart_CObject_kInt64; }
   bool IsInt32OrInt64() { return IsInt32() || IsInt64(); }
   bool IsIntptr() { return IsInt32OrInt64(); }
-  bool IsBigint() { return type() == Dart_CObject_kBigint; }
   bool IsDouble() { return type() == Dart_CObject_kDouble; }
   bool IsString() { return type() == Dart_CObject_kString; }
   bool IsArray() { return type() == Dart_CObject_kArray; }
@@ -310,8 +323,6 @@ class CObject {
   static Dart_CObject* NewInt32(int32_t value);
   static Dart_CObject* NewInt64(int64_t value);
   static Dart_CObject* NewIntptr(intptr_t value);
-  static Dart_CObject* NewBigint(const char* hex_value);
-  static char* BigintToHexValue(Dart_CObject* bigint);
   static Dart_CObject* NewDouble(double value);
   static Dart_CObject* NewString(intptr_t length);
   static Dart_CObject* NewString(const char* str);
@@ -450,36 +461,6 @@ class CObjectIntptr : public CObject {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(CObjectIntptr);
-};
-
-class CObjectBigint : public CObject {
- public:
-  // DECLARE_COBJECT_CONSTRUCTORS(Bigint) would miss hex_value_ initialization.
-  explicit CObjectBigint(Dart_CObject* cobject) : CObject(cobject) {
-    ASSERT(type() == Dart_CObject_kBigint);
-    cobject_ = cobject;
-    hex_value_ = NULL;
-  }
-  explicit CObjectBigint(CObject* cobject) : CObject() {
-    ASSERT(cobject != NULL);
-    ASSERT(cobject->type() == Dart_CObject_kBigint);
-    cobject_ = cobject->AsApiCObject();
-    hex_value_ = NULL;
-  }
-
-  char* Value() {
-    if (hex_value_ == NULL) {
-      hex_value_ = BigintToHexValue(cobject_);
-    }
-    ASSERT(hex_value_ != NULL);
-    return hex_value_;
-  }
-
-  ~CObjectBigint() { free(hex_value_); }
-
- private:
-  char* hex_value_;
-  DISALLOW_COPY_AND_ASSIGN(CObjectBigint);
 };
 
 class CObjectDouble : public CObject {

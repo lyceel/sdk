@@ -11,7 +11,6 @@ import 'package:analysis_server/protocol/protocol_generated.dart';
 import 'package:analysis_server/src/analysis_server.dart';
 import 'package:analysis_server/src/domain_completion.dart';
 import 'package:analysis_server/src/domain_diagnostic.dart';
-import 'package:analysis_server/src/domain_execution.dart';
 import 'package:analysis_server/src/plugin/plugin_manager.dart';
 import 'package:analysis_server/src/server/http_server.dart';
 import 'package:analysis_server/src/services/completion/completion_performance.dart';
@@ -173,6 +172,8 @@ class AstPage extends DiagnosticPageWithNav {
 
   @override
   Future<Null> generateContent(Map<String, String> params) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     String path = params['file'];
     if (path == null) {
       p('No file path provided.');
@@ -199,6 +200,8 @@ class AstPage extends DiagnosticPageWithNav {
 
   @override
   Future<Null> generatePage(Map<String, String> params) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     try {
       _description = params['file'];
       await super.generatePage(params);
@@ -216,6 +219,8 @@ class CommunicationsPage extends DiagnosticPageWithNav {
 
   @override
   Future generateContent(Map<String, String> params) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     void writeRow(List<String> data, {List<String> classes}) {
       buf.write("<tr>");
       for (int i = 0; i < data.length; i++) {
@@ -304,6 +309,8 @@ class CompletionPage extends DiagnosticPageWithNav {
 
   @override
   Future generateContent(Map<String, String> params) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     CompletionDomainHandler completionDomain = server.handlers
         .firstWhere((handler) => handler is CompletionDomainHandler);
 
@@ -351,12 +358,14 @@ class CompletionPage extends DiagnosticPageWithNav {
     buf.writeln('<table>');
     buf.writeln(
         '<tr><th>Time</th><th>Results</th><th>Source</th><th>Snippet</th></tr>');
+    var pathContext = completionDomain.server.resourceProvider.pathContext;
     for (CompletionPerformance completion in completions) {
+      String shortName = pathContext.basename(completion.path);
       buf.writeln('<tr>'
           '<td class="pre right">${printMilliseconds(
           completion.elapsedInMilliseconds)}</td>'
           '<td class="right">${completion.suggestionCount}</td>'
-          '<td>${escape(completion.source.shortName)}</td>'
+          '<td>${escape(shortName)}</td>'
           '<td><code>${escape(completion.snippet)}</code></td>'
           '</tr>');
     }
@@ -375,6 +384,11 @@ class ContextsPage extends DiagnosticPageWithNav {
   String describe(AnalysisOptionsImpl options) {
     StringBuffer b = new StringBuffer();
 
+    b.write(writeOption('Strong mode', options.strongMode));
+    b.write(writeOption('Implicit dynamic', options.implicitDynamic));
+    b.write(writeOption('Implicit casts', options.implicitCasts));
+    b.write(writeOption('Declaration casts', options.declarationCasts));
+
     b.write(
         writeOption('Analyze function bodies', options.analyzeFunctionBodies));
     b.write(writeOption('Enable super mixins', options.enableSuperMixins));
@@ -385,7 +399,6 @@ class ContextsPage extends DiagnosticPageWithNav {
         writeOption('Generate errors in SDK files', options.generateSdkErrors));
     b.write(writeOption('Generate hints', options.hint));
     b.write(writeOption('Preserve comments', options.preserveComments));
-    b.write(writeOption('Strong mode', options.strongMode));
     b.write(writeOption('Strong mode hints', options.strongModeHints));
 
     return b.toString();
@@ -393,6 +406,8 @@ class ContextsPage extends DiagnosticPageWithNav {
 
   @override
   Future generateContent(Map<String, String> params) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     Map<Folder, AnalysisDriver> driverMap = server.driverMap;
     if (driverMap.isEmpty) {
       blankslate('No contexts.');
@@ -573,10 +588,14 @@ abstract class DiagnosticPage extends Page {
       (site as DiagnosticsSite).socketServer.analysisServer;
 
   Future<Null> generateContainer(Map<String, String> params) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     buf.writeln('<div class="columns docs-layout">');
     buf.writeln('<div class="three-fourths column markdown-body">');
     h1(title, classes: 'page-title');
     await asyncDiv(() async {
+      // TODO(brianwilkerson) Determine whether this await is necessary.
+      await null;
       p(description);
       await generateContent(params);
     }, classes: 'markdown-body');
@@ -617,6 +636,8 @@ abstract class DiagnosticPage extends Page {
   }
 
   Future<Null> generatePage(Map<String, String> params) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     buf.writeln('<!DOCTYPE html><html lang="en">');
     buf.write('<head>');
     buf.write('<meta charset="utf-8">');
@@ -655,6 +676,8 @@ abstract class DiagnosticPageWithNav extends DiagnosticPage {
   bool get showInNav => true;
 
   Future<Null> generateContainer(Map<String, String> params) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     buf.writeln('<div class="columns docs-layout">');
 
     bool shouldShowInNav(Page page) {
@@ -678,6 +701,8 @@ abstract class DiagnosticPageWithNav extends DiagnosticPage {
     buf.writeln('<div class="four-fifths column markdown-body">');
     h1(title, classes: 'page-title');
     await asyncDiv(() async {
+      // TODO(brianwilkerson) Determine whether this await is necessary.
+      await null;
       p(description);
       await generateContent(params);
     }, classes: 'markdown-body');
@@ -749,6 +774,8 @@ class ElementModelPage extends DiagnosticPageWithNav {
 
   @override
   Future<Null> generateContent(Map<String, String> params) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     String path = params['file'];
     if (path == null) {
       p('No file path provided.');
@@ -775,6 +802,8 @@ class ElementModelPage extends DiagnosticPageWithNav {
 
   @override
   Future<Null> generatePage(Map<String, String> params) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     try {
       _description = params['file'];
       await super.generatePage(params);
@@ -792,6 +821,8 @@ class EnvironmentVariablesPage extends DiagnosticPageWithNav {
 
   @override
   Future generateContent(Map<String, String> params) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     buf.writeln('<table>');
     buf.writeln('<tr><th>Variable</th><th>Value</th></tr>');
     for (String key in Platform.environment.keys.toList()..sort()) {
@@ -809,6 +840,8 @@ class ExceptionPage extends DiagnosticPage {
       : super(site, '', '500 Oops', description: message);
 
   Future generateContent(Map<String, String> params) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     p(trace.toString(), style: 'white-space: pre');
   }
 }
@@ -824,6 +857,8 @@ class ExceptionsPage extends DiagnosticPageWithNav {
 
   @override
   Future generateContent(Map<String, String> params) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (exceptions.isEmpty) {
       blankslate('No exceptions encountered!');
     } else {
@@ -846,6 +881,8 @@ class FeedbackPage extends DiagnosticPage {
 
   @override
   Future generateContent(Map<String, String> params) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     final String issuesUrl = 'https://github.com/dart-lang/sdk/issues';
     p(
       'To file issues or feature requests, see our '
@@ -889,6 +926,8 @@ class InstrumentationPage extends DiagnosticPageWithNav {
 
   @override
   Future generateContent(Map<String, String> params) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     p(
         'Instrumentation can be enabled by starting the analysis server with the '
         '<code>--instrumentation-log-file=path/to/file</code> flag.',
@@ -931,6 +970,8 @@ class MemoryAndCpuPage extends DiagnosticPageWithNav {
 
   @override
   Future generateContent(Map<String, String> params) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     UsageInfo usage = await profiler.getProcessUsage(pid);
 
     developer.ServiceProtocolInfo serviceProtocolInfo =
@@ -993,7 +1034,10 @@ class NotFoundPage extends DiagnosticPage {
   NotFoundPage(Site site, this.path)
       : super(site, '', '404 Not found', description: "'$path' not found.");
 
-  Future generateContent(Map<String, String> params) async {}
+  Future generateContent(Map<String, String> params) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
+  }
 }
 
 class OverlaysPage extends DiagnosticPageWithNav {
@@ -1003,6 +1047,8 @@ class OverlaysPage extends DiagnosticPageWithNav {
 
   @override
   Future generateContent(Map<String, String> params) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     FileContentOverlay overlays = server.fileContentOverlay;
     List<String> paths = overlays.paths.toList()..sort();
 
@@ -1046,6 +1092,8 @@ class PluginsPage extends DiagnosticPageWithNav {
 
   @override
   Future generateContent(Map<String, String> params) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     h3('Analysis plugins');
     List<PluginInfo> analysisPlugins = server.pluginManager.plugins;
 
@@ -1107,6 +1155,8 @@ class ProfilePage extends DiagnosticPageWithNav {
 
   @override
   Future generateContent(Map<String, String> params) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     h3('Profiling performance tag data');
 
     // prepare sorted tags
@@ -1204,7 +1254,7 @@ class ServiceProtocol {
   final WebSocket socket;
 
   int _id = 0;
-  Map<String, Completer> _completers = {};
+  Map<String, Completer<Map>> _completers = {};
 
   ServiceProtocol._(this.socket) {
     socket.listen(_handleMessage);
@@ -1212,7 +1262,7 @@ class ServiceProtocol {
 
   Future<Map> call(String method, [Map args]) {
     String id = '${++_id}';
-    Completer completer = new Completer();
+    Completer<Map> completer = new Completer();
     _completers[id] = completer;
     Map m = {'id': id, 'method': method};
     if (args != null) m['params'] = args;
@@ -1241,6 +1291,8 @@ class ServiceProtocol {
   }
 
   static Future<ServiceProtocol> connect(Uri uri) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     WebSocket socket = await WebSocket.connect(uri.toString());
     return new ServiceProtocol._(socket);
   }
@@ -1254,6 +1306,8 @@ class StatusPage extends DiagnosticPageWithNav {
 
   @override
   Future generateContent(Map<String, String> params) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     DiagnosticsSite diagnosticsSite = site;
 
     buf.writeln('<div class="columns">');
@@ -1262,6 +1316,8 @@ class StatusPage extends DiagnosticPageWithNav {
     h3('Status');
     buf.writeln(writeOption('Preview-dart-2',
         diagnosticsSite.socketServer.analysisServerOptions.previewDart2));
+    buf.writeln(writeOption('Use fasta parser',
+        diagnosticsSite.socketServer.analysisServerOptions.useFastaParser));
     buf.writeln(writeOption('Use common front end',
         diagnosticsSite.socketServer.analysisServerOptions.useCFE));
     buf.writeln(writeOption('Instrumentation enabled',
@@ -1292,6 +1348,8 @@ class SubscriptionsPage extends DiagnosticPageWithNav {
 
   @override
   Future generateContent(Map<String, String> params) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     // server domain
     h3('Server domain subscriptions');
     ul(ServerService.VALUES, (item) {

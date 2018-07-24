@@ -23,11 +23,8 @@ class InvalidCodeTest_Kernel extends InvalidCodeTest {
   @override
   bool get useCFE => true;
 
-  @failingTest
   @override
-  test_constructorAndMethodNameCollision() async {
-    return super.test_constructorAndMethodNameCollision();
-  }
+  bool get usingFastaParser => true;
 
   @failingTest
   @override

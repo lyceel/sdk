@@ -27,6 +27,7 @@ import 'package:kernel/ast.dart'
         DartType,
         Field,
         FileUriNode,
+        IntConstant,
         Procedure,
         StaticGet,
         TreeNode;
@@ -84,7 +85,7 @@ Future<Component> compileToKernel(Uri source, CompilerOptions options,
   // Restore error handler (in case 'options' are reused).
   options.onProblem = errorDetector.previousErrorHandler;
 
-  if (genBytecode && component != null) {
+  if (!errorDetector.hasCompilationErrors && genBytecode && component != null) {
     generateBytecode(component,
         strongMode: options.strongMode, dropAST: dropAST);
   }
@@ -117,17 +118,17 @@ Future _runGlobalTransformations(
     // when building a platform dill file for VM/JIT case.
     mixin_deduplication.transformComponent(component);
 
-    if (useGlobalTypeFlowAnalysis) {
-      globalTypeFlow.transformComponent(coreTypes, component, entryPoints);
-    } else {
-      devirtualization.transformComponent(coreTypes, component);
-    }
-
     if (enableConstantEvaluation) {
       await _performConstantEvaluation(source, compilerOptions, component,
           coreTypes, environmentDefines, strongMode, enableAsserts);
 
       if (errorDetector.hasCompilationErrors) return;
+    }
+
+    if (useGlobalTypeFlowAnalysis) {
+      globalTypeFlow.transformComponent(coreTypes, component, entryPoints);
+    } else {
+      devirtualization.transformComponent(coreTypes, component);
     }
 
     no_dynamic_invocations_annotator.transformComponent(component);
@@ -145,8 +146,7 @@ Future _performConstantEvaluation(
   final vmConstants =
       new vm_constants.VmConstantsBackend(environmentDefines, coreTypes);
 
-  final processedOptions =
-      new ProcessedOptions(compilerOptions, false, [source]);
+  final processedOptions = new ProcessedOptions(compilerOptions, [source]);
 
   // Run within the context, so we have uri source tokens...
   await CompilerContext.runWithOptions(processedOptions,
@@ -159,14 +159,12 @@ Future _performConstantEvaluation(
     final typeEnvironment =
         new TypeEnvironment(coreTypes, hierarchy, strongMode: strongMode);
 
-    // NOTE: Currently we keep fields, because there are certain constant
-    // fields which the VM accesses (e.g. `_Random._A` needs to be preserved).
-    // TODO(kustermann): We should use the entrypoints manifest to find out
-    // which fields need to be preserved and remove the rest.
+    // TFA will remove constants fields which are unused (and respects the
+    // vm/embedder entrypoints).
     constants.transformComponent(component, vmConstants,
         keepFields: true,
         strongMode: true,
-        evaluateAnnotations: false,
+        evaluateAnnotations: true,
         enableAsserts: enableAsserts,
         errorReporter:
             new ForwardConstantEvaluationErrors(context, typeEnvironment));
@@ -286,6 +284,20 @@ class ForwardConstantEvaluationErrors implements constants.ErrorReporter {
     reportIt(context, message, node);
   }
 
+  zeroDivisor(
+      List<TreeNode> context, TreeNode node, IntConstant receiver, String op) {
+    final message = codes.templateConstEvalZeroDivisor
+        .withArguments(op, '${receiver.value}');
+    reportIt(context, message, node);
+  }
+
+  negativeShift(List<TreeNode> context, TreeNode node, IntConstant receiver,
+      String op, IntConstant argument) {
+    final message = codes.templateConstEvalNegativeShift
+        .withArguments(op, '${receiver.value}', '${argument.value}');
+    reportIt(context, message, node);
+  }
+
   nonConstLiteral(List<TreeNode> context, TreeNode node, String klass) {
     final message =
         codes.templateConstEvalNonConstantLiteral.withArguments(klass);
@@ -297,6 +309,13 @@ class ForwardConstantEvaluationErrors implements constants.ErrorReporter {
         ? codes.messageConstEvalFailedAssertion
         : codes.templateConstEvalFailedAssertionWithMessage
             .withArguments(string);
+    reportIt(context, message, node);
+  }
+
+  nonConstantVariableGet(
+      List<TreeNode> context, TreeNode node, String variableName) {
+    final message = codes.templateConstEvalNonConstantVariableGet
+        .withArguments(variableName);
     reportIt(context, message, node);
   }
 
@@ -327,9 +346,28 @@ class ForwardConstantEvaluationErrors implements constants.ErrorReporter {
   }
 
   getFileOffset(TreeNode node) {
-    while (node.fileOffset == TreeNode.noOffset) {
+    while (node?.fileOffset == TreeNode.noOffset) {
       node = node.parent;
     }
     return node == null ? TreeNode.noOffset : node.fileOffset;
   }
+}
+
+bool parseCommandLineDefines(
+    List<String> dFlags, Map<String, String> environmentDefines, String usage) {
+  for (final String dflag in dFlags) {
+    final equalsSignIndex = dflag.indexOf('=');
+    if (equalsSignIndex < 0) {
+      environmentDefines[dflag] = '';
+    } else if (equalsSignIndex > 0) {
+      final key = dflag.substring(0, equalsSignIndex);
+      final value = dflag.substring(equalsSignIndex + 1);
+      environmentDefines[key] = value;
+    } else {
+      print('The environment constant options must have a key (was: "$dflag")');
+      print(usage);
+      return false;
+    }
+  }
+  return true;
 }

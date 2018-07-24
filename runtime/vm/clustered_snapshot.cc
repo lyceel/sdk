@@ -8,7 +8,7 @@
 #include "vm/bootstrap.h"
 #include "vm/compiler/backend/code_statistics.h"
 #include "vm/dart.h"
-#include "vm/heap.h"
+#include "vm/heap/heap.h"
 #include "vm/image_snapshot.h"
 #include "vm/native_entry.h"
 #include "vm/object.h"
@@ -18,6 +18,8 @@
 #include "vm/symbols.h"
 #include "vm/timeline.h"
 #include "vm/version.h"
+
+#define LOG_SECTION_BOUNDARIES false
 
 namespace dart {
 
@@ -29,6 +31,10 @@ static RawObject* AllocateUninitialized(PageSpace* old_space, intptr_t size) {
     OUT_OF_MEMORY();
   }
   return RawObject::FromAddr(address);
+}
+
+static bool SnapshotContainsTypeTestingStubs(Snapshot::Kind kind) {
+  return kind == Snapshot::kFullAOT || kind == Snapshot::kFullJIT;
 }
 
 void Deserializer::InitializeHeader(RawObject* raw,
@@ -49,6 +55,10 @@ void Deserializer::InitializeHeader(RawObject* raw,
 }
 
 void SerializationCluster::WriteAndMeasureAlloc(Serializer* serializer) {
+  if (LOG_SECTION_BOUNDARIES) {
+    OS::PrintErr("Data + %" Px ": Alloc %s\n", serializer->bytes_written(),
+                 name_);
+  }
   intptr_t start_size = serializer->bytes_written() + serializer->GetDataSize();
   intptr_t start_objects = serializer->next_ref_index();
   WriteAlloc(serializer);
@@ -59,6 +69,10 @@ void SerializationCluster::WriteAndMeasureAlloc(Serializer* serializer) {
 }
 
 void SerializationCluster::WriteAndMeasureFill(Serializer* serializer) {
+  if (LOG_SECTION_BOUNDARIES) {
+    OS::PrintErr("Data + %" Px ": Fill %s\n", serializer->bytes_written(),
+                 name_);
+  }
   intptr_t start = serializer->bytes_written();
   WriteFill(serializer);
   intptr_t stop = serializer->bytes_written();
@@ -2430,7 +2444,7 @@ class ICDataSerializationCluster : public SerializationCluster {
       }
       s->Write<uint32_t>(ic->ptr()->state_bits_);
 #if defined(TAG_IC_DATA)
-      s->Write<int32_t>(ic->ptr()->tag_);
+      s->Write<int32_t>(static_cast<int32_t>(ic->ptr()->tag_));
 #endif
     }
   }
@@ -2475,7 +2489,7 @@ class ICDataDeserializationCluster : public DeserializationCluster {
       NOT_IN_PRECOMPILED(ic->ptr()->deopt_id_ = d->Read<int32_t>());
       ic->ptr()->state_bits_ = d->Read<int32_t>();
 #if defined(TAG_IC_DATA)
-      ic->ptr()->tag_ = d->Read<int32_t>();
+      ic->ptr()->tag_ = static_cast<ICData::Tag>(d->Read<int32_t>());
 #endif
     }
   }
@@ -3048,6 +3062,8 @@ class TypeSerializationCluster : public SerializationCluster {
 
   void WriteFill(Serializer* s) {
     const bool is_vm_isolate = s->isolate() == Dart::vm_isolate();
+    const bool should_write_type_testing_stub =
+        SnapshotContainsTypeTestingStubs(s->kind());
 
     intptr_t count = canonical_objects_.length();
     for (intptr_t i = 0; i < count; i++) {
@@ -3059,7 +3075,7 @@ class TypeSerializationCluster : public SerializationCluster {
       }
       s->WriteTokenPosition(type->ptr()->token_pos_);
       s->Write<int8_t>(type->ptr()->type_state_);
-      if (s->kind() == Snapshot::kFullAOT) {
+      if (should_write_type_testing_stub) {
         RawInstructions* instr = type_testing_stubs_.LookupByAddresss(
             type->ptr()->type_test_stub_entry_point_);
         s->WriteInstructions(instr, Code::null());
@@ -3075,7 +3091,7 @@ class TypeSerializationCluster : public SerializationCluster {
       }
       s->WriteTokenPosition(type->ptr()->token_pos_);
       s->Write<int8_t>(type->ptr()->type_state_);
-      if (s->kind() == Snapshot::kFullAOT) {
+      if (should_write_type_testing_stub) {
         RawInstructions* instr = type_testing_stubs_.LookupByAddresss(
             type->ptr()->type_test_stub_entry_point_);
         s->WriteInstructions(instr, Code::null());
@@ -3084,7 +3100,7 @@ class TypeSerializationCluster : public SerializationCluster {
 
     // The dynamic/void objects are not serialized, so we manually send
     // the type testing stub for it.
-    if (s->kind() == Snapshot::kFullAOT && is_vm_isolate) {
+    if (should_write_type_testing_stub && is_vm_isolate) {
       RawInstructions* dynamic_instr = type_testing_stubs_.LookupByAddresss(
           Type::dynamic_type().type_test_stub_entry_point());
       s->WriteInstructions(dynamic_instr, Code::null());
@@ -3127,6 +3143,8 @@ class TypeDeserializationCluster : public DeserializationCluster {
 
   void ReadFill(Deserializer* d) {
     const bool is_vm_isolate = d->isolate() == Dart::vm_isolate();
+    const bool should_read_type_testing_stub =
+        SnapshotContainsTypeTestingStubs(d->kind());
 
     for (intptr_t id = canonical_start_index_; id < canonical_stop_index_;
          id++) {
@@ -3140,7 +3158,7 @@ class TypeDeserializationCluster : public DeserializationCluster {
       }
       type->ptr()->token_pos_ = d->ReadTokenPosition();
       type->ptr()->type_state_ = d->Read<int8_t>();
-      if (d->kind() == Snapshot::kFullAOT) {
+      if (should_read_type_testing_stub) {
         instr_ = d->ReadInstructions();
         type_ = type;
         type_.SetTypeTestingStub(instr_);
@@ -3158,7 +3176,7 @@ class TypeDeserializationCluster : public DeserializationCluster {
       }
       type->ptr()->token_pos_ = d->ReadTokenPosition();
       type->ptr()->type_state_ = d->Read<int8_t>();
-      if (d->kind() == Snapshot::kFullAOT) {
+      if (should_read_type_testing_stub) {
         instr_ = d->ReadInstructions();
         type_ = type;
         type_.SetTypeTestingStub(instr_);
@@ -3167,7 +3185,7 @@ class TypeDeserializationCluster : public DeserializationCluster {
 
     // The dynamic/void objects are not serialized, so we manually send
     // the type testing stub for it.
-    if (d->kind() == Snapshot::kFullAOT && is_vm_isolate) {
+    if (should_read_type_testing_stub && is_vm_isolate) {
       instr_ = d->ReadInstructions();
       Type::dynamic_type().SetTypeTestingStub(instr_);
       instr_ = d->ReadInstructions();
@@ -3176,7 +3194,7 @@ class TypeDeserializationCluster : public DeserializationCluster {
   }
 
   void PostLoad(const Array& refs, Snapshot::Kind kind, Zone* zone) {
-    if (kind != Snapshot::kFullAOT) {
+    if (!SnapshotContainsTypeTestingStubs(kind)) {
       for (intptr_t id = canonical_start_index_; id < canonical_stop_index_;
            id++) {
         type_ ^= refs.At(id);
@@ -3227,6 +3245,9 @@ class TypeRefSerializationCluster : public SerializationCluster {
   }
 
   void WriteFill(Serializer* s) {
+    const bool should_write_type_testing_stub =
+        SnapshotContainsTypeTestingStubs(s->kind());
+
     intptr_t count = objects_.length();
     for (intptr_t i = 0; i < count; i++) {
       RawTypeRef* type = objects_[i];
@@ -3235,7 +3256,7 @@ class TypeRefSerializationCluster : public SerializationCluster {
       for (RawObject** p = from; p <= to; p++) {
         s->WriteRef(*p);
       }
-      if (s->kind() == Snapshot::kFullAOT) {
+      if (should_write_type_testing_stub) {
         RawInstructions* instr = type_testing_stubs_.LookupByAddresss(
             type->ptr()->type_test_stub_entry_point_);
         s->WriteInstructions(instr, Code::null());
@@ -3266,7 +3287,9 @@ class TypeRefDeserializationCluster : public DeserializationCluster {
   }
 
   void ReadFill(Deserializer* d) {
-    bool is_vm_object = d->isolate() == Dart::vm_isolate();
+    const bool is_vm_object = d->isolate() == Dart::vm_isolate();
+    const bool should_read_type_testing_stub =
+        SnapshotContainsTypeTestingStubs(d->kind());
 
     for (intptr_t id = start_index_; id < stop_index_; id++) {
       RawTypeRef* type = reinterpret_cast<RawTypeRef*>(d->Ref(id));
@@ -3277,9 +3300,19 @@ class TypeRefDeserializationCluster : public DeserializationCluster {
       for (RawObject** p = from; p <= to; p++) {
         *p = d->ReadRef();
       }
-      if (d->kind() == Snapshot::kFullAOT) {
+      if (should_read_type_testing_stub) {
         instr_ = d->ReadInstructions();
         type_ = type;
+        type_.SetTypeTestingStub(instr_);
+      }
+    }
+  }
+
+  void PostLoad(const Array& refs, Snapshot::Kind kind, Zone* zone) {
+    if (!SnapshotContainsTypeTestingStubs(kind)) {
+      for (intptr_t id = start_index_; id < stop_index_; id++) {
+        type_ ^= refs.At(id);
+        instr_ = TypeTestingStubGenerator::DefaultCodeForType(type_);
         type_.SetTypeTestingStub(instr_);
       }
     }
@@ -3321,6 +3354,9 @@ class TypeParameterSerializationCluster : public SerializationCluster {
   }
 
   void WriteFill(Serializer* s) {
+    const bool should_write_type_testing_stub =
+        SnapshotContainsTypeTestingStubs(s->kind());
+
     intptr_t count = objects_.length();
     for (intptr_t i = 0; i < count; i++) {
       RawTypeParameter* type = objects_[i];
@@ -3333,7 +3369,7 @@ class TypeParameterSerializationCluster : public SerializationCluster {
       s->WriteTokenPosition(type->ptr()->token_pos_);
       s->Write<int16_t>(type->ptr()->index_);
       s->Write<int8_t>(type->ptr()->type_state_);
-      if (s->kind() == Snapshot::kFullAOT) {
+      if (should_write_type_testing_stub) {
         RawInstructions* instr = type_testing_stubs_.LookupByAddresss(
             type->ptr()->type_test_stub_entry_point_);
         s->WriteInstructions(instr, Code::null());
@@ -3366,6 +3402,8 @@ class TypeParameterDeserializationCluster : public DeserializationCluster {
 
   void ReadFill(Deserializer* d) {
     bool is_vm_object = d->isolate() == Dart::vm_isolate();
+    const bool should_read_type_testing_stub =
+        SnapshotContainsTypeTestingStubs(d->kind());
 
     for (intptr_t id = start_index_; id < stop_index_; id++) {
       RawTypeParameter* type = reinterpret_cast<RawTypeParameter*>(d->Ref(id));
@@ -3380,7 +3418,7 @@ class TypeParameterDeserializationCluster : public DeserializationCluster {
       type->ptr()->token_pos_ = d->ReadTokenPosition();
       type->ptr()->index_ = d->Read<int16_t>();
       type->ptr()->type_state_ = d->Read<int8_t>();
-      if (d->kind() == Snapshot::kFullAOT) {
+      if (should_read_type_testing_stub) {
         instr_ = d->ReadInstructions();
         type_ = type;
         type_.SetTypeTestingStub(instr_);
@@ -3389,7 +3427,7 @@ class TypeParameterDeserializationCluster : public DeserializationCluster {
   }
 
   void PostLoad(const Array& refs, Snapshot::Kind kind, Zone* zone) {
-    if (kind != Snapshot::kFullAOT) {
+    if (!SnapshotContainsTypeTestingStubs(kind)) {
       for (intptr_t id = start_index_; id < stop_index_; id++) {
         type_ ^= refs.At(id);
         instr_ = TypeTestingStubGenerator::DefaultCodeForType(type_);
@@ -3641,83 +3679,6 @@ class MintDeserializationCluster : public DeserializationCluster {
       number = refs.At(i);
       if (number.IsMint() && number.IsCanonical()) {
         mint_cls.InsertCanonicalMint(zone, Mint::Cast(number));
-      }
-    }
-  }
-};
-
-#if !defined(DART_PRECOMPILED_RUNTIME)
-class BigintSerializationCluster : public SerializationCluster {
- public:
-  BigintSerializationCluster() : SerializationCluster("Bigint") {}
-  virtual ~BigintSerializationCluster() {}
-
-  void Trace(Serializer* s, RawObject* object) {
-    RawBigint* bigint = Bigint::RawCast(object);
-    objects_.Add(bigint);
-
-    RawObject** from = bigint->from();
-    RawObject** to = bigint->to();
-    for (RawObject** p = from; p <= to; p++) {
-      s->Push(*p);
-    }
-  }
-
-  void WriteAlloc(Serializer* s) {
-    s->WriteCid(kBigintCid);
-    intptr_t count = objects_.length();
-    s->WriteUnsigned(count);
-    for (intptr_t i = 0; i < count; i++) {
-      RawBigint* bigint = objects_[i];
-      s->AssignRef(bigint);
-    }
-  }
-
-  void WriteFill(Serializer* s) {
-    intptr_t count = objects_.length();
-    for (intptr_t i = 0; i < count; i++) {
-      RawBigint* bigint = objects_[i];
-      s->Write<bool>(bigint->IsCanonical());
-      RawObject** from = bigint->from();
-      RawObject** to = bigint->to();
-      for (RawObject** p = from; p <= to; p++) {
-        s->WriteRef(*p);
-      }
-    }
-  }
-
- private:
-  GrowableArray<RawBigint*> objects_;
-};
-#endif  // !DART_PRECOMPILED_RUNTIME
-
-class BigintDeserializationCluster : public DeserializationCluster {
- public:
-  BigintDeserializationCluster() {}
-  virtual ~BigintDeserializationCluster() {}
-
-  void ReadAlloc(Deserializer* d) {
-    start_index_ = d->next_index();
-    PageSpace* old_space = d->heap()->old_space();
-    intptr_t count = d->ReadUnsigned();
-    for (intptr_t i = 0; i < count; i++) {
-      d->AssignRef(AllocateUninitialized(old_space, Bigint::InstanceSize()));
-    }
-    stop_index_ = d->next_index();
-  }
-
-  void ReadFill(Deserializer* d) {
-    bool is_vm_object = d->isolate() == Dart::vm_isolate();
-
-    for (intptr_t id = start_index_; id < stop_index_; id++) {
-      RawBigint* bigint = reinterpret_cast<RawBigint*>(d->Ref(id));
-      bool is_canonical = d->Read<bool>();
-      Deserializer::InitializeHeader(bigint, kBigintCid, Bigint::InstanceSize(),
-                                     is_vm_object, is_canonical);
-      RawObject** from = bigint->from();
-      RawObject** to = bigint->to();
-      for (RawObject** p = from; p <= to; p++) {
-        *p = d->ReadRef();
       }
     }
   }
@@ -4775,8 +4736,6 @@ SerializationCluster* Serializer::NewClusterForClass(intptr_t cid) {
       return new (Z) ClosureSerializationCluster();
     case kMintCid:
       return new (Z) MintSerializationCluster();
-    case kBigintCid:
-      return new (Z) BigintSerializationCluster();
     case kDoubleCid:
       return new (Z) DoubleSerializationCluster();
     case kGrowableObjectArrayCid:
@@ -5028,7 +4987,7 @@ void Serializer::Serialize() {
 
 #if !defined(DART_PRECOMPILED_RUNTIME)
   if (FLAG_print_snapshot_sizes_verbose) {
-    OS::Print("             Cluster   Objs     Size Fraction Cumulative\n");
+    OS::PrintErr("             Cluster   Objs     Size Fraction Cumulative\n");
     GrowableArray<SerializationCluster*> clusters_by_size;
     for (intptr_t cid = 1; cid < num_cids_; cid++) {
       SerializationCluster* cluster = clusters_by_cid_[cid];
@@ -5048,9 +5007,9 @@ void Serializer::Serialize() {
       SerializationCluster* cluster = clusters_by_size[i];
       double fraction = static_cast<double>(cluster->size()) / total_size;
       cumulative_fraction += fraction;
-      OS::Print("%20s %6" Pd " %8" Pd " %lf %lf\n", cluster->name(),
-                cluster->num_objects(), cluster->size(), fraction,
-                cumulative_fraction);
+      OS::PrintErr("%20s %6" Pd " %8" Pd " %lf %lf\n", cluster->name(),
+                   cluster->num_objects(), cluster->size(), fraction,
+                   cumulative_fraction);
     }
   }
 #endif  // !defined(DART_PRECOMPILED_RUNTIME)
@@ -5300,8 +5259,6 @@ DeserializationCluster* Deserializer::ReadCluster() {
       return new (Z) ClosureDeserializationCluster();
     case kMintCid:
       return new (Z) MintDeserializationCluster();
-    case kBigintCid:
-      return new (Z) BigintDeserializationCluster();
     case kDoubleCid:
       return new (Z) DoubleDeserializationCluster();
     case kGrowableObjectArrayCid:

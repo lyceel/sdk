@@ -96,6 +96,8 @@ abstract class LibraryResynthesizerMixin implements LibraryResynthesizer {
       new NamespaceBuilder().createPublicNamespaceForLibrary(library);
 }
 
+class RecursiveInstantiateToBounds {}
+
 /// Data structure used during resynthesis to record all the information that is
 /// known about how to resynthesize a single entry in [LinkedUnit.references]
 /// (and its associated entry in [UnlinkedUnit.references], if it exists).
@@ -154,6 +156,7 @@ abstract class SummaryResynthesizer extends ElementResynthesizer {
    * Indicates whether the summary should be resynthesized assuming strong mode
    * semantics.
    */
+  // TODO(brianwilkerson) Remove this field.
   final bool strongMode;
 
   /**
@@ -858,8 +861,6 @@ class _LibraryResynthesizerContext extends LibraryResynthesizerContextMixin
   }
 }
 
-class RecursiveInstantiateToBounds {}
-
 /// Specialization of [ReferenceInfo] for resynthesis from linked summaries.
 class _ReferenceInfo extends ReferenceInfo {
   /**
@@ -1075,8 +1076,8 @@ class _ReferenceInfo extends ReferenceInfo {
         } else {
           typeArguments = _dynamicTypeArguments;
         }
-        return new FunctionTypeImpl.elementWithNameAndArgs(
-            element, name, typeArguments, numTypeParameters != 0);
+        return new FunctionTypeImpl.forTypedef(element,
+            typeArguments: typeArguments);
       } else {
         FunctionTypedElementComputer computer;
         if (implicitFunctionTypeIndices.isNotEmpty) {
@@ -1240,8 +1241,8 @@ class _UnitResynthesizer extends UnitResynthesizer with UnitResynthesizerMixin {
         elementAnnotation.annotationAst =
             AstTestFactory.annotation2(constExpr, null, arguments);
       } else {
-        elementAnnotation.annotationAst = AstTestFactory
-            .annotation(AstTestFactory.identifier3(r'#invalidConst'));
+        elementAnnotation.annotationAst = AstTestFactory.annotation(
+            AstTestFactory.identifier3(r'#invalidConst'));
       }
     } else if (constExpr is InstanceCreationExpression) {
       elementAnnotation.element = constExpr.staticElement;
@@ -1263,17 +1264,17 @@ class _UnitResynthesizer extends UnitResynthesizer with UnitResynthesizerMixin {
       ArgumentList arguments = constExpr.getProperty(ExprBuilder.ARGUMENT_LIST);
       if (propertyElement is PropertyAccessorElement && arguments == null) {
         elementAnnotation.element = propertyElement;
-        elementAnnotation.annotationAst = AstTestFactory.annotation2(
-            target, propertyName, null)
-          ..element = propertyElement;
+        elementAnnotation.annotationAst =
+            AstTestFactory.annotation2(target, propertyName, null)
+              ..element = propertyElement;
       } else if (propertyElement is ConstructorElement && arguments != null) {
         elementAnnotation.element = propertyElement;
-        elementAnnotation.annotationAst = AstTestFactory.annotation2(
-            target, propertyName, arguments)
-          ..element = propertyElement;
+        elementAnnotation.annotationAst =
+            AstTestFactory.annotation2(target, propertyName, arguments)
+              ..element = propertyElement;
       } else {
-        elementAnnotation.annotationAst = AstTestFactory
-            .annotation(AstTestFactory.identifier3(r'#invalidConst'));
+        elementAnnotation.annotationAst = AstTestFactory.annotation(
+            AstTestFactory.identifier3(r'#invalidConst'));
       }
     } else {
       throw new StateError(
@@ -1600,8 +1601,12 @@ class _UnitResynthesizer extends UnitResynthesizer with UnitResynthesizerMixin {
     var expression = new ExprBuilder(this, context, uc).build();
 
     if (expression != null && context.context.analysisOptions.previewDart2) {
-      astRewriteVisitor ??= new AstRewriteVisitor(libraryResynthesizer.library,
-          unit.source, typeProvider, AnalysisErrorListener.NULL_LISTENER,
+      astRewriteVisitor ??= new AstRewriteVisitor(
+          libraryResynthesizer.summaryResynthesizer.context.typeSystem,
+          libraryResynthesizer.library,
+          unit.source,
+          typeProvider,
+          AnalysisErrorListener.NULL_LISTENER,
           addConstKeyword: true);
       var container = astFactory.expressionStatement(expression, null);
       expression.accept(astRewriteVisitor);

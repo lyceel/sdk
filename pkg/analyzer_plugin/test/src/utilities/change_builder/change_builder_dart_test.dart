@@ -64,7 +64,7 @@ class DartChangeBuilderImplTest extends AbstractContextTest {
     DartChangeBuilderImpl builder = new DartChangeBuilder(session);
     DartFileEditBuilderImpl fileEditBuilder =
         await builder.createFileEditBuilder(path);
-    expect(fileEditBuilder, new isInstanceOf<DartFileEditBuilder>());
+    expect(fileEditBuilder, const TypeMatcher<DartFileEditBuilder>());
     SourceFileEdit fileEdit = fileEditBuilder.fileEdit;
     expect(fileEdit.file, path);
   }
@@ -1734,6 +1734,32 @@ import 'a.dart' as p;
     expect(edit.replacement, equalsIgnoringWhitespace(''));
   }
 
+  test_writeType_function() async {
+    await _assertWriteType('int Function(double a, String b)');
+  }
+
+  @failingTest
+  test_writeType_function_generic() async {
+    // TODO(scheglov) Fails because T/U are considered invisible.
+    await _assertWriteType('T Function<T, U>(T a, U b)');
+  }
+
+  test_writeType_function_noReturnType() async {
+    await _assertWriteType('Function()');
+  }
+
+  test_writeType_function_parameters_named() async {
+    await _assertWriteType('int Function(int a, {int b, int c})');
+  }
+
+  test_writeType_function_parameters_noName() async {
+    await _assertWriteType('int Function(double, String)');
+  }
+
+  test_writeType_function_parameters_positional() async {
+    await _assertWriteType('int Function(int a, [int b, int c])');
+  }
+
   test_writeType_genericType() async {
     String path = provider.convertPath('/test.dart');
     String content = 'class A {} class B<E> {}';
@@ -1804,6 +1830,33 @@ import 'a.dart' as p;
     expect(values, contains('A'));
     expect(values, contains('B'));
     expect(values, contains('C'));
+  }
+
+  test_writeType_groupName_invalidType() async {
+    String path = provider.convertPath('/test.dart');
+    String content = 'class A<T> {}';
+    addSource(path, content);
+
+    InterfaceType typeA = await _getType(path, 'A');
+    DartType typeT = typeA.typeParameters.single.type;
+
+    var builder = new DartChangeBuilder(session);
+    await builder.addFileEdit(path, (builder) {
+      builder.addInsertion(content.length, (builder) {
+        // "T" cannot be written, because we are outside of "A".
+        // So, we also should not create linked groups.
+        builder.writeType(typeT, groupName: 'type');
+      });
+    });
+    expect(builder.sourceChange.linkedEditGroups, isEmpty);
+  }
+
+  test_writeType_interface_typeArguments() async {
+    await _assertWriteType('Map<int, List<String>>');
+  }
+
+  test_writeType_interface_typeArguments_allDynamic() async {
+    await _assertWriteType('Map');
   }
 
   test_writeType_null() async {
@@ -1938,6 +1991,15 @@ class B {}
     });
     SourceEdit edit = getEdit(builder);
     expect(edit.replacement, equalsIgnoringWhitespace('A'));
+  }
+
+  test_writeType_typedef_typeArguments() async {
+    await _assertWriteType('F<int, String>',
+        declarations: 'typedef void F<T, U>(T t, U u);');
+  }
+
+  test_writeType_void() async {
+    await _assertWriteType('void Function()');
   }
 
   test_writeTypes_empty() async {
@@ -2091,6 +2153,23 @@ class B {}
     }
   }
 
+  Future<void> _assertWriteType(String typeCode, {String declarations}) async {
+    String path = provider.convertPath('/test.dart');
+    String content = (declarations ?? '') + '$typeCode v;';
+    addSource(path, content);
+
+    var f = await _getTopLevelAccessorElement(path, 'v');
+
+    var builder = new DartChangeBuilder(session);
+    await builder.addFileEdit(path, (builder) {
+      builder.addInsertion(content.length - 1, (builder) {
+        builder.writeType(f.returnType);
+      });
+    });
+    SourceEdit edit = getEdit(builder);
+    expect(edit.replacement, typeCode);
+  }
+
   Future<ClassElement> _getClassElement(String path, String name) async {
     UnitElementResult result = await driver.getUnitElement(path);
     return result.element.getType(name);
@@ -2102,7 +2181,7 @@ class B {}
     return result.element.accessors.firstWhere((v) => v.name == name);
   }
 
-  Future<DartType> _getType(String path, String name) async {
+  Future<InterfaceType> _getType(String path, String name) async {
     ClassElement classElement = await _getClassElement(path, name);
     return classElement.type;
   }
@@ -2167,7 +2246,7 @@ class DartFileEditBuilderImplTest extends AbstractContextTest
       int length = 5;
       DartEditBuilderImpl editBuilder = (builder as DartFileEditBuilderImpl)
           .createEditBuilder(offset, length);
-      expect(editBuilder, new isInstanceOf<DartEditBuilder>());
+      expect(editBuilder, const TypeMatcher<DartEditBuilder>());
       SourceEdit sourceEdit = editBuilder.sourceEdit;
       expect(sourceEdit.length, length);
       expect(sourceEdit.offset, offset);

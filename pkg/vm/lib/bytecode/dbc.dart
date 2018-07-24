@@ -15,6 +15,13 @@ library vm.bytecode.dbc;
 //    parameters. This DBC instruction was removed at
 //    https://github.com/dart-lang/sdk/commit/cf1de7d46cd88e204380e8f96a993439be56b24c
 //
+// 3. NativeCall instruction is modified to have 'D' format and take 1 argument:
+//    D = index of NativeEntry constant pool entry
+//
+// 4. JumpIfNoAsserts instruction is added. This instruction jumps to the given
+//    target if assertions are not enabled. It has the same format as Jump
+//    instruction.
+//
 
 enum Opcode {
   kTrap,
@@ -26,6 +33,7 @@ enum Opcode {
   kDropR,
   kDrop,
   kJump,
+  kJumpIfNoAsserts,
   kReturn,
   kReturnTOS,
   kMove,
@@ -235,6 +243,7 @@ enum Operand {
   reg, // register (unsigned FP relative local)
   xeg, // x-register (signed FP relative local)
   tgt, // jump target relative to the PC of the current instruction
+  spe, // SpecialIndex
 }
 
 class Format {
@@ -261,6 +270,8 @@ const Map<Opcode, Format> BytecodeFormats = const {
   Opcode.kDrop: const Format(
       Encoding.kA, const [Operand.imm, Operand.none, Operand.none]),
   Opcode.kJump: const Format(
+      Encoding.kT, const [Operand.tgt, Operand.none, Operand.none]),
+  Opcode.kJumpIfNoAsserts: const Format(
       Encoding.kT, const [Operand.tgt, Operand.none, Operand.none]),
   Opcode.kReturn: const Format(
       Encoding.kA, const [Operand.reg, Operand.none, Operand.none]),
@@ -301,7 +312,7 @@ const Map<Opcode, Format> BytecodeFormats = const {
   Opcode.kPushPolymorphicInstanceCallByRange: const Format(
       Encoding.kAD, const [Operand.imm, Operand.imm, Operand.none]),
   Opcode.kNativeCall: const Format(
-      Encoding.kABC, const [Operand.imm, Operand.imm, Operand.imm]),
+      Encoding.kD, const [Operand.lit, Operand.none, Operand.none]),
   Opcode.kOneByteStringFromCharCode: const Format(
       Encoding.kAX, const [Operand.reg, Operand.xeg, Operand.none]),
   Opcode.kStringToCharCode: const Format(
@@ -589,7 +600,7 @@ const Map<Opcode, Format> BytecodeFormats = const {
   Opcode.kCloneContext: const Format(
       Encoding.k0, const [Operand.none, Operand.none, Operand.none]),
   Opcode.kMoveSpecial: const Format(
-      Encoding.kAD, const [Operand.reg, Operand.imm, Operand.none]),
+      Encoding.kAD, const [Operand.reg, Operand.spe, Operand.none]),
   Opcode.kInstantiateType: const Format(
       Encoding.kD, const [Operand.lit, Operand.none, Operand.none]),
   Opcode.kInstantiateTypeArgumentsTOS: const Format(
@@ -643,10 +654,9 @@ const Map<Opcode, Format> BytecodeFormats = const {
 // Should match constant in runtime/vm/stack_frame_dbc.h.
 const int kParamEndSlotFromFp = 4;
 
-// Prefix used to distinguish getters in ICData target names.
-// Should match constant in runtime/vm/object.cc.
-const String kGetterPrefix = 'get:';
+enum SpecialIndex {
+  exception,
+  stackTrace,
+}
 
-// Prefix used to distinguish setters in ICData target names.
-// Should match constant in runtime/vm/object.cc.
-const String kSetterPrefix = 'set:';
+bool isJump(Opcode opcode) => BytecodeFormats[opcode].encoding == Encoding.kT;

@@ -48,7 +48,6 @@ void printAndFail(String message, {int exitCode: 15}) {
 
 AnalysisOptions _buildAnalyzerOptions(LinterOptions options) {
   AnalysisOptionsImpl analysisOptions = new AnalysisOptionsImpl();
-  analysisOptions.strongMode = options.strongMode;
   analysisOptions.hint = false;
   analysisOptions.previewDart2 = options.previewDart2;
   analysisOptions.lint = options.enableLints;
@@ -159,6 +158,8 @@ class LintDriver {
   }
 
   Future<List<AnalysisErrorInfo>> analyze(Iterable<io.File> files) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     AnalysisEngine.instance.logger = new StdLogger();
 
     SourceFactory sourceFactory =

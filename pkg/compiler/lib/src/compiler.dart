@@ -6,6 +6,8 @@ library dart2js.compiler_base;
 
 import 'dart:async' show Future;
 
+import 'package:front_end/src/fasta/scanner.dart' show StringToken;
+
 import '../compiler_new.dart' as api;
 import 'backend_strategy.dart';
 import 'common/names.dart' show Selectors;
@@ -24,24 +26,25 @@ import 'elements/entities.dart';
 import 'enqueue.dart' show Enqueuer, EnqueueTask, ResolutionEnqueuer;
 import 'environment.dart';
 import 'frontend_strategy.dart';
-import 'id_generator.dart';
+import 'inferrer/typemasks/masks.dart' show TypeMaskStrategy;
 import 'io/source_information.dart' show SourceInformation;
 import 'js_backend/backend.dart' show JavaScriptBackend;
+import 'js_backend/inferred_data.dart';
 import 'kernel/kernel_backend_strategy.dart';
 import 'kernel/kernel_strategy.dart';
 import 'library_loader.dart' show LibraryLoaderTask, LoadedLibraries;
 import 'null_compiler_output.dart' show NullCompilerOutput, NullSink;
 import 'options.dart' show CompilerOptions, DiagnosticOptions;
 import 'ssa/nodes.dart' show HInstruction;
-import 'package:front_end/src/fasta/scanner.dart' show StringToken, Token;
-import 'types/types.dart' show GlobalTypeInferenceTask;
+import 'types/abstract_value_domain.dart' show AbstractValueStrategy;
+import 'types/types.dart'
+    show GlobalTypeInferenceResults, GlobalTypeInferenceTask;
 import 'universe/selector.dart' show Selector;
 import 'universe/world_builder.dart'
     show ResolutionWorldBuilder, CodegenWorldBuilder;
-import 'universe/use.dart' show StaticUse, TypeUse;
 import 'universe/world_impact.dart'
     show ImpactStrategy, WorldImpact, WorldImpactBuilderImpl;
-import 'world.dart' show ClosedWorld, ClosedWorldRefiner;
+import 'world.dart' show JClosedWorld, KClosedWorld;
 
 typedef CompilerDiagnosticReporter MakeReporterFunction(
     Compiler compiler, CompilerOptions options);
@@ -51,7 +54,6 @@ abstract class Compiler {
 
   api.CompilerInput get provider;
 
-  final IdGenerator idGenerator = new IdGenerator();
   FrontendStrategy frontendStrategy;
   BackendStrategy backendStrategy;
   CompilerDiagnosticReporter _reporter;
@@ -74,11 +76,9 @@ abstract class Compiler {
 
   api.CompilerOutput get outputProvider => _outputProvider;
 
-  List<Uri> librariesToAnalyzeWhenRun;
+  Uri _mainLibraryUri;
 
-  Uri mainLibraryUri;
-
-  ClosedWorld backendClosedWorldForTesting;
+  JClosedWorld backendClosedWorldForTesting;
 
   DiagnosticReporter get reporter => _reporter;
   Map<Entity, WorldImpact> get impactCache => _impactCache;
@@ -103,6 +103,8 @@ abstract class Compiler {
   GlobalTypeInferenceTask globalInference;
   JavaScriptBackend backend;
   CodegenWorldBuilder _codegenWorldBuilder;
+
+  AbstractValueStrategy abstractValueStrategy = const TypeMaskStrategy();
 
   GenericTask selfTask;
 
@@ -149,8 +151,8 @@ abstract class Compiler {
       _reporter = new CompilerDiagnosticReporter(this, options);
     }
     kernelFrontEndTask = new GenericTask('Front end', measurer);
-    frontendStrategy = new KernelFrontEndStrategy(kernelFrontEndTask, options,
-        reporter, environment, options.kernelInitializedCompilerState);
+    frontendStrategy = new KernelFrontEndStrategy(
+        kernelFrontEndTask, options, reporter, environment);
     backendStrategy = new KernelBackendStrategy(this);
     _impactCache = <Entity, WorldImpact>{};
     _impactCacheDeleter = new _MapImpactCacheDeleter(_impactCache);
@@ -164,7 +166,8 @@ abstract class Compiler {
 
     tasks = [
       libraryLoader =
-          frontendStrategy.createLibraryLoader(provider, reporter, measurer),
+          new LibraryLoaderTask(options, provider, reporter, measurer),
+      kernelFrontEndTask,
       globalInference = new GlobalTypeInferenceTask(this),
       constants = backend.constantCompilerTask,
       deferredLoadTask = frontendStrategy.createDeferredLoadTask(this),
@@ -174,7 +177,6 @@ abstract class Compiler {
       dumpInfoTask = new DumpInfoTask(this),
       selfTask,
     ];
-    tasks.add(kernelFrontEndTask);
 
     tasks.addAll(backend.tasks);
   }
@@ -192,6 +194,7 @@ abstract class Compiler {
 
   ResolutionWorldBuilder get resolutionWorldBuilder =>
       enqueuer.resolution.worldBuilder;
+
   CodegenWorldBuilder get codegenWorldBuilder {
     assert(
         _codegenWorldBuilder != null,
@@ -199,10 +202,6 @@ abstract class Compiler {
             "CodegenWorldBuilder has not been created yet."));
     return _codegenWorldBuilder;
   }
-
-  bool get analyzeAll => options.analyzeAll || compileAll;
-
-  bool get compileAll => false;
 
   bool get disableTypeInference =>
       options.disableTypeInference || compilationFailed;
@@ -232,7 +231,10 @@ abstract class Compiler {
   /// The method returns a [Future] allowing for the loading of additional
   /// libraries.
   LoadedLibraries processLoadedLibraries(LoadedLibraries loadedLibraries) {
-    loadedLibraries.forEachLibrary((LibraryEntity library) {
+    frontendStrategy.registerLoadedLibraries(loadedLibraries);
+    loadedLibraries.forEachLibrary((Uri uri) {
+      LibraryEntity library =
+          frontendStrategy.elementEnvironment.lookupLibrary(uri);
       backend.setAnnotations(library);
     });
 
@@ -248,14 +250,7 @@ abstract class Compiler {
     return loadedLibraries;
   }
 
-  /**
-   * Get an [Uri] pointing to a patch for the dart: library with
-   * the given path. Returns null if there is no patch.
-   */
-  Uri resolvePatchUri(String dartLibraryPath);
-
   Future runInternal(Uri uri) async {
-    mainLibraryUri = uri;
     // TODO(ahe): This prevents memory leaks when invoking the compiler
     // multiple times. Implement a better mechanism where we can store
     // such caches in the compiler and get access to them through a
@@ -270,31 +265,16 @@ abstract class Compiler {
           .add(selector);
     }
 
-    assert(uri != null || options.analyzeOnly);
+    assert(uri != null);
     // As far as I can tell, this branch is only used by test code.
-    if (librariesToAnalyzeWhenRun != null) {
-      await Future.forEach(librariesToAnalyzeWhenRun, (libraryUri) async {
-        reporter.log('Analyzing $libraryUri (${options.buildId})');
-        LoadedLibraries loadedLibraries =
-            await libraryLoader.loadLibrary(libraryUri);
-        processLoadedLibraries(loadedLibraries);
-      });
-    }
-    LibraryEntity mainApp;
-    if (uri != null) {
-      if (options.analyzeOnly) {
-        reporter.log('Analyzing $uri (${options.buildId})');
-      } else {
-        reporter.log('Compiling $uri (${options.buildId})');
-      }
-      LoadedLibraries libraries = await libraryLoader.loadLibrary(uri);
-      // Note: libraries may be null because of errors trying to find files or
-      // parse-time errors (when using `package:front_end` as a loader).
-      if (libraries == null) return;
-      processLoadedLibraries(libraries);
-      mainApp = libraries.rootLibrary;
-    }
-    compileLoadedLibraries(mainApp);
+    reporter.log('Compiling $uri (${options.buildId})');
+    LoadedLibraries loadedLibraries = await libraryLoader.loadLibraries(uri);
+    // Note: libraries may be null because of errors trying to find files or
+    // parse-time errors (when using `package:front_end` as a loader).
+    if (loadedLibraries == null) return;
+    _mainLibraryUri = loadedLibraries.rootLibraryUri;
+    processLoadedLibraries(loadedLibraries);
+    compileLoadedLibraries(loadedLibraries);
   }
 
   /// Starts the resolution phase, creating the [ResolutionEnqueuer] if not
@@ -310,110 +290,108 @@ abstract class Compiler {
       resolutionEnqueuer = enqueuer.createResolutionEnqueuer();
       backend.onResolutionStart();
     }
-    resolutionEnqueuer.addDeferredActions(libraryLoader.pullDeferredActions());
     return resolutionEnqueuer;
   }
 
+  JClosedWorld computeClosedWorld(LoadedLibraries loadedLibraries) {
+    ResolutionEnqueuer resolutionEnqueuer = startResolution();
+    WorldImpactBuilderImpl mainImpact = new WorldImpactBuilderImpl();
+    FunctionEntity mainFunction = frontendStrategy.computeMain(mainImpact);
+
+    // In order to see if a library is deferred, we must compute the
+    // compile-time constants that are metadata.  This means adding
+    // something to the resolution queue.  So we cannot wait with
+    // this until after the resolution queue is processed.
+    deferredLoadTask.beforeResolution(loadedLibraries);
+    impactStrategy = backend.createImpactStrategy(
+        supportDeferredLoad: deferredLoadTask.isProgramSplit,
+        supportDumpInfo: options.dumpInfo);
+
+    phase = PHASE_RESOLVING;
+    resolutionEnqueuer.applyImpact(mainImpact);
+    reporter.log('Resolving...');
+
+    processQueue(frontendStrategy.elementEnvironment, resolutionEnqueuer,
+        mainFunction, loadedLibraries.libraries,
+        onProgress: showResolutionProgress);
+    backend.onResolutionEnd();
+    resolutionEnqueuer.logSummary(reporter.log);
+
+    _reporter.reportSuppressedMessagesSummary();
+
+    if (compilationFailed) {
+      if (!options.generateCodeWithCompileTimeErrors) {
+        return null;
+      }
+      if (mainFunction == null) return null;
+      if (!backend.enableCodegenWithErrorsIfSupported(NO_LOCATION_SPANNABLE)) {
+        return null;
+      }
+    }
+
+    assert(mainFunction != null);
+
+    JClosedWorld closedWorld = closeResolution(mainFunction);
+    backendClosedWorldForTesting = closedWorld;
+    return closedWorld;
+  }
+
+  GlobalTypeInferenceResults performGlobalTypeInference(
+      JClosedWorld closedWorld) {
+    FunctionEntity mainFunction = closedWorld.elementEnvironment.mainFunction;
+    reporter.log('Inferring types...');
+    InferredDataBuilder inferredDataBuilder = new InferredDataBuilderImpl();
+    backend.processAnnotations(closedWorld, inferredDataBuilder);
+    return globalInference.runGlobalTypeInference(
+        mainFunction, closedWorld, inferredDataBuilder);
+  }
+
+  Enqueuer generateJavaScriptCode(
+      LoadedLibraries loadedLibraries,
+      JClosedWorld closedWorld,
+      GlobalTypeInferenceResults globalInferenceResults) {
+    FunctionEntity mainFunction = closedWorld.elementEnvironment.mainFunction;
+    reporter.log('Compiling...');
+    phase = PHASE_COMPILING;
+
+    Enqueuer codegenEnqueuer =
+        startCodegen(closedWorld, globalInferenceResults);
+    processQueue(closedWorld.elementEnvironment, codegenEnqueuer, mainFunction,
+        loadedLibraries.libraries,
+        onProgress: showCodegenProgress);
+    codegenEnqueuer.logSummary(reporter.log);
+
+    int programSize = backend.assembleProgram(
+        closedWorld, globalInferenceResults.inferredData);
+
+    if (options.dumpInfo) {
+      dumpInfoTask.reportSize(programSize);
+      dumpInfoTask.dumpInfo(closedWorld, globalInferenceResults);
+    }
+
+    backend.onCodegenEnd();
+
+    return codegenEnqueuer;
+  }
+
   /// Performs the compilation when all libraries have been loaded.
-  void compileLoadedLibraries(LibraryEntity rootLibrary) =>
+  void compileLoadedLibraries(LoadedLibraries loadedLibraries) =>
       selfTask.measureSubtask("Compiler.compileLoadedLibraries", () {
-        ResolutionEnqueuer resolutionEnqueuer = startResolution();
-        WorldImpactBuilderImpl mainImpact = new WorldImpactBuilderImpl();
-        FunctionEntity mainFunction =
-            frontendStrategy.computeMain(rootLibrary, mainImpact);
-
-        // In order to see if a library is deferred, we must compute the
-        // compile-time constants that are metadata.  This means adding
-        // something to the resolution queue.  So we cannot wait with
-        // this until after the resolution queue is processed.
-        deferredLoadTask.beforeResolution(rootLibrary);
-        impactStrategy = backend.createImpactStrategy(
-            supportDeferredLoad: deferredLoadTask.isProgramSplit,
-            supportDumpInfo: options.dumpInfo);
-
-        phase = PHASE_RESOLVING;
-        resolutionEnqueuer.applyImpact(mainImpact);
-        if (analyzeAll) {
-          libraryLoader.libraries.forEach((LibraryEntity library) {
-            reporter.log('Enqueuing ${library.canonicalUri}');
-            resolutionEnqueuer.applyImpact(computeImpactForLibrary(library));
-          });
-        } else if (options.analyzeMain) {
-          if (rootLibrary != null) {
-            resolutionEnqueuer
-                .applyImpact(computeImpactForLibrary(rootLibrary));
-          }
-          if (librariesToAnalyzeWhenRun != null) {
-            for (Uri libraryUri in librariesToAnalyzeWhenRun) {
-              resolutionEnqueuer.applyImpact(computeImpactForLibrary(
-                  libraryLoader.lookupLibrary(libraryUri)));
-            }
-          }
+        JClosedWorld closedWorld = computeClosedWorld(loadedLibraries);
+        if (closedWorld != null) {
+          GlobalTypeInferenceResults globalInferenceResults =
+              performGlobalTypeInference(closedWorld);
+          if (stopAfterTypeInference) return;
+          Enqueuer codegenEnqueuer = generateJavaScriptCode(
+              loadedLibraries, closedWorld, globalInferenceResults);
+          checkQueues(enqueuer.resolution, codegenEnqueuer);
         }
-        reporter.log('Resolving...');
-
-        processQueue(frontendStrategy.elementEnvironment, resolutionEnqueuer,
-            mainFunction, libraryLoader.libraries,
-            onProgress: showResolutionProgress);
-        backend.onResolutionEnd();
-        resolutionEnqueuer.logSummary(reporter.log);
-
-        _reporter.reportSuppressedMessagesSummary();
-
-        if (compilationFailed) {
-          if (!options.generateCodeWithCompileTimeErrors) {
-            return;
-          }
-          if (mainFunction == null) return;
-          if (!backend
-              .enableCodegenWithErrorsIfSupported(NO_LOCATION_SPANNABLE)) {
-            return;
-          }
-        }
-
-        if (options.analyzeOnly) return;
-        assert(mainFunction != null);
-
-        ClosedWorldRefiner closedWorldRefiner = closeResolution(mainFunction);
-        ClosedWorld closedWorld = closedWorldRefiner.closedWorld;
-        backendClosedWorldForTesting = closedWorld;
-        mainFunction = closedWorld.elementEnvironment.mainFunction;
-
-        reporter.log('Inferring types...');
-        globalInference.runGlobalTypeInference(
-            mainFunction, closedWorld, closedWorldRefiner);
-        closedWorldRefiner.computeSideEffects();
-
-        if (stopAfterTypeInference) return;
-
-        reporter.log('Compiling...');
-        phase = PHASE_COMPILING;
-
-        Enqueuer codegenEnqueuer = startCodegen(closedWorld);
-        if (compileAll) {
-          libraryLoader.libraries.forEach((LibraryEntity library) {
-            codegenEnqueuer.applyImpact(computeImpactForLibrary(library));
-          });
-        }
-        processQueue(closedWorld.elementEnvironment, codegenEnqueuer,
-            mainFunction, libraryLoader.libraries,
-            onProgress: showCodegenProgress);
-        codegenEnqueuer.logSummary(reporter.log);
-
-        int programSize = backend.assembleProgram(closedWorld);
-
-        if (options.dumpInfo) {
-          dumpInfoTask.reportSize(programSize);
-          dumpInfoTask.dumpInfo(closedWorld);
-        }
-
-        backend.onCodegenEnd();
-
-        checkQueues(resolutionEnqueuer, codegenEnqueuer);
       });
 
-  Enqueuer startCodegen(ClosedWorld closedWorld) {
-    Enqueuer codegenEnqueuer = enqueuer.createCodegenEnqueuer(closedWorld);
+  Enqueuer startCodegen(JClosedWorld closedWorld,
+      GlobalTypeInferenceResults globalInferenceResults) {
+    Enqueuer codegenEnqueuer =
+        enqueuer.createCodegenEnqueuer(closedWorld, globalInferenceResults);
     _codegenWorldBuilder = codegenEnqueuer.worldBuilder;
     codegenEnqueuer.applyImpact(backend.onCodegenStart(
         closedWorld, _codegenWorldBuilder, backendStrategy.sorter));
@@ -421,43 +399,17 @@ abstract class Compiler {
   }
 
   /// Perform the steps needed to fully end the resolution phase.
-  ClosedWorldRefiner closeResolution(FunctionEntity mainFunction) {
+  JClosedWorld closeResolution(FunctionEntity mainFunction) {
     phase = PHASE_DONE_RESOLVING;
 
-    ClosedWorld closedWorld = resolutionWorldBuilder.closeWorld();
-    ClosedWorldRefiner closedWorldRefiner =
-        backendStrategy.createClosedWorldRefiner(closedWorld);
-    // Compute whole-program-knowledge that the backend needs. (This might
-    // require the information computed in [world.closeWorld].)
-    backend.onResolutionClosedWorld(closedWorld, closedWorldRefiner);
-
+    KClosedWorld closedWorld = resolutionWorldBuilder.closeWorld();
     OutputUnitData result = deferredLoadTask.run(mainFunction, closedWorld);
+    JClosedWorld closedWorldRefiner =
+        backendStrategy.createJClosedWorld(closedWorld);
+
     backend.onDeferredLoadComplete(result);
 
-    // TODO(johnniwinther): Move this after rti computation but before
-    // reflection members computation, and (re-)close the world afterwards.
-    backendStrategy.closureDataLookup.convertClosures(
-        enqueuer.resolution.processedEntities, closedWorldRefiner);
     return closedWorldRefiner;
-  }
-
-  /// Compute the [WorldImpact] for accessing all elements in [library].
-  WorldImpact computeImpactForLibrary(LibraryEntity library) {
-    WorldImpactBuilderImpl impactBuilder = new WorldImpactBuilderImpl();
-
-    void registerStaticUse(MemberEntity element) {
-      impactBuilder.registerStaticUse(new StaticUse.directUse(element));
-    }
-
-    ElementEnvironment elementEnvironment = frontendStrategy.elementEnvironment;
-
-    elementEnvironment.forEachLibraryMember(library, registerStaticUse);
-    elementEnvironment.forEachClass(library, (ClassEntity cls) {
-      impactBuilder.registerTypeUse(
-          new TypeUse.instantiation(elementEnvironment.getRawType(cls)));
-      elementEnvironment.forEachLocalClassMember(cls, registerStaticUse);
-    });
-    return impactBuilder;
   }
 
   /**
@@ -481,7 +433,7 @@ abstract class Compiler {
   }
 
   void processQueue(ElementEnvironment elementEnvironment, Enqueuer enqueuer,
-      FunctionEntity mainMethod, Iterable<LibraryEntity> libraries,
+      FunctionEntity mainMethod, Iterable<Uri> libraries,
       {void onProgress(Enqueuer enqueuer)}) {
     selfTask.measureSubtask("Compiler.processQueue", () {
       enqueuer.open(impactStrategy, mainMethod, libraries);
@@ -591,12 +543,8 @@ abstract class Compiler {
   Iterable<CodeLocation> computeUserCodeLocations(
       {bool assumeInUserCode: false}) {
     List<CodeLocation> userCodeLocations = <CodeLocation>[];
-    if (mainLibraryUri != null) {
-      userCodeLocations.add(new CodeLocation(mainLibraryUri));
-    }
-    if (librariesToAnalyzeWhenRun != null) {
-      userCodeLocations.addAll(
-          librariesToAnalyzeWhenRun.map((Uri uri) => new CodeLocation(uri)));
+    if (_mainLibraryUri != null) {
+      userCodeLocations.add(new CodeLocation(_mainLibraryUri));
     }
     if (userCodeLocations.isEmpty && assumeInUserCode) {
       // Assume in user code since [mainApp] has not been set yet.
@@ -866,12 +814,6 @@ class CompilerDiagnosticReporter extends DiagnosticReporter {
     } else {
       return _spanFromStrategy(spannable);
     }
-  }
-
-  // TODO(johnniwinther): Move this to the parser listeners.
-  @override
-  SourceSpan spanFromToken(Token token) {
-    throw 'No error location.';
   }
 
   internalError(Spannable spannable, reason) {

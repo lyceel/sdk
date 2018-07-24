@@ -5,6 +5,7 @@
 import 'package:analyzer/analyzer.dart';
 import 'package:analyzer/dart/ast/token.dart' show Token;
 import 'package:analyzer/src/dart/error/syntactic_errors.dart';
+import 'package:analyzer/src/generated/resolver.dart' show ResolverErrorCode;
 import 'package:front_end/src/api_prototype/compilation_message.dart';
 import 'package:front_end/src/fasta/messages.dart' show Code, Message;
 
@@ -349,6 +350,22 @@ class FastaErrorReporter {
         errorReporter?.reportErrorForOffset(
             StrongModeCode.INVALID_CAST_NEW_EXPR, offset, length);
         return;
+      case "INVALID_CODE_POINT":
+        errorReporter?.reportErrorForOffset(
+            ParserErrorCode.INVALID_CODE_POINT, offset, length, ['\\u{...}']);
+        return;
+      case "INVALID_CONSTRUCTOR_NAME":
+        errorReporter?.reportErrorForOffset(
+            CompileTimeErrorCode.INVALID_CONSTRUCTOR_NAME, offset, length);
+        return;
+      case "INVALID_GENERIC_FUNCTION_TYPE":
+        errorReporter?.reportErrorForOffset(
+            ParserErrorCode.INVALID_GENERIC_FUNCTION_TYPE, offset, length);
+        return;
+      case "INVALID_HEX_ESCAPE":
+        errorReporter?.reportErrorForOffset(
+            ParserErrorCode.INVALID_HEX_ESCAPE, offset, length);
+        return;
       case "INVALID_METHOD_OVERRIDE":
         errorReporter?.reportErrorForOffset(
             StrongModeCode.INVALID_METHOD_OVERRIDE, offset, length);
@@ -364,6 +381,10 @@ class FastaErrorReporter {
       case "INVALID_OPERATOR_FOR_SUPER":
         _reportByCode(ParserErrorCode.INVALID_OPERATOR_FOR_SUPER, message,
             offset, length);
+        return;
+      case "INVALID_UNICODE_ESCAPE":
+        errorReporter?.reportErrorForOffset(
+            ParserErrorCode.INVALID_UNICODE_ESCAPE, offset, length);
         return;
       case "LIBRARY_DIRECTIVE_NOT_FIRST":
         errorReporter?.reportErrorForOffset(
@@ -489,6 +510,12 @@ class FastaErrorReporter {
         errorReporter?.reportErrorForOffset(
             ParserErrorCode.PREFIX_AFTER_COMBINATOR, offset, length);
         return;
+      case "RECURSIVE_CONSTRUCTOR_REDIRECT":
+        errorReporter?.reportErrorForOffset(
+            CompileTimeErrorCode.RECURSIVE_CONSTRUCTOR_REDIRECT,
+            offset,
+            length);
+        return;
       case "REDIRECTING_CONSTRUCTOR_WITH_BODY":
         errorReporter?.reportErrorForOffset(
             ParserErrorCode.REDIRECTING_CONSTRUCTOR_WITH_BODY, offset, length);
@@ -501,7 +528,14 @@ class FastaErrorReporter {
         return;
       case "RETURN_IN_GENERATOR":
         errorReporter?.reportErrorForOffset(
-            CompileTimeErrorCode.RETURN_IN_GENERATOR, offset, length);
+            CompileTimeErrorCode.RETURN_IN_GENERATOR, offset, length,
+            // TODO(danrubel): Update the parser to report the modifier
+            // involved in this error... either async* or sync*
+            ['async*']);
+        return;
+      case "STACK_OVERFLOW":
+        errorReporter?.reportErrorForOffset(
+            ParserErrorCode.STACK_OVERFLOW, offset, length);
         return;
       case "STATIC_AFTER_CONST":
         errorReporter?.reportErrorForOffset(
@@ -558,6 +592,10 @@ class FastaErrorReporter {
         errorReporter?.reportErrorForOffset(
             StaticTypeWarningCode.UNDEFINED_SETTER, offset, length);
         return;
+      case "UNEXPECTED_DOLLAR_IN_STRING":
+        errorReporter?.reportErrorForOffset(
+            ScannerErrorCode.UNEXPECTED_DOLLAR_IN_STRING, offset, length);
+        return;
       case "UNEXPECTED_TOKEN":
         errorReporter?.reportErrorForOffset(
             ParserErrorCode.UNEXPECTED_TOKEN, offset, length, [lexeme()]);
@@ -608,6 +646,11 @@ class FastaErrorReporter {
   }
 
   void reportCompilationMessage(CompilationMessage message) {
+    // TODO(scheglov) https://github.com/dart-lang/sdk/issues/33680
+    if (message.code == 'MissingImplementationCause') {
+      return;
+    }
+
     String errorCodeStr = message.analyzerCode;
     ErrorCode errorCode = _getErrorCode(errorCodeStr);
     if (errorCode != null) {
@@ -618,8 +661,13 @@ class FastaErrorReporter {
           errorCode,
           message.message,
           message.tip));
-    } else {
-      // TODO(mfairhurst) throw here, and fail all tests that trip this.
+    } else if (message.severity != Severity.context) {
+      // Messages with [Severity.context] are supposed to give extra information
+      // to messages of other kinds, and it should be possible to ignore them
+      // without affecting the discoverability of compile-time errors.  See also
+      // https://github.com/dart-lang/sdk/issues/33730.
+      throw new StateError('Unable to convert (${message.code}, $errorCodeStr, '
+          '@${message.span.start.offset}, $message)');
     }
   }
 
@@ -654,13 +702,16 @@ class FastaErrorReporter {
   /// Return the [ErrorCode] for the given [shortName], or `null` if not found.
   static ErrorCode _getErrorCode(String shortName) {
     const prefixes = const {
-      CompileTimeErrorCode: 'CompileTimeErrorCode',
-      ParserErrorCode: 'ParserErrorCode',
-      StaticTypeWarningCode: 'StaticTypeWarningCode',
-      StaticWarningCode: 'StaticWarningCode'
+      CompileTimeErrorCode: 'CompileTimeErrorCode.',
+      StrongModeCode: 'StrongModeCode.STRONG_MODE_',
+      ResolverErrorCode: 'ResolverErrorCode.',
+      ParserErrorCode: 'ParserErrorCode.',
+      ScannerErrorCode: 'ScannerErrorCode.',
+      StaticTypeWarningCode: 'StaticTypeWarningCode.',
+      StaticWarningCode: 'StaticWarningCode.'
     };
     for (var prefix in prefixes.values) {
-      var uniqueName = '$prefix.$shortName';
+      var uniqueName = '$prefix$shortName';
       var errorCode = errorCodeByUniqueName(uniqueName);
       if (errorCode != null) {
         return errorCode;

@@ -385,6 +385,7 @@ var v = /*info:INFERRED_TYPE_CLOSURE*/() => null;
     expect(v.initializer.type.toString(), '() → () → Null');
   }
 
+  @failingTest
   test_circularReference_viaClosures() async {
     var mainUnit = await checkFileElement('''
 var x = /*info:INFERRED_TYPE_CLOSURE*/() => /*error:TOP_LEVEL_CYCLE*/y;
@@ -398,6 +399,7 @@ var y = /*info:INFERRED_TYPE_CLOSURE*/() => /*error:TOP_LEVEL_CYCLE*/x;
     expect(y.type.toString(), 'dynamic');
   }
 
+  @failingTest
   test_circularReference_viaClosures_initializerTypes() async {
     var mainUnit = await checkFileElement('''
 var x = /*info:INFERRED_TYPE_CLOSURE*/() => /*error:TOP_LEVEL_CYCLE*/y;
@@ -1859,18 +1861,6 @@ class Foo<T extends Pattern> {
   U method<U extends T>(U u) => u;
 }
 main() {
-/*!!!
-  String s;
-  var a = new Foo().method<String>("str");
-  s = a;
-  new Foo();
-
-  var b = new Foo<String>().method("str");
-  s = b;
-  var c = new Foo().method("str");
-  s = c;
-  */
-
   new Foo<String>()./*error:COULD_NOT_INFER*/method(42);
 }
 ''');
@@ -1986,7 +1976,7 @@ main() {
   test_genericMethods_inferGenericFunctionParameterType() async {
     var mainUnit = await checkFileElement('''
 class C<T> extends D<T> {
-  f<U>(x) {}
+  f<U>(x) { return null; }
 }
 class D<T> {
   F<U> f<U>(U u) => null;
@@ -2014,7 +2004,7 @@ typedef List<V> G<V>();
   test_genericMethods_inferGenericFunctionReturnType() async {
     var mainUnit = await checkFileElement('''
 class C<T> extends D<T> {
-  f<U>(x) {}
+  f<U>(x) { return null; }
 }
 class D<T> {
   F<U> f<U>(U u) => null;
@@ -3375,7 +3365,7 @@ class B<E> extends A<E> implements M {
   const B();
   int get y => 0;
 
-  m(a, f(v, E e)) {}
+  m(a, f(v, E e)) { return null; }
 }
 
 foo () {
@@ -3429,7 +3419,7 @@ class B<E> extends A<E> implements M {
   const B();
   int get y => 0;
 
-  m(a, f(v, int e)) {}
+  m(a, f(v, int e)) { return null; }
 }
 
 foo () {
@@ -3602,6 +3592,7 @@ B<A<int, List<int>>> v;
 ''');
   }
 
+  @failingTest
   test_instantiateToBounds_typeName_OK_hasBound_definedAfter() async {
     var unit = await checkFileElement(r'''
 class B<T extends A> {}
@@ -4146,6 +4137,7 @@ var v = f<dynamic>(/*info:INFERRED_TYPE_CLOSURE*/() { return 1; });
     expect(v.type.toString(), 'List<dynamic>');
   }
 
+  @failingTest
   test_unsafeBlockClosureInference_functionCall_explicitDynamicParam_viaExpr1() async {
     // Note: (f<dynamic>) is not properly resulting in an instantiated
     // function type due to dartbug.com/25824.
@@ -4178,6 +4170,7 @@ var v = f<int>(/*info:INFERRED_TYPE_CLOSURE*/() { return 1; });
     expect(v.type.toString(), 'List<int>');
   }
 
+  @failingTest
   test_unsafeBlockClosureInference_functionCall_explicitTypeParam_viaExpr1() async {
     // TODO(paulberry): for some reason (f<int>) is not properly resulting
     // in an instantiated function type.
@@ -4414,40 +4407,6 @@ class InferredTypeTest extends AbstractStrongTest with InferredTypeMixin {
     CompilationUnit unit = await checkFile(content);
     return unit.element;
   }
-
-  @failingTest
-  @override
-  void test_circularReference_viaClosures() {
-    super.test_circularReference_viaClosures();
-  }
-
-  @failingTest
-  @override
-  void test_circularReference_viaClosures_initializerTypes() {
-    super.test_circularReference_viaClosures_initializerTypes();
-  }
-
-  @failingTest
-  @override
-  void test_instantiateToBounds_typeName_OK_hasBound_definedAfter() {
-    super.test_instantiateToBounds_typeName_OK_hasBound_definedAfter();
-  }
-
-  @failingTest
-  @override
-  void
-      test_unsafeBlockClosureInference_functionCall_explicitDynamicParam_viaExpr1() {
-    super
-        .test_unsafeBlockClosureInference_functionCall_explicitDynamicParam_viaExpr1();
-  }
-
-  @failingTest
-  @override
-  void
-      test_unsafeBlockClosureInference_functionCall_explicitTypeParam_viaExpr1() {
-    super
-        .test_unsafeBlockClosureInference_functionCall_explicitTypeParam_viaExpr1();
-  }
 }
 
 @reflectiveTest
@@ -4458,19 +4417,6 @@ class InferredTypeTest_Driver extends InferredTypeTest {
   @override
   bool get hasExtraTaskModelPass => false;
 
-  @failingTest
-  @override
-  void test_circularReference_viaClosures() {
-    super.test_circularReference_viaClosures();
-  }
-
-  @failingTest
-  @override
-  test_circularReference_viaClosures_initializerTypes() async {
-    await super.test_circularReference_viaClosures_initializerTypes();
-  }
-
-  @failingTest
   @override
   test_instantiateToBounds_typeName_OK_hasBound_definedAfter() async {
     await super.test_instantiateToBounds_typeName_OK_hasBound_definedAfter();
@@ -4490,16 +4436,18 @@ class InferredTypeTest_Driver extends InferredTypeTest {
   }
 
   @override
+  test_circularReference_viaClosures() async {
+    await super.test_circularReference_viaClosures();
+  }
+
+  @override
   test_unsafeBlockClosureInference_closureCall() async {
     await super.test_unsafeBlockClosureInference_closureCall();
   }
 
-  @failingTest
   @override
-  void
-      test_unsafeBlockClosureInference_functionCall_explicitDynamicParam_viaExpr1() {
-    super
-        .test_unsafeBlockClosureInference_functionCall_explicitDynamicParam_viaExpr1();
+  test_circularReference_viaClosures_initializerTypes() async {
+    await super.test_circularReference_viaClosures_initializerTypes();
   }
 
   @failingTest
@@ -4507,14 +4455,6 @@ class InferredTypeTest_Driver extends InferredTypeTest {
   test_unsafeBlockClosureInference_functionCall_explicitDynamicParam_viaExpr2() async {
     await super
         .test_unsafeBlockClosureInference_functionCall_explicitDynamicParam_viaExpr2();
-  }
-
-  @failingTest
-  @override
-  void
-      test_unsafeBlockClosureInference_functionCall_explicitTypeParam_viaExpr1() {
-    super
-        .test_unsafeBlockClosureInference_functionCall_explicitTypeParam_viaExpr1();
   }
 
   @failingTest

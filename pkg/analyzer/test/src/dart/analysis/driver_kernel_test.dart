@@ -9,9 +9,7 @@ import 'driver_test.dart';
 
 main() {
   defineReflectiveSuite(() {
-    // TODO(scheglov): Restore similar test coverage when the front-end API
-    // allows it.  See https://github.com/dart-lang/sdk/issues/32258.
-    // defineReflectiveTests(AnalysisDriverTest_Kernel);
+    defineReflectiveTests(AnalysisDriverTest_Kernel);
   });
 }
 
@@ -33,8 +31,6 @@ class AnalysisDriverTest_Kernel extends AnalysisDriverTest {
   @override
   bool get useCFE => true;
 
-//  @failingTest
-//  @potentialAnalyzerProblem
   @override
   test_asyncChangesDuringAnalysis_getErrors() async {
     // TODO(brianwilkerson) Re-enable this test. It was disabled because it
@@ -56,11 +52,28 @@ class AnalysisDriverTest_Kernel extends AnalysisDriverTest {
 //    await super.test_asyncChangesDuringAnalysis_getErrors();
   }
 
-  @failingTest
-  @potentialAnalyzerProblem
-  @override
-  test_const_annotation_notConstConstructor() async {
-    await super.test_const_annotation_notConstConstructor();
+  test_componentMetadata_incremental_merge() async {
+    var a = _p('/a.dart');
+    var b = _p('/b.dart');
+    provider.newFile(a, r'''
+class A {
+  A.a();
+}
+''');
+    provider.newFile(b, r'''
+class B {
+  B.b();
+}
+''');
+    await driver.getResult(a);
+    await driver.getResult(b);
+
+    // This will fail if compilation of 'b' removed metadata for 'a'.
+    // We use metadata to get constructor name offsets.
+    await driver.getResult(a);
+
+    // And check that 'b' still has its metadata as well.
+    await driver.getResult(b);
   }
 
   @failingTest
@@ -84,30 +97,30 @@ class AnalysisDriverTest_Kernel extends AnalysisDriverTest {
     await super.test_const_implicitSuperConstructorInvocation();
   }
 
-  @failingTest
-  @potentialAnalyzerProblem
   @override
+  @failingTest
+  @FastaProblem('https://github.com/dart-lang/sdk/issues/33719')
   test_errors_uriDoesNotExist_export() async {
     await super.test_errors_uriDoesNotExist_export();
   }
 
-  @failingTest
-  @potentialAnalyzerProblem
   @override
+  @failingTest
+  @FastaProblem('https://github.com/dart-lang/sdk/issues/33719')
   test_errors_uriDoesNotExist_import() async {
     await super.test_errors_uriDoesNotExist_import();
   }
 
-  @failingTest
-  @potentialAnalyzerProblem
   @override
+  @failingTest
+  @FastaProblem('https://github.com/dart-lang/sdk/issues/33719')
   test_errors_uriDoesNotExist_import_deferred() async {
     await super.test_errors_uriDoesNotExist_import_deferred();
   }
 
-  @failingTest
-  @potentialAnalyzerProblem
   @override
+  @failingTest
+  @FastaProblem('https://github.com/dart-lang/sdk/issues/33719')
   test_errors_uriDoesNotExist_part() async {
     await super.test_errors_uriDoesNotExist_part();
   }
@@ -122,11 +135,18 @@ class AnalysisDriverTest_Kernel extends AnalysisDriverTest {
     // Skipped by design.
   }
 
-  @failingTest
-  @potentialAnalyzerProblem
   @override
-  test_getErrors() async {
-    await super.test_getErrors();
+  @failingTest
+  @FastaProblem('https://github.com/dart-lang/sdk/issues/33719')
+  test_getResult_doesNotExist() async {
+    await super.test_getResult_doesNotExist();
+  }
+
+  @override
+  @assertFailingTest
+  test_getResult_functionTypeFormalParameter_withTypeParameter() {
+    // Failed assertion: 'element != null': is not true.
+    return super.test_getResult_functionTypeFormalParameter_withTypeParameter();
   }
 
   @failingTest
@@ -192,6 +212,23 @@ class AnalysisDriverTest_Kernel extends AnalysisDriverTest {
     await super.test_getResult_nameConflict_local_typeInference();
   }
 
+  @override
+  @failingTest
+  test_missingDartLibrary_async() {
+    // Crash when compiling package:test/test.dart, at character offset null:
+    // Class 'FutureOr' not found in library 'dart:async'
+    return super.test_missingDartLibrary_async();
+  }
+
+  @override
+  @failingTest
+  test_missingDartLibrary_core() {
+    // Crash when compiling package:test/test.dart, at character offset null:
+    // file:///sdk/lib/core/core.dart:1: Internal problem: Couldn't find
+    // 'Object' in 'file:///sdk/lib/core/core.dart'.
+    return super.test_missingDartLibrary_core();
+  }
+
   @failingTest
   @FastaProblem('https://github.com/dart-lang/sdk/issues/30959')
   @override
@@ -228,12 +265,12 @@ class AnalysisDriverTest_Kernel extends AnalysisDriverTest {
     await super.test_removeFile_invalidate_importers();
   }
 
-  @failingTest
-  @potentialAnalyzerProblem
-  @override
-  test_results_order() async {
-    await super.test_results_order();
-  }
+  String _p(String path) => provider.convertPath(path);
+}
+
+/// Tests marked with this annotation fail because of an Analyzer problem.
+class AnalyzerProblem {
+  const AnalyzerProblem(String issueUri);
 }
 
 /// Tests marked with this annotation fail because of a Fasta problem.

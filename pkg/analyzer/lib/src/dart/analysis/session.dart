@@ -6,10 +6,12 @@ import 'dart:async';
 
 import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/analysis/session.dart';
+import 'package:analyzer/dart/analysis/uri_converter.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/file_system/file_system.dart';
 import 'package:analyzer/src/dart/analysis/driver.dart' as driver;
 import 'package:analyzer/src/dart/analysis/top_level_declaration.dart';
+import 'package:analyzer/src/dart/analysis/uri_converter.dart';
 import 'package:analyzer/src/generated/resolver.dart';
 import 'package:analyzer/src/generated/source.dart';
 
@@ -33,6 +35,11 @@ class AnalysisSessionImpl implements AnalysisSession {
   TypeSystem _typeSystem;
 
   /**
+   * The URI converter used to convert between URI's and file paths.
+   */
+  UriConverter _uriConverter;
+
+  /**
    * The cache of libraries for URIs.
    */
   final Map<String, LibraryElement> _uriToLibraryCache = {};
@@ -50,6 +57,8 @@ class AnalysisSessionImpl implements AnalysisSession {
 
   @override
   Future<TypeProvider> get typeProvider async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     _checkConsistency();
     if (_typeProvider == null) {
       LibraryElement coreLibrary = await _driver.getLibraryByUri('dart:core');
@@ -61,15 +70,18 @@ class AnalysisSessionImpl implements AnalysisSession {
 
   @override
   Future<TypeSystem> get typeSystem async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     _checkConsistency();
     if (_typeSystem == null) {
-      if (_driver.analysisOptions.strongMode) {
-        _typeSystem = new StrongTypeSystemImpl(await typeProvider);
-      } else {
-        _typeSystem = new TypeSystemImpl(await typeProvider);
-      }
+      _typeSystem = new StrongTypeSystemImpl(await typeProvider);
     }
     return _typeSystem;
+  }
+
+  @override
+  UriConverter get uriConverter {
+    return _uriConverter ??= new DriverBasedUriConverter(_driver);
   }
 
   @override
@@ -80,6 +92,8 @@ class AnalysisSessionImpl implements AnalysisSession {
 
   @override
   Future<LibraryElement> getLibraryByUri(String uri) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     _checkConsistency();
     var libraryElement = _uriToLibraryCache[uri];
     if (libraryElement == null) {
@@ -91,6 +105,8 @@ class AnalysisSessionImpl implements AnalysisSession {
 
   @override
   Future<ParseResult> getParsedAst(String path) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     return getParsedAstSync(path);
   }
 

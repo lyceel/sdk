@@ -9,16 +9,16 @@
 #include "vm/compiler/jit/compiler.h"
 #include "vm/dart_api_impl.h"
 #include "vm/dart_entry.h"
+#include "vm/heap/verifier.h"
 #include "vm/resolver.h"
 #include "vm/unit_test.h"
-#include "vm/verifier.h"
 #include "vm/zone.h"
 
 namespace dart {
 
 // Unit test for empty stack frame iteration.
 ISOLATE_UNIT_TEST_CASE(EmptyStackFrameIteration) {
-  StackFrameIterator iterator(StackFrameIterator::kValidateFrames,
+  StackFrameIterator iterator(ValidationPolicy::kValidateFrames,
                               Thread::Current(),
                               StackFrameIterator::kNoCrossThreadIteration);
   EXPECT(!iterator.HasNextFrame());
@@ -42,15 +42,15 @@ void FUNCTION_NAME(StackFrame_equals)(Dart_NativeArguments args) {
   const Instance& expected = Instance::CheckedHandle(arguments->NativeArgAt(0));
   const Instance& actual = Instance::CheckedHandle(arguments->NativeArgAt(1));
   if (!expected.OperatorEquals(actual)) {
-    OS::Print("expected: '%s' actual: '%s'\n", expected.ToCString(),
-              actual.ToCString());
+    OS::PrintErr("expected: '%s' actual: '%s'\n", expected.ToCString(),
+                 actual.ToCString());
     FATAL("Expect_equals fails.\n");
   }
 }
 
 void FUNCTION_NAME(StackFrame_frameCount)(Dart_NativeArguments args) {
   int count = 0;
-  StackFrameIterator frames(StackFrameIterator::kValidateFrames,
+  StackFrameIterator frames(ValidationPolicy::kValidateFrames,
                             Thread::Current(),
                             StackFrameIterator::kNoCrossThreadIteration);
   while (frames.NextFrame() != NULL) {

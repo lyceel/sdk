@@ -4,10 +4,8 @@
 
 #include "vm/ast.h"
 #include "platform/assert.h"
-#include "vm/heap.h"
 #include "vm/isolate.h"
 #include "vm/object.h"
-#include "vm/object_store.h"
 #include "vm/unit_test.h"
 
 namespace dart {
@@ -22,17 +20,17 @@ TEST_CASE(Ast) {
   EXPECT(!ll->IsLiteralNode());
   LoadLocalNode* lln = ll->AsLoadLocalNode();
   EXPECT(NULL != lln);
-  v->set_index(1);
-  EXPECT_EQ(1, v->index());
+  v->set_index(VariableIndex(1));
+  EXPECT_EQ(1, v->index().value());
 
   LocalVariable* p =
       new LocalVariable(TokenPosition::kNoSource, TokenPosition::kNoSource,
                         String::ZoneHandle(Symbols::New(thread, "p")),
                         Type::ZoneHandle(Type::DynamicType()));
   EXPECT(!p->HasIndex());
-  p->set_index(-1);
+  p->set_index(VariableIndex(-1));
   EXPECT(p->HasIndex());
-  EXPECT_EQ(-1, p->index());
+  EXPECT_EQ(-1, p->index().value());
 
   ReturnNode* r = new ReturnNode(TokenPosition::kNoSource, lln);
   EXPECT_EQ(lln, r->value());

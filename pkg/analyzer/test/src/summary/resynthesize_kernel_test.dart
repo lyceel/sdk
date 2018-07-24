@@ -29,11 +29,9 @@ import 'element_text.dart';
 import 'resynthesize_common.dart';
 
 main() {
-  // TODO(brianwilkerson) Either remove the following test, or uncomment it if
-  // we get it working under Dart2 semantics.
-//  defineReflectiveSuite(() {
-//    defineReflectiveTests(ResynthesizeKernelStrongTest);
-//  });
+  defineReflectiveSuite(() {
+    defineReflectiveTests(ResynthesizeTest_Kernel);
+  });
 }
 
 /// Tests marked with this annotation fail because they test features that
@@ -51,7 +49,7 @@ class FastaProblem {
 }
 
 @reflectiveTest
-class ResynthesizeKernelStrongTest extends ResynthesizeTest {
+class ResynthesizeTest_Kernel extends ResynthesizeTest {
   static const DEBUG = false;
 
   final resourceProvider = new MemoryResourceProvider();
@@ -136,54 +134,9 @@ class C {
 ''');
   }
 
-  @failingTest
-  @potentialAnalyzerProblem
-  @override
-  test_class_type_parameters_bound() async {
-    // https://github.com/dart-lang/sdk/issues/29561
-    // Fasta does not provide a flag for explicit vs. implicit Object bound.
-    await super.test_class_type_parameters_bound();
-  }
-
   @failingTest // See dartbug.com/32290
   test_const_constructor_inferred_args() =>
-      test_const_constructor_inferred_args();
-
-  @failingTest
-  @FastaProblem('https://github.com/dart-lang/sdk/issues/30258')
-  test_constructor_redirected_factory_named_generic() async {
-    await super.test_constructor_redirected_factory_named_generic();
-  }
-
-  @failingTest
-  @FastaProblem('https://github.com/dart-lang/sdk/issues/30258')
-  test_constructor_redirected_factory_named_imported_generic() async {
-    await super.test_constructor_redirected_factory_named_imported_generic();
-  }
-
-  @failingTest
-  @FastaProblem('https://github.com/dart-lang/sdk/issues/30258')
-  test_constructor_redirected_factory_named_prefixed_generic() async {
-    await super.test_constructor_redirected_factory_named_prefixed_generic();
-  }
-
-  @failingTest
-  @FastaProblem('https://github.com/dart-lang/sdk/issues/30258')
-  test_constructor_redirected_factory_unnamed_generic() async {
-    await super.test_constructor_redirected_factory_unnamed_generic();
-  }
-
-  @failingTest
-  @FastaProblem('https://github.com/dart-lang/sdk/issues/30258')
-  test_constructor_redirected_factory_unnamed_imported_generic() async {
-    await super.test_constructor_redirected_factory_unnamed_imported_generic();
-  }
-
-  @failingTest
-  @FastaProblem('https://github.com/dart-lang/sdk/issues/30258')
-  test_constructor_redirected_factory_unnamed_prefixed_generic() async {
-    await super.test_constructor_redirected_factory_unnamed_prefixed_generic();
-  }
+      super.test_const_constructor_inferred_args();
 
   @failingTest
   @notForDart2
@@ -201,27 +154,6 @@ class C {
   @notForDart2
   test_exportImport_configurations_useFirst() async {
     await super.test_exportImport_configurations_useFirst();
-  }
-
-  @failingTest
-  @override
-  test_futureOr() async {
-    // TODO(brianwilkerson) Triage this failure.
-    fail('Inconsistent results');
-  }
-
-  @failingTest
-  @override
-  test_futureOr_const() async {
-    // TODO(brianwilkerson) Triage this failure.
-    fail('Inconsistent results');
-  }
-
-  @failingTest
-  @override
-  test_futureOr_inferred() async {
-    // TODO(brianwilkerson) Triage this failure.
-    fail('Inconsistent results');
   }
 
   test_getElement_unit() async {
@@ -253,18 +185,6 @@ class C {
     await super.test_import_invalidUri_metadata();
   }
 
-  @override
-  @failingTest
-  test_invalid_annotation_prefixed_constructor() {
-    return super.test_invalid_annotation_prefixed_constructor();
-  }
-
-  @override
-  @failingTest
-  test_invalid_annotation_unprefixed_constructor() {
-    return super.test_invalid_annotation_unprefixed_constructor();
-  }
-
   @failingTest
   @FastaProblem('https://github.com/dart-lang/sdk/issues/30267')
   test_invalid_nameConflict_imported() async {
@@ -284,58 +204,21 @@ class C {
   }
 
   @failingTest
-  @FastaProblem('https://github.com/dart-lang/sdk/issues/30267')
-  test_invalid_setterParameter_fieldFormalParameter() async {
-    await super.test_invalid_setterParameter_fieldFormalParameter();
-  }
-
-  @failingTest
   @FastaProblem('https://github.com/dart-lang/sdk/issues/30725')
   test_invalidUri_part_emptyUri() async {
     await super.test_invalidUri_part_emptyUri();
   }
 
   @failingTest
-  @FastaProblem('https://github.com/dart-lang/sdk/issues/28434')
-  test_metadata_fieldFormalParameter() async {
-    await super.test_metadata_fieldFormalParameter();
+  @potentialAnalyzerProblem
+  test_invalidUris() async {
+    await super.test_invalidUris();
   }
 
   @failingTest
-  @FastaProblem('https://github.com/dart-lang/sdk/issues/28434')
-  test_metadata_fieldFormalParameter_withDefault() async {
-    await super.test_metadata_fieldFormalParameter_withDefault();
-  }
-
-  @failingTest
-  @FastaProblem('https://github.com/dart-lang/sdk/issues/28434')
-  test_metadata_functionTypedFormalParameter() async {
-    await super.test_metadata_functionTypedFormalParameter();
-  }
-
-  @failingTest
-  @FastaProblem('https://github.com/dart-lang/sdk/issues/28434')
-  test_metadata_functionTypedFormalParameter_withDefault() async {
-    await super.test_metadata_functionTypedFormalParameter_withDefault();
-  }
-
-  @failingTest
-  @FastaProblem('https://github.com/dart-lang/sdk/issues/28434')
-  test_metadata_simpleFormalParameter() async {
-    await super.test_metadata_simpleFormalParameter();
-  }
-
-  @failingTest
-  @FastaProblem('https://github.com/dart-lang/sdk/issues/28434')
-  test_metadata_simpleFormalParameter_withDefault() async {
-    await super.test_metadata_simpleFormalParameter_withDefault();
-  }
-
-  @failingTest
-  @notForDart2
-  test_parameter_checked() async {
-    // @checked is deprecated, use `covariant` instead.
-    await super.test_parameter_checked();
+  @potentialAnalyzerProblem
+  test_metadata_enumConstantDeclaration() async {
+    await super.test_metadata_enumConstantDeclaration();
   }
 
   @failingTest
@@ -345,27 +228,17 @@ class C {
     await super.test_parameter_checked_inherited();
   }
 
+  @override
   @failingTest
-  @FastaProblem('https://github.com/dart-lang/sdk/issues/31711')
-  test_typedef_generic_asFieldType() async {
-    await super.test_typedef_generic_asFieldType();
+  @FastaProblem('https://github.com/dart-lang/sdk/issues/33719')
+  test_parts_invalidUri() async {
+    await super.test_parts_invalidUri();
   }
 
   @failingTest
   @potentialAnalyzerProblem
-  test_typedef_type_parameters_bound() async {
-    // https://github.com/dart-lang/sdk/issues/29561
-    await super.test_typedef_type_parameters_bound();
-  }
-
-  @failingTest
-  test_typedef_type_parameters_bound_recursive() async {
-    await super.test_typedef_type_parameters_bound_recursive();
-  }
-
-  @failingTest
-  test_typedef_type_parameters_bound_recursive2() async {
-    await super.test_typedef_type_parameters_bound_recursive2();
+  test_setter_inferred_type_conflictingInheritance() async {
+    await super.test_setter_inferred_type_conflictingInheritance();
   }
 
   @failingTest
@@ -376,26 +249,29 @@ class C {
 
   @override
   @failingTest
-  test_unresolved_annotation_prefixedIdentifier_badPrefix() {
-    return super.test_unresolved_annotation_prefixedIdentifier_badPrefix();
+  @FastaProblem('https://github.com/dart-lang/sdk/issues/33719')
+  test_unresolved_export() async {
+    await super.test_unresolved_export();
   }
 
   @override
   @failingTest
-  test_unresolved_annotation_prefixedIdentifier_noDeclaration() {
-    return super.test_unresolved_annotation_prefixedIdentifier_noDeclaration();
+  @FastaProblem('https://github.com/dart-lang/sdk/issues/33719')
+  test_unresolved_import() async {
+    await super.test_unresolved_import();
   }
 
   @override
   @failingTest
-  test_unresolved_annotation_simpleIdentifier() {
-    return super.test_unresolved_annotation_simpleIdentifier();
+  @FastaProblem('https://github.com/dart-lang/sdk/issues/33719')
+  test_unresolved_part() async {
+    await super.test_unresolved_part();
   }
 
   Future<KernelResynthesizer> _createResynthesizer(Uri testUri) async {
     var logger = new PerformanceLog(null);
     var byteStore = new MemoryByteStore();
-    var analysisOptions = new AnalysisOptionsImpl()..strongMode = true;
+    var analysisOptions = new AnalysisOptionsImpl();
 
     var fsState = new FileSystemState(
         logger,

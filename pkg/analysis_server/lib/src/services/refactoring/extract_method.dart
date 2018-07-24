@@ -188,6 +188,8 @@ class ExtractMethodRefactoringImpl extends RefactoringImpl
 
   @override
   Future<RefactoringStatus> checkFinalConditions() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     RefactoringStatus result = new RefactoringStatus();
     result.addStatus(validateMethodName(name));
     result.addStatus(_checkParameterNames());
@@ -198,6 +200,8 @@ class ExtractMethodRefactoringImpl extends RefactoringImpl
 
   @override
   Future<RefactoringStatus> checkInitialConditions() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     RefactoringStatus result = new RefactoringStatus();
     // selection
     result.addStatus(_checkSelection());
@@ -236,6 +240,8 @@ class ExtractMethodRefactoringImpl extends RefactoringImpl
 
   @override
   Future<SourceChange> createChange() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     SourceChange change = new SourceChange(refactoringName);
     // replace occurrences with method invocation
     for (_Occurrence occurrence in _occurrences) {
@@ -395,6 +401,11 @@ class ExtractMethodRefactoringImpl extends RefactoringImpl
   }
 
   @override
+  bool isAvailable() {
+    return !_checkSelection().hasFatalError;
+  }
+
+  @override
   bool requiresPreview() => false;
 
   /**
@@ -434,6 +445,8 @@ class ExtractMethodRefactoringImpl extends RefactoringImpl
    * Checks if created method will shadow or will be shadowed by other elements.
    */
   Future<RefactoringStatus> _checkPossibleConflicts() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     RefactoringStatus result = new RefactoringStatus();
     AstNode parent = _parentMember.parent;
     // top-level function
@@ -609,7 +622,7 @@ class ExtractMethodRefactoringImpl extends RefactoringImpl
     if (argument.parent is NamedExpression) {
       argument = argument.parent as NamedExpression;
     }
-    ParameterElement parameter = argument.bestParameterElement;
+    ParameterElement parameter = argument.staticParameterElement;
     if (parameter != null) {
       DartType parameterType = parameter.type;
       if (parameterType is FunctionType) {
@@ -710,6 +723,8 @@ class ExtractMethodRefactoringImpl extends RefactoringImpl
    * parameters.
    */
   Future<RefactoringStatus> _initializeParameters() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     _parameters.clear();
     _parametersMap.clear();
     _parameterReferencesMap.clear();
@@ -718,7 +733,7 @@ class ExtractMethodRefactoringImpl extends RefactoringImpl
     unit.accept(new _InitializeParametersVisitor(this, assignedUsedVariables));
     // single expression
     if (_selectionExpression != null) {
-      _returnType = _selectionExpression.bestType;
+      _returnType = _selectionExpression.staticType;
     }
     // verify that none or all execution flows end with a "return"
     if (_selectionStatements != null) {
@@ -768,6 +783,8 @@ class ExtractMethodRefactoringImpl extends RefactoringImpl
   }
 
   Future<Null> _initializeReturnType() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     TypeProvider typeProvider = await session.typeProvider;
     InterfaceType futureType = typeProvider.futureType;
     if (_selectionFunctionExpression != null) {
@@ -982,7 +999,7 @@ class _ExtractMethodAnalyzer extends StatementAnalyzer {
         invalidSelection('Cannot extract the name part of a declaration.');
       }
       // method name
-      Element element = node.bestElement;
+      Element element = node.staticElement;
       if (element is FunctionElement || element is MethodElement) {
         invalidSelection('Cannot extract a single method name.');
       }
@@ -1234,7 +1251,7 @@ class _InitializeParametersVisitor extends GeneralizingAstVisitor {
         // add parameter
         RefactoringMethodParameter parameter = ref._parametersMap[name];
         if (parameter == null) {
-          DartType parameterType = node.bestType;
+          DartType parameterType = node.staticType;
           StringBuffer parametersBuffer = new StringBuffer();
           String parameterTypeCode = ref.utils.getTypeSource(
               parameterType, ref.librariesToImport,
@@ -1323,7 +1340,7 @@ class _ReturnTypeComputer extends RecursiveAstVisitor {
       return;
     }
     // prepare type
-    DartType type = expression.bestType;
+    DartType type = expression.staticType;
     if (type.isBottom) {
       return;
     }

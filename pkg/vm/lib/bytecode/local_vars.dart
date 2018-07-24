@@ -7,13 +7,23 @@ library vm.bytecode.local_vars;
 import 'dart:math' show max;
 
 import 'package:kernel/ast.dart';
+import 'package:kernel/transformations/continuation.dart'
+    show ContinuationVariables;
 import 'package:vm/bytecode/dbc.dart';
 
 class LocalVariables {
   final Map<TreeNode, Scope> _scopes = <TreeNode, Scope>{};
   final Map<VariableDeclaration, VarDesc> _vars =
       <VariableDeclaration, VarDesc>{};
-  final Map<TreeNode, int> _temps = <TreeNode, int>{};
+  final Map<TreeNode, List<int>> _temps = <TreeNode, List<int>>{};
+  final Map<TreeNode, VariableDeclaration> _capturedSavedContextVars =
+      <TreeNode, VariableDeclaration>{};
+  final Map<TreeNode, VariableDeclaration> _capturedExceptionVars =
+      <TreeNode, VariableDeclaration>{};
+  final Map<TreeNode, VariableDeclaration> _capturedStackTraceVars =
+      <TreeNode, VariableDeclaration>{};
+  final Map<ForInStatement, VariableDeclaration> _capturedIteratorVars =
+      <ForInStatement, VariableDeclaration>{};
 
   Scope _currentScope;
   Frame _currentFrame;
@@ -43,12 +53,20 @@ class LocalVariables {
       _getVarDesc(variable).originalParamSlotIndex ??
       (throw 'Variablie $variable does not have originalParamSlotIndex');
 
-  int tempIndexInFrame(TreeNode node) =>
-      _temps[node] ??
-      (throw 'Temp is not allocated for node ${node.runtimeType} $node');
+  int tempIndexInFrame(TreeNode node, {int tempIndex: 0}) {
+    final temps = _temps[node];
+    if (temps == null) {
+      throw 'Temp is not allocated for node ${node.runtimeType} $node';
+    }
+    return temps[tempIndex];
+  }
 
   int get currentContextSize => _currentScope.contextSize;
   int get currentContextLevel => _currentScope.contextLevel;
+
+  int get contextLevelAtEntry =>
+      _currentFrame.contextLevelAtEntry ??
+      (throw "Current frame is top level and it doesn't have a context at entry");
 
   int getContextLevelOfVar(VariableDeclaration variable) {
     final v = _getVarDesc(variable);
@@ -64,21 +82,68 @@ class LocalVariables {
           .contextVar ??
       (throw 'Context variable is not declared in ${_currentFrame.function}'));
 
+  bool get hasContextVar => _currentFrame.contextVar != null;
+
   int get scratchVarIndexInFrame => getVarIndexInFrame(_currentFrame
           .scratchVar ??
       (throw 'Scratch variable is not declared in ${_currentFrame.function}'));
 
-  int get typeArgsVarIndexInFrame => getVarIndexInFrame(_currentFrame
-          .typeArgsVar ??
-      (throw 'TypeArgs variable is not declared in ${_currentFrame.function}'));
+  int get functionTypeArgsVarIndexInFrame => getVarIndexInFrame(_currentFrame
+          .functionTypeArgsVar ??
+      (throw 'FunctionTypeArgs variable is not declared in ${_currentFrame.function}'));
 
-  bool get hasTypeArgsVar => _currentFrame.typeArgsVar != null;
+  bool get hasFunctionTypeArgsVar => _currentFrame.functionTypeArgsVar != null;
+
+  VariableDeclaration get factoryTypeArgsVar =>
+      _currentFrame.factoryTypeArgsVar ??
+      (throw 'FactoryTypeArgs variable is not declared in ${_currentFrame.function}');
+
+  bool get hasFactoryTypeArgsVar => _currentFrame.factoryTypeArgsVar != null;
 
   VariableDeclaration get receiverVar =>
       _currentFrame.receiverVar ??
       (throw 'Receiver variable is not declared in ${_currentFrame.function}');
 
   bool get hasReceiver => _currentFrame.receiverVar != null;
+
+  bool get isSyncYieldingFrame => _currentFrame.isSyncYielding;
+
+  VariableDeclaration get awaitJumpVar {
+    assert(_currentFrame.isSyncYielding);
+    return _currentFrame.parent
+        .getSyntheticVar(ContinuationVariables.awaitJumpVar);
+  }
+
+  VariableDeclaration get awaitContextVar {
+    assert(_currentFrame.isSyncYielding);
+    return _currentFrame.parent
+        .getSyntheticVar(ContinuationVariables.awaitContextVar);
+  }
+
+  VariableDeclaration capturedSavedContextVar(TreeNode node) =>
+      _capturedSavedContextVars[node];
+  VariableDeclaration capturedExceptionVar(TreeNode node) =>
+      _capturedExceptionVars[node];
+  VariableDeclaration capturedStackTraceVar(TreeNode node) =>
+      _capturedStackTraceVars[node];
+  VariableDeclaration capturedIteratorVar(ForInStatement node) =>
+      _capturedIteratorVars[node];
+
+  int get asyncExceptionParamIndexInFrame {
+    assert(_currentFrame.isSyncYielding);
+    final function = (_currentFrame.function as FunctionDeclaration).function;
+    final param = function.positionalParameters
+        .firstWhere((p) => p.name == ContinuationVariables.exceptionParam);
+    return getVarIndexInFrame(param);
+  }
+
+  int get asyncStackTraceParamIndexInFrame {
+    assert(_currentFrame.isSyncYielding);
+    final function = (_currentFrame.function as FunctionDeclaration).function;
+    final param = function.positionalParameters
+        .firstWhere((p) => p.name == ContinuationVariables.stackTraceParam);
+    return getVarIndexInFrame(param);
+  }
 
   int get frameSize => _currentFrame.frameSize;
 
@@ -115,7 +180,9 @@ class VarDesc {
   int index;
   int originalParamSlotIndex;
 
-  VarDesc(this.declaration, this.scope);
+  VarDesc(this.declaration, this.scope) {
+    scope.vars.add(this);
+  }
 
   Frame get frame => scope.frame;
 
@@ -140,20 +207,30 @@ class Frame {
   bool hasOptionalParameters = false;
   bool hasCapturedParameters = false;
   bool hasClosures = false;
+  bool isDartSync = true;
+  bool isSyncYielding = false;
   VariableDeclaration receiverVar;
-  VariableDeclaration typeArgsVar;
+  VariableDeclaration functionTypeArgsVar;
+  VariableDeclaration factoryTypeArgsVar;
   VariableDeclaration closureVar;
   VariableDeclaration contextVar;
   VariableDeclaration scratchVar;
+  Map<String, VariableDeclaration> syntheticVars;
   int frameSize = 0;
   List<int> temporaries = <int>[];
+  int contextLevelAtEntry;
 
   Frame(this.function, this.parent);
+
+  VariableDeclaration getSyntheticVar(String name) =>
+      syntheticVars[name] ??
+      (throw '${name} variable is not declared in ${function}');
 }
 
 class Scope {
   final Scope parent;
   final Frame frame;
+  final List<VarDesc> vars = <VarDesc>[];
 
   int localsUsed;
   int tempsUsed;
@@ -170,6 +247,8 @@ class _ScopeBuilder extends RecursiveVisitor<Null> {
 
   Scope _currentScope;
   Frame _currentFrame;
+  List<TreeNode> _enclosingTryBlocks;
+  List<TreeNode> _enclosingTryCatches;
 
   _ScopeBuilder(this.locals);
 
@@ -182,6 +261,11 @@ class _ScopeBuilder extends RecursiveVisitor<Null> {
   void _visitFunction(TreeNode node) {
     _enterFrame(node);
 
+    final savedEnclosingTryBlocks = _enclosingTryBlocks;
+    _enclosingTryBlocks = <TreeNode>[];
+    final savedEnclosingTryCatches = _enclosingTryCatches;
+    _enclosingTryCatches = <TreeNode>[];
+
     if (node is Field) {
       node.initializer.accept(this);
     } else {
@@ -193,15 +277,34 @@ class _ScopeBuilder extends RecursiveVisitor<Null> {
       FunctionNode function = (node as dynamic).function;
       assert(function != null);
 
-      _currentFrame.numTypeArguments =
-          (_currentFrame.parent?.numTypeArguments ?? 0) +
-              function.typeParameters.length;
+      _currentFrame.isDartSync = function.dartAsyncMarker == AsyncMarker.Sync;
 
-      if (_currentFrame.numTypeArguments > 0) {
-        _currentFrame.typeArgsVar =
-            new VariableDeclaration(':function_type_arguments_var');
-        _declareVariable(_currentFrame.typeArgsVar);
+      _currentFrame.isSyncYielding =
+          function.asyncMarker == AsyncMarker.SyncYielding;
+
+      if (node is Procedure && node.isFactory) {
+        assert(_currentFrame.parent == null);
+        _currentFrame.numTypeArguments = 0;
+        _currentFrame.factoryTypeArgsVar =
+            new VariableDeclaration(':type_arguments');
+        _declareVariable(_currentFrame.factoryTypeArgsVar);
+      } else {
+        _currentFrame.numTypeArguments =
+            (_currentFrame.parent?.numTypeArguments ?? 0) +
+                function.typeParameters.length;
+
+        if (_currentFrame.numTypeArguments > 0) {
+          _currentFrame.functionTypeArgsVar =
+              new VariableDeclaration(':function_type_arguments_var');
+          _declareVariable(_currentFrame.functionTypeArgsVar);
+        }
+
+        if (_currentFrame.parent?.factoryTypeArgsVar != null) {
+          _currentFrame.factoryTypeArgsVar =
+              _currentFrame.parent.factoryTypeArgsVar;
+        }
       }
+
       if (node is Constructor || (node is Procedure && !node.isStatic)) {
         _currentFrame.receiverVar = new VariableDeclaration('this');
         _declareVariable(_currentFrame.receiverVar);
@@ -217,6 +320,15 @@ class _ScopeBuilder extends RecursiveVisitor<Null> {
 
       visitList(function.positionalParameters, this);
       visitList(function.namedParameters, this);
+
+      if (_currentFrame.isSyncYielding) {
+        // The following variables from parent frame are used implicitly and need
+        // to be captured to preserve state across closure invocations.
+        _useVariable(_currentFrame.parent
+            .getSyntheticVar(ContinuationVariables.awaitJumpVar));
+        _useVariable(_currentFrame.parent
+            .getSyntheticVar(ContinuationVariables.awaitContextVar));
+      }
 
       if (node is Constructor) {
         for (var field in node.enclosingClass.fields) {
@@ -238,6 +350,9 @@ class _ScopeBuilder extends RecursiveVisitor<Null> {
       _currentFrame.scratchVar = new VariableDeclaration(':scratch');
       _declareVariable(_currentFrame.scratchVar);
     }
+
+    _enclosingTryBlocks = savedEnclosingTryBlocks;
+    _enclosingTryCatches = savedEnclosingTryCatches;
 
     _leaveFrame();
   }
@@ -284,6 +399,56 @@ class _ScopeBuilder extends RecursiveVisitor<Null> {
     _useVariable(_currentFrame.receiverVar);
   }
 
+  void _captureAllVisibleVariablesInCurrentFrame() {
+    assert(_currentFrame.isSyncYielding);
+    final transient = new Set<VariableDeclaration>();
+    transient
+      ..addAll([
+        _currentFrame.functionTypeArgsVar,
+        _currentFrame.closureVar,
+        _currentFrame.contextVar,
+        _currentFrame.scratchVar,
+      ]);
+    transient.addAll((_currentFrame.function as FunctionDeclaration)
+        .function
+        .positionalParameters);
+    for (Scope scope = _currentScope;
+        scope != null && scope.frame == _currentFrame;
+        scope = scope.parent) {
+      for (VarDesc v in scope.vars) {
+        if (!transient.contains(v.declaration)) {
+          v.capture();
+        }
+      }
+    }
+  }
+
+  // Capture synthetic variables for control flow statements.
+  void _captureSyntheticVariables() {
+    int depth = 0;
+    for (TreeNode tryBlock in _enclosingTryBlocks) {
+      _captureSyntheticVariable(ContinuationVariables.savedTryContextVar(depth),
+          tryBlock, locals._capturedSavedContextVars);
+      ++depth;
+    }
+    depth = 0;
+    for (TreeNode tryBlock in _enclosingTryCatches) {
+      _captureSyntheticVariable(ContinuationVariables.exceptionVar(depth),
+          tryBlock, locals._capturedExceptionVars);
+      _captureSyntheticVariable(ContinuationVariables.stackTraceVar(depth),
+          tryBlock, locals._capturedStackTraceVars);
+      ++depth;
+    }
+  }
+
+  void _captureSyntheticVariable(
+      String name, TreeNode node, Map<TreeNode, VariableDeclaration> map) {
+    final variable = _currentFrame.parent.getSyntheticVar(name);
+    _useVariable(variable);
+    assert(map[node] == null || map[node] == variable);
+    map[node] = variable;
+  }
+
   void _visitWithScope(TreeNode node) {
     _enterScope(node);
     node.visitChildren(this);
@@ -311,6 +476,13 @@ class _ScopeBuilder extends RecursiveVisitor<Null> {
   @override
   visitVariableDeclaration(VariableDeclaration node) {
     _declareVariable(node);
+
+    if (!_currentFrame.isDartSync && node.name[0] == ':') {
+      _currentFrame.syntheticVars ??= <String, VariableDeclaration>{};
+      assert(_currentFrame.syntheticVars[node.name] == null);
+      _currentFrame.syntheticVars[node.name] = node;
+    }
+
     node.visitChildren(this);
   }
 
@@ -350,8 +522,15 @@ class _ScopeBuilder extends RecursiveVisitor<Null> {
 
   @override
   visitTypeParameterType(TypeParameterType node) {
-    if (node.parameter.parent is Class) {
+    var parent = node.parameter.parent;
+    if (parent is Class) {
       _useThis();
+    } else if (parent is FunctionNode) {
+      parent = parent.parent;
+      if (parent is Procedure && parent.isFactory) {
+        assert(_currentFrame.factoryTypeArgsVar != null);
+        _useVariable(_currentFrame.factoryTypeArgsVar);
+      }
     }
     node.visitChildren(this);
   }
@@ -375,10 +554,28 @@ class _ScopeBuilder extends RecursiveVisitor<Null> {
   visitForInStatement(ForInStatement node) {
     node.iterable.accept(this);
 
+    VariableDeclaration iteratorVar;
+    if (_currentFrame.isSyncYielding) {
+      // Declare a variable to hold 'iterator' so it could be captured.
+      iteratorVar = new VariableDeclaration(null);
+      _declareVariable(iteratorVar);
+      locals._capturedIteratorVars[node] = iteratorVar;
+    }
+
     _enterScope(node);
     node.variable.accept(this);
     node.body.accept(this);
     _leaveScope();
+
+    if (_currentFrame.isSyncYielding && !locals.isCaptured(iteratorVar)) {
+      // Iterator variable was not captured, as there are no yield points
+      // inside for-in statement body. The variable is needed only if captured,
+      // so undeclare it.
+      assert(_currentScope.vars.last == locals._vars[iteratorVar]);
+      _currentScope.vars.removeLast();
+      locals._vars.remove(iteratorVar);
+      locals._capturedIteratorVars.remove(node);
+    }
   }
 
   @override
@@ -389,6 +586,36 @@ class _ScopeBuilder extends RecursiveVisitor<Null> {
   @override
   visitLet(Let node) {
     _visitWithScope(node);
+  }
+
+  @override
+  visitYieldStatement(YieldStatement node) {
+    assert(_currentFrame.isSyncYielding);
+    _captureAllVisibleVariablesInCurrentFrame();
+    _captureSyntheticVariables();
+    node.visitChildren(this);
+  }
+
+  @override
+  visitTryCatch(TryCatch node) {
+    _enclosingTryBlocks.add(node);
+    node.body?.accept(this);
+    _enclosingTryBlocks.removeLast();
+
+    _enclosingTryCatches.add(node);
+    visitList(node.catches, this);
+    _enclosingTryCatches.removeLast();
+  }
+
+  @override
+  visitTryFinally(TryFinally node) {
+    _enclosingTryBlocks.add(node);
+    node.body?.accept(this);
+    _enclosingTryBlocks.removeLast();
+
+    _enclosingTryCatches.add(node);
+    node.finalizer?.accept(this);
+    _enclosingTryCatches.removeLast();
   }
 }
 
@@ -409,6 +636,10 @@ class _Allocator extends RecursiveVisitor<Null> {
 
     if (_currentScope.frame != _currentFrame) {
       _currentFrame = _currentScope.frame;
+
+      if (_currentScope.parent != null) {
+        _currentFrame.contextLevelAtEntry = _currentScope.parent.contextLevel;
+      }
 
       _currentScope.localsUsed = 0;
       _currentScope.tempsUsed = 0;
@@ -452,23 +683,31 @@ class _Allocator extends RecursiveVisitor<Null> {
         max(_currentFrame.frameSize, _currentScope.localsUsed);
   }
 
-  void _allocateTemp(TreeNode node) {
+  void _allocateTemp(TreeNode node, {int count: 1}) {
     assert(locals._temps[node] == null);
-    if (_currentScope.tempsUsed >= _currentFrame.temporaries.length) {
-      // Allocate a new local slot for temporary variable.
-      int local = _currentScope.localsUsed++;
+    if (_currentScope.tempsUsed + count > _currentFrame.temporaries.length) {
+      // Allocate new local slots for temporary variables.
+      final int newSlots =
+          (_currentScope.tempsUsed + count) - _currentFrame.temporaries.length;
+      int local = _currentScope.localsUsed;
+      _currentScope.localsUsed += newSlots;
       _updateFrameSize();
-      _currentFrame.temporaries.add(local);
+      for (int i = 0; i < newSlots; i++) {
+        _currentFrame.temporaries.add(local + i);
+      }
     }
-    int index = _currentFrame.temporaries[_currentScope.tempsUsed++];
-    locals._temps[node] = index;
+    locals._temps[node] = _currentFrame.temporaries
+        .sublist(_currentScope.tempsUsed, _currentScope.tempsUsed + count);
+    _currentScope.tempsUsed += count;
   }
 
-  void _freeTemp(TreeNode node) {
-    assert(_currentScope.tempsUsed > 0);
-    assert(locals._temps[node] ==
-        _currentFrame.temporaries[_currentScope.tempsUsed - 1]);
-    --_currentScope.tempsUsed;
+  void _freeTemp(TreeNode node, {int count: 1}) {
+    assert(_currentScope.tempsUsed >= count);
+    _currentScope.tempsUsed -= count;
+    assert(listEquals(
+        locals._temps[node],
+        _currentFrame.temporaries.sublist(
+            _currentScope.tempsUsed, _currentScope.tempsUsed + count)));
   }
 
   void _allocateVariable(VariableDeclaration variable, {int paramSlotIndex}) {
@@ -512,7 +751,7 @@ class _Allocator extends RecursiveVisitor<Null> {
   }
 
   void _allocateParameters(TreeNode node, FunctionNode function) {
-    final bool hasTypeArgs = function.typeParameters.isNotEmpty;
+    final bool isFactory = node is Procedure && node.isFactory;
     final bool hasReceiver =
         node is Constructor || (node is Procedure && !node.isStatic);
     final bool hasClosureArg =
@@ -520,7 +759,7 @@ class _Allocator extends RecursiveVisitor<Null> {
 
     _currentFrame.numParameters = function.positionalParameters.length +
         function.namedParameters.length +
-        (hasTypeArgs ? 1 : 0) +
+        (isFactory ? 1 : 0) +
         (hasReceiver ? 1 : 0) +
         (hasClosureArg ? 1 : 0);
 
@@ -534,9 +773,8 @@ class _Allocator extends RecursiveVisitor<Null> {
             function.namedParameters.any(locals.isCaptured);
 
     int count = 0;
-    if (hasTypeArgs) {
-      assert(!locals.isCaptured(_currentFrame.typeArgsVar));
-      _allocateParameter(_currentFrame.typeArgsVar, count++);
+    if (isFactory) {
+      _allocateParameter(_currentFrame.factoryTypeArgsVar, count++);
     }
     if (hasReceiver) {
       _allocateParameter(_currentFrame.receiverVar, count++);
@@ -560,7 +798,7 @@ class _Allocator extends RecursiveVisitor<Null> {
   }
 
   void _allocateSpecialVariables() {
-    _ensureVariableAllocated(_currentFrame.typeArgsVar);
+    _ensureVariableAllocated(_currentFrame.functionTypeArgsVar);
     _ensureVariableAllocated(_currentFrame.contextVar);
     _ensureVariableAllocated(_currentFrame.scratchVar);
   }
@@ -598,18 +836,18 @@ class _Allocator extends RecursiveVisitor<Null> {
     _leaveScope();
   }
 
-  void _visit(TreeNode node, {scope: false, temp: false}) {
+  void _visit(TreeNode node, {bool scope: false, int temps: 0}) {
     if (scope) {
       _enterScope(node);
     }
-    if (temp) {
-      _allocateTemp(node);
+    if (temps > 0) {
+      _allocateTemp(node, count: temps);
     }
 
     node.visitChildren(this);
 
-    if (temp) {
-      _freeTemp(node);
+    if (temps > 0) {
+      _freeTemp(node, count: temps);
     }
     if (scope) {
       _leaveScope();
@@ -688,7 +926,7 @@ class _Allocator extends RecursiveVisitor<Null> {
     if (node.isConst) {
       return;
     }
-    _visit(node, temp: true);
+    _visit(node, temps: 1);
   }
 
   @override
@@ -696,7 +934,7 @@ class _Allocator extends RecursiveVisitor<Null> {
     if (node.isConst) {
       return;
     }
-    _visit(node, temp: true);
+    _visit(node, temps: 1);
   }
 
   @override
@@ -704,42 +942,77 @@ class _Allocator extends RecursiveVisitor<Null> {
     if (node.isConst) {
       return;
     }
-    _visit(node, temp: true);
+    _visit(node, temps: 1);
   }
 
   @override
   visitStringConcatenation(StringConcatenation node) {
-    _visit(node, temp: true);
+    _visit(node, temps: 1);
   }
 
   @override
   visitConditionalExpression(ConditionalExpression node) {
-    _visit(node, temp: true);
+    _visit(node, temps: 1);
   }
 
   @override
   visitLogicalExpression(LogicalExpression node) {
-    _visit(node, temp: true);
+    _visit(node, temps: 1);
   }
 
   @override
   visitPropertySet(PropertySet node) {
-    _visit(node, temp: true);
+    _visit(node, temps: 1);
+  }
+
+  @override
+  visitDirectPropertySet(DirectPropertySet node) {
+    _visit(node, temps: 1);
+  }
+
+  @override
+  visitSuperMethodInvocation(SuperMethodInvocation node) {
+    _visit(node, temps: 1);
+  }
+
+  @override
+  visitSuperPropertyGet(SuperPropertyGet node) {
+    _visit(node, temps: 1);
+  }
+
+  @override
+  visitSuperPropertySet(SuperPropertySet node) {
+    _visit(node, temps: 1);
   }
 
   @override
   visitSwitchStatement(SwitchStatement node) {
-    _visit(node, temp: true);
+    _visit(node, temps: 1);
   }
 
   @override
   visitVariableSet(VariableSet node) {
-    _visit(node, temp: locals.isCaptured(node.variable));
+    _visit(node, temps: locals.isCaptured(node.variable) ? 1 : 0);
   }
 
   @override
   visitStaticSet(StaticSet node) {
     _allocateTemp(node);
     super.visitStaticSet(node);
+  }
+
+  @override
+  visitTryCatch(TryCatch node) {
+    _visit(node, temps: 2);
+  }
+
+  @override
+  visitTryFinally(TryFinally node) {
+    _visit(node, temps: 2);
+  }
+
+  @override
+  visitInstantiation(Instantiation node) {
+    _visit(node, temps: 2);
   }
 }

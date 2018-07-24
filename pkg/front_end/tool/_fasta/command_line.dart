@@ -4,10 +4,20 @@
 
 library fasta.tool.command_line;
 
-import 'dart:io' show exit;
+import 'dart:async' show Future;
+
+import 'dart:io' show exit, exitCode;
+
+import 'package:build_integration/file_system/single_root.dart'
+    show SingleRootFileSystem;
 
 import 'package:front_end/src/api_prototype/compiler_options.dart'
     show CompilerOptions;
+
+import 'package:front_end/src/api_prototype/file_system.dart' show FileSystem;
+
+import 'package:front_end/src/api_prototype/standard_file_system.dart'
+    show StandardFileSystem;
 
 import 'package:front_end/src/base/processed_options.dart'
     show ProcessedOptions;
@@ -17,6 +27,9 @@ import 'package:front_end/src/compute_platform_binaries_location.dart'
 
 import 'package:front_end/src/fasta/compiler_context.dart' show CompilerContext;
 
+import 'package:front_end/src/fasta/deprecated_problems.dart'
+    show deprecated_InputError;
+
 import 'package:front_end/src/fasta/fasta_codes.dart'
     show
         Message,
@@ -25,14 +38,17 @@ import 'package:front_end/src/fasta/fasta_codes.dart'
         messageFastaUsageShort,
         templateUnspecified;
 
-import 'package:front_end/src/fasta/problems.dart' show unhandled;
+import 'package:front_end/src/fasta/problems.dart' show DebugAbort, unhandled;
 
 import 'package:front_end/src/fasta/severity.dart' show Severity;
+
+import 'package:front_end/src/scheme_based_file_system.dart'
+    show SchemeBasedFileSystem;
 
 import 'package:kernel/target/targets.dart'
     show Target, getTarget, TargetFlags, targets;
 
-Uri resolveFile(String path) => Uri.base.resolveUri(new Uri.file(path));
+import 'resolve_input_uri.dart' show resolveInputUri;
 
 class CommandLineProblem {
   final Message message;
@@ -159,7 +175,9 @@ class ParsedArguments {
                     "but expected one of: 'true', 'false', 'yes', or 'no'.");
               }
             } else if (valueSpecification == Uri) {
-              parsedValue = resolveFile(value);
+              // TODO(ahe): resolve Uris lazily, so that schemes provided by
+              // other flags can be used for parsed command-line arguments too.
+              parsedValue = resolveInputUri(value);
             } else if (valueSpecification == String) {
               parsedValue = value;
             } else if (valueSpecification is String) {
@@ -210,9 +228,11 @@ const Map<String, dynamic> optionSpecification = const <String, dynamic>{
   "--packages": Uri,
   "--platform": Uri,
   "--sdk": Uri,
+  "--single-root-scheme": String,
+  "--single-root-base": Uri,
   "--strong": "--strong-mode",
   "--strong-mode": false,
-  "--sync-async": false,
+  "--sync-async": true,
   "--target": String,
   "--verbose": false,
   "--verify": false,
@@ -277,14 +297,30 @@ ProcessedOptions analyzeCommandLine(
 
   final bool warningsAreFatal = fatal.contains("warnings");
 
-  final bool nitsAreFatal = fatal.contains("nits");
-
   final bool compileSdk = options.containsKey("--compile-sdk");
 
+  final String singleRootScheme = options["--single-root-scheme"];
+  final Uri singleRootBase = options["--single-root-base"];
+
+  FileSystem fileSystem = StandardFileSystem.instance;
+  List<String> extraSchemes = const [];
+  if (singleRootScheme != null) {
+    extraSchemes = [singleRootScheme];
+    fileSystem = new SchemeBasedFileSystem({
+      'file': fileSystem,
+      'data': fileSystem,
+      // TODO(askesc): remove also when fixing StandardFileSystem (empty schemes
+      // should have been handled elsewhere).
+      '': fileSystem,
+      singleRootScheme: new SingleRootFileSystem(
+          singleRootScheme, singleRootBase, fileSystem),
+    });
+  }
+
   if (programName == "compile_platform") {
-    if (arguments.length != 4) {
+    if (arguments.length != 5) {
       return throw new CommandLineProblem.deprecated(
-          "Expected four arguments.");
+          "Expected five arguments.");
     }
     if (compileSdk) {
       return throw new CommandLineProblem.deprecated(
@@ -298,27 +334,27 @@ ProcessedOptions analyzeCommandLine(
     return new ProcessedOptions(
         new CompilerOptions()
           ..sdkSummary = options["--platform"]
-          ..librariesSpecificationUri = resolveFile(arguments[1])
+          ..librariesSpecificationUri =
+              resolveInputUri(arguments[1], extraSchemes: extraSchemes)
           ..setExitCodeOnProblem = true
-          ..chaseDependencies = true
+          ..fileSystem = fileSystem
           ..packagesFileUri = packages
           ..strongMode = strongMode
           ..target = target
           ..throwOnErrorsForDebugging = errorsAreFatal
           ..throwOnWarningsForDebugging = warningsAreFatal
-          ..throwOnNitsForDebugging = nitsAreFatal
           ..embedSourceText = !excludeSource
           ..debugDump = dumpIr
           ..verbose = verbose
           ..verify = verify,
-        false,
         <Uri>[Uri.parse(arguments[0])],
-        resolveFile(arguments[2]));
+        resolveInputUri(arguments[3], extraSchemes: extraSchemes));
   } else if (arguments.isEmpty) {
     return throw new CommandLineProblem.deprecated("No Dart file specified.");
   }
 
-  final Uri defaultOutput = resolveFile("${arguments.first}.dill");
+  final Uri defaultOutput =
+      resolveInputUri("${arguments.first}.dill", extraSchemes: extraSchemes);
 
   final Uri output = options["-o"] ?? options["--output"] ?? defaultOutput;
 
@@ -331,6 +367,7 @@ ProcessedOptions analyzeCommandLine(
 
   CompilerOptions compilerOptions = new CompilerOptions()
     ..compileSdk = compileSdk
+    ..fileSystem = fileSystem
     ..sdkRoot = sdk
     ..sdkSummary = platform
     ..packagesFileUri = packages
@@ -338,7 +375,6 @@ ProcessedOptions analyzeCommandLine(
     ..target = target
     ..throwOnErrorsForDebugging = errorsAreFatal
     ..throwOnWarningsForDebugging = warningsAreFatal
-    ..throwOnNitsForDebugging = nitsAreFatal
     ..embedSourceText = !excludeSource
     ..debugDump = dumpIr
     ..verbose = verbose
@@ -349,17 +385,17 @@ ProcessedOptions analyzeCommandLine(
   List<Uri> inputs = <Uri>[];
   if (areRestArgumentsInputs) {
     for (String argument in arguments) {
-      inputs.add(resolveFile(argument));
+      inputs.add(resolveInputUri(argument, extraSchemes: extraSchemes));
     }
   }
-  return new ProcessedOptions(compilerOptions, false, inputs, output);
+  return new ProcessedOptions(compilerOptions, inputs, output);
 }
 
-dynamic withGlobalOptions(
+Future<T> withGlobalOptions<T>(
     String programName,
     List<String> arguments,
     bool areRestArgumentsInputs,
-    dynamic f(CompilerContext context, List<String> restArguments)) {
+    Future<T> f(CompilerContext context, List<String> restArguments)) {
   bool verbose = false;
   for (String argument in arguments) {
     if (argument == "--") break;
@@ -380,7 +416,7 @@ dynamic withGlobalOptions(
     problem = e;
   }
 
-  return CompilerContext.runWithOptions(options, (c) {
+  return CompilerContext.runWithOptions<T>(options, (c) {
     if (problem != null) {
       print(computeUsage(programName, verbose).message);
       print(c.formatWithoutLocation(problem.message, Severity.error));
@@ -414,7 +450,8 @@ Message computeUsage(String programName, bool verbose) {
     case "compile_platform":
       summary = "Compiles Dart SDK platform to the Dill/Kernel IR format.";
       basicUsage = "Usage: $programName [options]"
-          " dart-library-uri libraries.json platform.dill outline.dill\n";
+          " dart-library-uri libraries.json vm_outline_strong.dill"
+          " platform.dill outline.dill\n";
   }
   StringBuffer sb = new StringBuffer(basicUsage);
   if (summary != null) {
@@ -425,4 +462,26 @@ Message computeUsage(String programName, bool verbose) {
   sb.write(options);
   // TODO(ahe): Don't use [templateUnspecified].
   return templateUnspecified.withArguments("$sb");
+}
+
+Future<T> runProtectedFromAbort<T>(Future<T> Function() action,
+    [T failingValue]) async {
+  if (CompilerContext.isActive) {
+    throw "runProtectedFromAbort should be called from 'main',"
+        " that is, outside a compiler context.";
+  }
+  try {
+    return await action();
+  } on DebugAbort catch (e) {
+    print(e.message.message);
+
+    // DebugAbort should never happen in production code, so we want test.py to
+    // treat this as a crash which is signalled by exiting with 255.
+    exit(255);
+  } on deprecated_InputError catch (e) {
+    exitCode = 1;
+    await CompilerContext.runWithDefaultOptions((c) =>
+        new Future<void>.sync(() => c.report(e.message, Severity.error)));
+  }
+  return failingValue;
 }

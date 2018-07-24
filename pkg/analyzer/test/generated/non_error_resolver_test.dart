@@ -29,8 +29,7 @@ main() {
 @reflectiveTest
 class NonErrorResolverTest extends ResolverTestCase {
   @override
-  AnalysisOptions get defaultAnalysisOptions =>
-      new AnalysisOptionsImpl()..strongMode = true;
+  AnalysisOptions get defaultAnalysisOptions => new AnalysisOptionsImpl();
 
   fail_undefinedEnumConstant() async {
     Source source = addSource(r'''
@@ -315,10 +314,7 @@ process(Object x) {}''');
   }
 
   test_argumentTypeNotAssignable_optionalNew() async {
-    resetWith(
-        options: new AnalysisOptionsImpl()
-          ..previewDart2 = true
-          ..strongMode = true);
+    resetWith(options: new AnalysisOptionsImpl()..previewDart2 = true);
     Source source = addSource(r'''
 class Widget { }
 
@@ -664,18 +660,6 @@ Future<Null> f() async {}
     verify([source]);
   }
 
-  test_async_future_object_with_return() async {
-    Source source = addSource('''
-import 'dart:async';
-Future<Object> f() async {
-  return;
-}
-''');
-    await computeAnalysisResult(source);
-    assertNoErrors(source);
-    verify([source]);
-  }
-
   test_async_future_object_with_return_value() async {
     Source source = addSource('''
 import 'dart:async';
@@ -716,19 +700,6 @@ Future f() async {
     Source source = addSource('''
 import 'dart:async';
 Future f() async {}
-''');
-    await computeAnalysisResult(source);
-    assertNoErrors(source);
-    verify([source]);
-  }
-
-  test_async_return_flattens_futures() async {
-    Source source = addSource('''
-import 'dart:async';
-Future<int> f() async {
-  return g();
-}
-Future<Future<int>> g() => null;
 ''');
     await computeAnalysisResult(source);
     assertNoErrors(source);
@@ -789,14 +760,11 @@ f(list) async* {
   }
 
   test_await_flattened() async {
-    // The analyzer type system over-flattens so it considers `await ffi()` to
-    // have type `int` - see dartbug.com/31887
-    var expectedType = enableKernelDriver ? 'Future<int>' : 'int';
     Source source = addSource('''
 import 'dart:async';
 Future<Future<int>> ffi() => null;
 f() async {
-  $expectedType b = await ffi();
+  Future<int> b = await ffi();
 }
 ''');
     await computeAnalysisResult(source);
@@ -1031,7 +999,7 @@ abstract class A {
     {
       SimpleIdentifier ref =
           EngineTestCase.findSimpleIdentifier(unit, code, "p]");
-      expect(ref.staticElement, new isInstanceOf<ParameterElement>());
+      expect(ref.staticElement, new TypeMatcher<ParameterElement>());
     }
   }
 
@@ -1084,7 +1052,7 @@ foo(int p) {
     CompilationUnit unit = analysisResult.unit;
     SimpleIdentifier ref =
         EngineTestCase.findSimpleIdentifier(unit, code, 'p]');
-    expect(ref.staticElement, new isInstanceOf<ParameterElement>());
+    expect(ref.staticElement, new TypeMatcher<ParameterElement>());
   }
 
   test_commentReference_beforeFunction_expressionBody() async {
@@ -1098,7 +1066,7 @@ foo(int p) => null;''';
     CompilationUnit unit = analysisResult.unit;
     SimpleIdentifier ref =
         EngineTestCase.findSimpleIdentifier(unit, code, 'p]');
-    expect(ref.staticElement, new isInstanceOf<ParameterElement>());
+    expect(ref.staticElement, new TypeMatcher<ParameterElement>());
   }
 
   test_commentReference_beforeFunctionTypeAlias() async {
@@ -1113,7 +1081,7 @@ typedef Foo(int p);
     CompilationUnit unit = analysisResult.unit;
     SimpleIdentifier ref =
         EngineTestCase.findSimpleIdentifier(unit, code, 'p]');
-    expect(ref.staticElement, new isInstanceOf<ParameterElement>());
+    expect(ref.staticElement, new TypeMatcher<ParameterElement>());
   }
 
   test_commentReference_beforeGenericTypeAlias() async {
@@ -1128,14 +1096,13 @@ typedef Foo<T> = Function<S>(int p);
     CompilationUnit unit = analysisResult.unit;
 
     Element getElement(String search) {
-      return EngineTestCase
-          .findSimpleIdentifier(unit, code, search)
+      return EngineTestCase.findSimpleIdentifier(unit, code, search)
           .staticElement;
     }
 
-    expect(getElement('T]'), new isInstanceOf<TypeParameterElement>());
-    expect(getElement('S]'), new isInstanceOf<TypeParameterElement>());
-    expect(getElement('p]'), new isInstanceOf<ParameterElement>());
+    expect(getElement('T]'), new TypeMatcher<TypeParameterElement>());
+    expect(getElement('S]'), new TypeMatcher<TypeParameterElement>());
+    expect(getElement('p]'), new TypeMatcher<ParameterElement>());
   }
 
   test_commentReference_beforeGetter() async {
@@ -1176,7 +1143,7 @@ abstract class A {
     assertIsParameter(String search) {
       SimpleIdentifier ref =
           EngineTestCase.findSimpleIdentifier(unit, code, search);
-      expect(ref.staticElement, new isInstanceOf<ParameterElement>());
+      expect(ref.staticElement, new TypeMatcher<ParameterElement>());
     }
 
     assertIsParameter('p1');
@@ -1200,7 +1167,7 @@ class A {
     CompilationUnit unit = analysisResult.unit;
     SimpleIdentifier ref =
         EngineTestCase.findSimpleIdentifier(unit, code, 'foo]');
-    expect(ref.staticElement, new isInstanceOf<MethodElement>());
+    expect(ref.staticElement, new TypeMatcher<MethodElement>());
   }
 
   test_commentReference_setter() async {
@@ -1223,12 +1190,12 @@ class B extends A {
     {
       SimpleIdentifier ref =
           EngineTestCase.findSimpleIdentifier(unit, code, "x] in A");
-      expect(ref.staticElement, new isInstanceOf<PropertyAccessorElement>());
+      expect(ref.staticElement, new TypeMatcher<PropertyAccessorElement>());
     }
     {
       SimpleIdentifier ref =
           EngineTestCase.findSimpleIdentifier(unit, code, 'x] in B');
-      expect(ref.staticElement, new isInstanceOf<PropertyAccessorElement>());
+      expect(ref.staticElement, new TypeMatcher<PropertyAccessorElement>());
     }
   }
 
@@ -1323,7 +1290,6 @@ const Type d = dynamic;
   }
 
   test_const_imported_defaultParameterValue_withImportPrefix() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addNamedSource("/a.dart", r'''
 import 'b.dart';
 const b = const B();
@@ -1337,6 +1303,18 @@ class B {
     addNamedSource("/c.dart", r'''
 const int value = 12345;
 ''');
+    await computeAnalysisResult(source);
+    assertNoErrors(source);
+    verify([source]);
+  }
+
+  test_constConstructorWithMixinWithField() async {
+    Source source = addSource(r'''
+class M {
+}
+class A extends Object with M {
+  const A();
+}''');
     await computeAnalysisResult(source);
     assertNoErrors(source);
     verify([source]);
@@ -1393,19 +1371,6 @@ class A {
 }''');
     await computeAnalysisResult(source);
     assertNoErrors(source);
-    verify([source]);
-  }
-
-  test_constConstructorWithNonFinalField_mixin() async {
-    Source source = addSource(r'''
-class A {
-  a() {}
-}
-class B extends Object with A {
-  const B();
-}''');
-    await computeAnalysisResult(source);
-    assertErrors(source, [CompileTimeErrorCode.CONST_CONSTRUCTOR_WITH_MIXIN]);
     verify([source]);
   }
 
@@ -2120,7 +2085,7 @@ class A {
   test_forEach_genericFunctionType() async {
     Source source = addSource(r'''
 main() {
-  for (Null Function<T>(T, Null) e in []) {
+  for (Null Function<T>(T, Null) e in <dynamic>[]) {
     e;
   }
 }''');
@@ -2731,7 +2696,6 @@ class C implements A, B {
   test_infer_mixin() async {
     AnalysisOptionsImpl options = new AnalysisOptionsImpl();
     options.enableSuperMixins = true;
-    options.strongMode = true;
     resetWith(options: options);
     Source source = addSource('''
 abstract class A<T> {}
@@ -2756,7 +2720,6 @@ class C extends A<B> with M {}
   test_infer_mixin_multiplyConstrained() async {
     AnalysisOptionsImpl options = new AnalysisOptionsImpl();
     options.enableSuperMixins = true;
-    options.strongMode = true;
     resetWith(options: options);
     Source source = addSource('''
 abstract class A<T> {}
@@ -2787,7 +2750,6 @@ class F extends E with M {}
   test_infer_mixin_with_substitution() async {
     AnalysisOptionsImpl options = new AnalysisOptionsImpl();
     options.enableSuperMixins = true;
-    options.strongMode = true;
     resetWith(options: options);
     Source source = addSource('''
 abstract class A<T> {}
@@ -2812,7 +2774,6 @@ class C extends A<List<B>> with M {}
   test_infer_mixin_with_substitution_functionType() async {
     AnalysisOptionsImpl options = new AnalysisOptionsImpl();
     options.enableSuperMixins = true;
-    options.strongMode = true;
     resetWith(options: options);
     Source source = addSource('''
 abstract class A<T> {}
@@ -2933,6 +2894,12 @@ class A {
     Source source = addSource('int x = -000923372036854775809;');
     await computeAnalysisResult(source);
     assertNoErrors(source);
+  }
+
+  test_integerLiteralOutOfRange_negative_small() async {
+    Source source = addSource('int x = -42;');
+    await computeAnalysisResult(source);
+    assertErrors(source);
   }
 
   test_integerLiteralOutOfRange_negative_valid() async {
@@ -3603,6 +3570,32 @@ main() {
     verify([source]);
   }
 
+  Future test_issue32114() async {
+    addNamedSource('/a.dart', '''
+class O {}
+
+typedef T Func<T extends O>(T e);
+''');
+    addNamedSource('/b.dart', '''
+import 'a.dart';
+export 'a.dart' show Func;
+
+abstract class A<T extends O> {
+  Func<T> get func;
+}
+''');
+    final Source source = addSource('''
+import 'b.dart';
+
+class B extends A {
+  Func get func => (x) => x;
+}
+''');
+    await computeAnalysisResult(source);
+    assertNoErrors(source);
+    verify([source]);
+  }
+
   test_issue_24191() async {
     Source source = addSource('''
 import 'dart:async';
@@ -3694,6 +3687,19 @@ f() {
     Source source = addSource(r'''
 class A {
   set A(v) {}
+}''');
+    await computeAnalysisResult(source);
+    assertNoErrors(source);
+    verify([source]);
+  }
+
+  test_metadata_enumConstantDeclaration() async {
+    Source source = addSource(r'''
+const x = 1;
+enum E {
+  aaa,
+  @x
+  bbb
 }''');
     await computeAnalysisResult(source);
     assertNoErrors(source);
@@ -4786,6 +4792,124 @@ main() {
     assertNoErrors(source);
   }
 
+  test_optionalNew_rewrite() async {
+    resetWith(options: new AnalysisOptionsImpl()..previewDart2 = true);
+    Source source = addSource(r'''
+import 'b.dart';
+main() {
+  const B.named1();
+  const B.named2();
+  const B.named3();
+  const B.named4();
+}
+''');
+    addNamedSource("/a.dart", r'''
+class A {
+  const A();
+  const A.named();
+}
+''');
+    addNamedSource("/b.dart", r'''
+import 'a.dart';
+import 'a.dart' as p;
+
+const _a1 = A();
+const _a2 = A.named();
+const _a3 = p.A();
+const _a4 = p.A.named();
+
+class B {
+  const B.named1({this.a: _a1}) : assert(a != null);
+  const B.named2({this.a: _a2}) : assert(a != null);
+  const B.named3({this.a: _a3}) : assert(a != null);
+  const B.named4({this.a: _a4}) : assert(a != null);
+
+  final A a;
+}
+''');
+    await computeAnalysisResult(source);
+    assertNoErrors(source);
+    verify([source]);
+  }
+
+  test_optionalNew_rewrite_instantiatesToBounds() async {
+    resetWith(options: new AnalysisOptionsImpl()..previewDart2 = true);
+    Source source = addSource(r'''
+import 'b.dart';
+
+@B.named1()
+@B.named2()
+@B.named3()
+@B.named4()
+@B.named5()
+@B.named6()
+@B.named7()
+@B.named8()
+main() {}
+''');
+    addNamedSource("/a.dart", r'''
+class Unbounded<T> {
+  const Unbounded();
+  const Unbounded.named();
+}
+class Bounded<T extends String> {
+  const Bounded();
+  const Bounded.named();
+}
+''');
+    addNamedSource("/b.dart", r'''
+import 'a.dart';
+import 'a.dart' as p;
+
+const unbounded1 = Unbounded();
+const unbounded2 = Unbounded.named();
+const unbounded3 = p.Unbounded();
+const unbounded4 = p.Unbounded.named();
+const bounded1 = Bounded();
+const bounded2 = Bounded.named();
+const bounded3 = p.Bounded();
+const bounded4 = p.Bounded.named();
+
+class B {
+  const B.named1({this.unbounded: unbounded1}) : bounded = null;
+  const B.named2({this.unbounded: unbounded2}) : bounded = null;
+  const B.named3({this.unbounded: unbounded3}) : bounded = null;
+  const B.named4({this.unbounded: unbounded4}) : bounded = null;
+  const B.named5({this.bounded: bounded1}) : unbounded = null;
+  const B.named6({this.bounded: bounded2}) : unbounded = null;
+  const B.named7({this.bounded: bounded3}) : unbounded = null;
+  const B.named8({this.bounded: bounded4}) : unbounded = null;
+
+  final Unbounded unbounded;
+  final Bounded bounded;
+}
+''');
+    final result = await computeAnalysisResult(source);
+    expect(result.unit.declarations, hasLength(1));
+    final mainDecl = result.unit.declarations[0];
+    expect(mainDecl.metadata, hasLength(8));
+    mainDecl.metadata.forEach((metadata) {
+      final value = metadata.elementAnnotation.computeConstantValue();
+      expect(value, isNotNull);
+      expect(value.type.toString(), 'B');
+      final unbounded = value.getField('unbounded');
+      final bounded = value.getField('bounded');
+      if (!unbounded.isNull) {
+        expect(bounded.isNull, true);
+        expect(unbounded.type.name, 'Unbounded');
+        expect(unbounded.type.typeArguments, hasLength(1));
+        expect(unbounded.type.typeArguments[0].isDynamic, isTrue);
+      } else {
+        expect(unbounded.isNull, true);
+        expect(bounded.type.name, 'Bounded');
+        expect(bounded.type.typeArguments, hasLength(1));
+        expect(bounded.type.typeArguments[0].name, 'String');
+      }
+    });
+    assertNoErrors(source);
+    verify([source]);
+  }
+
   test_optionalParameterInOperator_required() async {
     Source source = addSource(r'''
 class A {
@@ -4837,6 +4961,21 @@ g(g) {
 }
 h(x) {}
 ''');
+    await computeAnalysisResult(source);
+    assertNoErrors(source);
+    verify([source]);
+  }
+
+  test_parametricCallFunction() async {
+    Source source = addSource(r'''
+f() {
+  var c = new C();
+  c<String>().codeUnits;
+}
+
+class C {
+  T call<T>() => null;
+}''');
     await computeAnalysisResult(source);
     assertNoErrors(source);
     verify([source]);
@@ -5277,7 +5416,7 @@ class B {
   }
 
   test_typeArgument_boundToFunctionType() async {
-    Source source = addSource("class A<T extends void Function<T>(T)>{}");
+    Source source = addSource("class A<T extends void Function(T)>{}");
     await computeAnalysisResult(source);
     assertNoErrors(source);
     verify([source]);
@@ -5967,6 +6106,17 @@ main() {
     assertNoErrors(source);
   }
 
+  Future test_useDynamicWithPrefix() async {
+    final Source source = addSource('''
+import 'dart:core' as core;
+
+core.dynamic dynamicVariable;
+''');
+    await computeAnalysisResult(source);
+    assertNoErrors(source);
+    verify([source]);
+  }
+
   test_wrongNumberOfParametersForOperator1() async {
     await _check_wrongNumberOfParametersForOperator1("<");
     await _check_wrongNumberOfParametersForOperator1(">");
@@ -6278,7 +6428,6 @@ class A {
     await computeAnalysisResult(source);
     assertNoErrors(source);
     verify([source]);
-    reset();
   }
 
   Future<Null> _check_wrongNumberOfParametersForOperator1(String name) async {

@@ -18,13 +18,15 @@ import 'package:analyzer/src/generated/source.dart';
 import 'package:analyzer/src/generated/testing/token_factory.dart';
 import 'package:analyzer/src/generated/utilities_dart.dart';
 import 'package:front_end/src/fasta/scanner/abstract_scanner.dart';
-import 'package:front_end/src/scanner/scanner.dart' as fe;
 import 'package:test/test.dart';
 import 'package:test_reflective_loader/test_reflective_loader.dart';
 
 import 'test_support.dart';
 
 main() {
+  // The fasta parser has a parallel set of tests in parser_fasta_test.dart
+  if (Parser.useFasta) return;
+
   defineReflectiveSuite(() {
     defineReflectiveTests(ClassMemberParserTest);
     defineReflectiveTests(ComplexParserTest);
@@ -84,11 +86,6 @@ abstract class AbstractParserTestCase implements ParserTestHelpers {
    * Flag indicating whether the fasta parser is being used.
    */
   bool get usingFastaParser;
-
-  /**
-   * Flag indicating whether the fasta scanner is being used.
-   */
-  bool get usingFastaScanner;
 
   /**
    * Assert that the number and codes of errors occurred during parsing is the
@@ -339,7 +336,7 @@ abstract class ClassMemberParserTestMixin implements AbstractParserTestCase {
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     FunctionBody body = method.body;
     EngineTestCase.assertInstanceOf(
@@ -359,7 +356,7 @@ abstract class ClassMemberParserTestMixin implements AbstractParserTestCase {
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     FunctionBody body = method.body;
     EngineTestCase.assertInstanceOf(
@@ -372,13 +369,22 @@ abstract class ClassMemberParserTestMixin implements AbstractParserTestCase {
   }
 
   void test_parseAwaitExpression_inSync() {
-    // This test requires better error recovery than we currently have. In
-    // particular, we need to be able to distinguish between an await expression
-    // in the wrong context, and the use of 'await' as an identifier.
     createParser('m() { return await x + await y; }');
     MethodDeclaration method = parser.parseClassMember('C');
     expect(method, isNotNull);
-    assertNoErrors();
+    listener.assertErrors(usingFastaParser
+        ? [
+            expectedError(ParserErrorCode.UNEXPECTED_TOKEN, 13, 5),
+            expectedError(ParserErrorCode.UNEXPECTED_TOKEN, 23, 5)
+          ]
+        : [
+            // This test requires better error recovery than we currently have.
+            // In particular, we need to be able to distinguish
+            // between an await expression in the wrong context,
+            // and the use of 'await' as an identifier.
+            expectedError(ParserErrorCode.EXPECTED_TOKEN, 13, 5),
+            expectedError(ParserErrorCode.UNEXPECTED_TOKEN, 29, 1)
+          ]);
     FunctionBody body = method.body;
     EngineTestCase.assertInstanceOf(
         (obj) => obj is BlockFunctionBody, BlockFunctionBody, body);
@@ -388,10 +394,13 @@ abstract class ClassMemberParserTestMixin implements AbstractParserTestCase {
     Expression expression = (statement as ReturnStatement).expression;
     EngineTestCase.assertInstanceOf(
         (obj) => obj is BinaryExpression, BinaryExpression, expression);
-    EngineTestCase.assertInstanceOf((obj) => obj is AwaitExpression,
-        AwaitExpression, (expression as BinaryExpression).leftOperand);
-    EngineTestCase.assertInstanceOf((obj) => obj is AwaitExpression,
-        AwaitExpression, (expression as BinaryExpression).rightOperand);
+    if (!usingFastaParser) {
+      // TODO(danrubel): capture `await` keywords in fasta generated AST
+      EngineTestCase.assertInstanceOf((obj) => obj is AwaitExpression,
+          AwaitExpression, (expression as BinaryExpression).leftOperand);
+      EngineTestCase.assertInstanceOf((obj) => obj is AwaitExpression,
+          AwaitExpression, (expression as BinaryExpression).rightOperand);
+    }
   }
 
   void test_parseClassMember_constructor_withDocComment() {
@@ -407,7 +416,7 @@ abstract class ClassMemberParserTestMixin implements AbstractParserTestCase {
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<ConstructorDeclaration>());
+    expect(member, new TypeMatcher<ConstructorDeclaration>());
     ConstructorDeclaration constructor = member;
     expect(constructor.body, isNotNull);
     expect(constructor.separator, isNotNull);
@@ -426,7 +435,7 @@ abstract class ClassMemberParserTestMixin implements AbstractParserTestCase {
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<FieldDeclaration>());
+    expect(member, new TypeMatcher<FieldDeclaration>());
     FieldDeclaration field = member;
     expect(field.covariantKeyword, isNotNull);
     expect(field.documentationComment, isNull);
@@ -445,7 +454,7 @@ abstract class ClassMemberParserTestMixin implements AbstractParserTestCase {
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<FieldDeclaration>());
+    expect(member, new TypeMatcher<FieldDeclaration>());
     FieldDeclaration field = member;
     expect(field.covariantKeyword, isNull);
     expect(field.documentationComment, isNull);
@@ -475,9 +484,9 @@ Function(int) Function(String) v;
 ''');
     ClassMember member = parser.parseClassMember('C');
     assertNoErrors();
-    expect(member, new isInstanceOf<FieldDeclaration>());
+    expect(member, new TypeMatcher<FieldDeclaration>());
     VariableDeclarationList fields = (member as FieldDeclaration).fields;
-    expect(fields.type, new isInstanceOf<GenericFunctionType>());
+    expect(fields.type, new TypeMatcher<GenericFunctionType>());
   }
 
   void test_parseClassMember_field_gftType_noReturnType() {
@@ -486,9 +495,9 @@ Function(int, String) v;
 ''');
     ClassMember member = parser.parseClassMember('C');
     assertNoErrors();
-    expect(member, new isInstanceOf<FieldDeclaration>());
+    expect(member, new TypeMatcher<FieldDeclaration>());
     VariableDeclarationList fields = (member as FieldDeclaration).fields;
-    expect(fields.type, new isInstanceOf<GenericFunctionType>());
+    expect(fields.type, new TypeMatcher<GenericFunctionType>());
   }
 
   void test_parseClassMember_field_instance_prefixedType() {
@@ -496,7 +505,7 @@ Function(int, String) v;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<FieldDeclaration>());
+    expect(member, new TypeMatcher<FieldDeclaration>());
     FieldDeclaration field = member;
     expect(field.covariantKeyword, isNull);
     expect(field.documentationComment, isNull);
@@ -516,7 +525,7 @@ Function(int, String) v;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<FieldDeclaration>());
+    expect(member, new TypeMatcher<FieldDeclaration>());
     FieldDeclaration field = member;
     expect(field.covariantKeyword, isNull);
     expect(field.documentationComment, isNull);
@@ -535,7 +544,7 @@ Function(int, String) v;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<FieldDeclaration>());
+    expect(member, new TypeMatcher<FieldDeclaration>());
     FieldDeclaration field = member;
     expect(field.covariantKeyword, isNull);
     expect(field.documentationComment, isNull);
@@ -554,7 +563,7 @@ Function(int, String) v;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<FieldDeclaration>());
+    expect(member, new TypeMatcher<FieldDeclaration>());
     FieldDeclaration field = member;
     expect(field.covariantKeyword, isNull);
     expect(field.documentationComment, isNull);
@@ -574,7 +583,7 @@ Function(int, String) v;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<FieldDeclaration>());
+    expect(member, new TypeMatcher<FieldDeclaration>());
     FieldDeclaration field = member;
     expect(field.covariantKeyword, isNull);
     expect(field.documentationComment, isNull);
@@ -625,7 +634,7 @@ Function(int, String) v;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<FieldDeclaration>());
+    expect(member, new TypeMatcher<FieldDeclaration>());
     FieldDeclaration field = member;
     expect(field.covariantKeyword, isNull);
     expect(field.documentationComment, isNull);
@@ -644,7 +653,7 @@ Function(int, String) v;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.documentationComment, isNull);
     expect(method.externalKeyword, isNull);
@@ -662,7 +671,7 @@ Function(int, String) v;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.documentationComment, isNull);
     expect(method.externalKeyword, isNull);
@@ -681,7 +690,7 @@ Function(int, String) v;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.documentationComment, isNull);
     expect(method.externalKeyword, isNotNull);
@@ -705,7 +714,7 @@ Function(int, String) v;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.body, isNotNull);
     expect(method.documentationComment, isNull);
@@ -729,7 +738,7 @@ Function(int, String) v;
     } else {
       assertErrorsWithCodes([HintCode.GENERIC_METHOD_COMMENT]);
     }
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.documentationComment, isNull);
     expect(method.externalKeyword, isNull);
@@ -754,7 +763,7 @@ Function(int, String) v;
       assertErrorsWithCodes(
           [HintCode.GENERIC_METHOD_COMMENT, HintCode.GENERIC_METHOD_COMMENT]);
     }
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.documentationComment, isNull);
     expect(method.externalKeyword, isNull);
@@ -786,7 +795,7 @@ Function(int, String) v;
       assertErrorsWithCodes(
           [HintCode.GENERIC_METHOD_COMMENT, HintCode.GENERIC_METHOD_COMMENT]);
     }
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.documentationComment, isNull);
     expect(method.externalKeyword, isNull);
@@ -812,7 +821,7 @@ Function(int, String) v;
       assertErrorsWithCodes(
           [HintCode.GENERIC_METHOD_COMMENT, HintCode.GENERIC_METHOD_COMMENT]);
     }
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.documentationComment, isNull);
     expect(method.externalKeyword, isNull);
@@ -841,7 +850,7 @@ Function(int, String) v;
       assertErrorsWithCodes(
           [HintCode.GENERIC_METHOD_COMMENT, HintCode.GENERIC_METHOD_COMMENT]);
     }
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.documentationComment, isNull);
     expect(method.externalKeyword, isNull);
@@ -876,7 +885,7 @@ Function(int, String) v;
     } else {
       assertErrorsWithCodes([HintCode.GENERIC_METHOD_COMMENT]);
     }
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.documentationComment, isNull);
     expect(method.externalKeyword, isNull);
@@ -895,7 +904,7 @@ Function(int, String) v;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.documentationComment, isNull);
     expect(method.externalKeyword, isNull);
@@ -914,7 +923,7 @@ Function(int, String) v;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.documentationComment, isNull);
     expect(method.externalKeyword, isNull);
@@ -940,7 +949,7 @@ Function(int, String) v;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.documentationComment, isNull);
     expect(method.externalKeyword, isNull);
@@ -959,7 +968,7 @@ Function(int, String) v;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.documentationComment, isNull);
     expect(method.externalKeyword, isNull);
@@ -982,7 +991,7 @@ Function(int, String) v;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.documentationComment, isNull);
     expect(method.externalKeyword, isNull);
@@ -1012,7 +1021,7 @@ Function(int, String) v;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.documentationComment, isNull);
     expect(method.externalKeyword, isNull);
@@ -1032,7 +1041,7 @@ Function(int, String) v;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.documentationComment, isNull);
     expect(method.externalKeyword, isNull);
@@ -1051,7 +1060,7 @@ Function(int, String) v;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.documentationComment, isNull);
     expect(method.externalKeyword, isNull);
@@ -1070,7 +1079,7 @@ Function(int, String) v;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.documentationComment, isNull);
     expect(method.externalKeyword, isNull);
@@ -1089,7 +1098,7 @@ Function(int, String) v;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.documentationComment, isNull);
     expect(method.externalKeyword, isNull);
@@ -1109,9 +1118,9 @@ Function<A>(core.List<core.int> x) m() => null;
 ''');
     ClassMember member = parser.parseClassMember('C');
     assertNoErrors();
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     expect((member as MethodDeclaration).body,
-        new isInstanceOf<ExpressionFunctionBody>());
+        new TypeMatcher<ExpressionFunctionBody>());
   }
 
   void test_parseClassMember_method_gftReturnType_voidReturnType() {
@@ -1120,9 +1129,9 @@ void Function<A>(core.List<core.int> x) m() => null;
 ''');
     ClassMember member = parser.parseClassMember('C');
     assertNoErrors();
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     expect((member as MethodDeclaration).body,
-        new isInstanceOf<ExpressionFunctionBody>());
+        new TypeMatcher<ExpressionFunctionBody>());
   }
 
   void test_parseClassMember_method_native_allowed() {
@@ -1204,7 +1213,7 @@ void Function<A>(core.List<core.int> x) m() => null;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.documentationComment, isNull);
     expect(method.externalKeyword, isNull);
@@ -1223,7 +1232,7 @@ void Function<A>(core.List<core.int> x) m() => null;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.documentationComment, isNull);
     expect(method.externalKeyword, isNull);
@@ -1242,7 +1251,7 @@ void Function<A>(core.List<core.int> x) m() => null;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.documentationComment, isNull);
     expect(method.externalKeyword, isNull);
@@ -1261,7 +1270,7 @@ void Function<A>(core.List<core.int> x) m() => null;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.documentationComment, isNull);
     expect(method.externalKeyword, isNull);
@@ -1281,7 +1290,7 @@ void Function<A>(core.List<core.int> x) m() => null;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.documentationComment, isNull);
     expect(method.externalKeyword, isNull);
@@ -1300,7 +1309,7 @@ void Function<A>(core.List<core.int> x) m() => null;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.documentationComment, isNull);
     expect(method.externalKeyword, isNull);
@@ -1319,7 +1328,7 @@ void Function<A>(core.List<core.int> x) m() => null;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.documentationComment, isNull);
     expect(method.externalKeyword, isNull);
@@ -1338,7 +1347,7 @@ void Function<A>(core.List<core.int> x) m() => null;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.documentationComment, isNull);
     expect(method.externalKeyword, isNull);
@@ -1363,7 +1372,7 @@ void Function<A>(core.List<core.int> x) m() => null;
       assertErrorsWithCodes(
           [HintCode.GENERIC_METHOD_COMMENT, HintCode.GENERIC_METHOD_COMMENT]);
     }
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.documentationComment, isNull);
     expect(method.externalKeyword, isNull);
@@ -1383,7 +1392,7 @@ void Function<A>(core.List<core.int> x) m() => null;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.documentationComment, isNull);
     expect(method.externalKeyword, isNull);
@@ -1402,13 +1411,13 @@ void Function<A>(core.List<core.int> x) m() => null;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.documentationComment, isNull);
     expect(method.externalKeyword, isNull);
     expect(method.modifierKeyword, isNull);
     expect(method.propertyKeyword, isNull);
-    expect(method.returnType, new isInstanceOf<GenericFunctionType>());
+    expect(method.returnType, new TypeMatcher<GenericFunctionType>());
     expect(method.name, isNotNull);
     expect(method.operatorKeyword, isNotNull);
     expect(method.typeParameters, isNull);
@@ -1416,7 +1425,7 @@ void Function<A>(core.List<core.int> x) m() => null;
     NodeList<FormalParameter> parameters = method.parameters.parameters;
     expect(parameters, hasLength(1));
     expect((parameters[0] as SimpleFormalParameter).type,
-        new isInstanceOf<GenericFunctionType>());
+        new TypeMatcher<GenericFunctionType>());
     expect(method.body, isNotNull);
   }
 
@@ -1425,7 +1434,7 @@ void Function<A>(core.List<core.int> x) m() => null;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.documentationComment, isNull);
     expect(method.externalKeyword, isNull);
@@ -1444,7 +1453,7 @@ void Function<A>(core.List<core.int> x) m() => null;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.documentationComment, isNull);
     expect(method.externalKeyword, isNull);
@@ -1463,7 +1472,7 @@ void Function<A>(core.List<core.int> x) m() => null;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.documentationComment, isNull);
     expect(method.externalKeyword, isNull);
@@ -1497,7 +1506,7 @@ void Function<A>(core.List<core.int> x) m() => null;
     expect(constructor.redirectedConstructor.type.name.name, 'prefix.B');
     expect(constructor.redirectedConstructor.period.type, TokenType.PERIOD);
     expect(constructor.redirectedConstructor.name.name, 'foo');
-    expect(constructor.body, new isInstanceOf<EmptyFunctionBody>());
+    expect(constructor.body, new TypeMatcher<EmptyFunctionBody>());
   }
 
   void test_parseClassMember_redirectingFactory_expressionBody() {
@@ -1530,7 +1539,7 @@ void Function<A>(core.List<core.int> x) m() => null;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<ConstructorDeclaration>());
+    expect(member, new TypeMatcher<ConstructorDeclaration>());
     ConstructorDeclaration constructor = member;
     expect(constructor.externalKeyword, isNull);
     expect(constructor.constKeyword, isNull);
@@ -1547,7 +1556,7 @@ void Function<A>(core.List<core.int> x) m() => null;
     expect(constructor.redirectedConstructor.type.name.name, 'B');
     expect(constructor.redirectedConstructor.period, isNull);
     expect(constructor.redirectedConstructor.name, isNull);
-    expect(constructor.body, new isInstanceOf<EmptyFunctionBody>());
+    expect(constructor.body, new TypeMatcher<EmptyFunctionBody>());
   }
 
   void test_parseConstructor_assert() {
@@ -1555,12 +1564,12 @@ void Function<A>(core.List<core.int> x) m() => null;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<ConstructorDeclaration>());
+    expect(member, new TypeMatcher<ConstructorDeclaration>());
     ConstructorDeclaration constructor = member as ConstructorDeclaration;
     NodeList<ConstructorInitializer> initializers = constructor.initializers;
     expect(initializers, hasLength(3));
     ConstructorInitializer initializer = initializers[1];
-    expect(initializer, new isInstanceOf<AssertInitializer>());
+    expect(initializer, new TypeMatcher<AssertInitializer>());
     AssertInitializer assertInitializer = initializer;
     expect(assertInitializer.condition, isNotNull);
     expect(assertInitializer.message, isNull);
@@ -1573,7 +1582,7 @@ void Function<A>(core.List<core.int> x) m() => null;
     createParser('external const factory C();');
     ClassMember member = parser.parseClassMember('C');
     expectNotNullIfNoErrors(member);
-    listener.assertNoErrors();
+    assertNoErrors();
   }
 
   void test_parseConstructor_factory_named() {
@@ -1594,7 +1603,7 @@ void Function<A>(core.List<core.int> x) m() => null;
     expect(constructor.separator, isNull);
     expect(constructor.initializers, isEmpty);
     expect(constructor.redirectedConstructor, isNull);
-    expect(constructor.body, new isInstanceOf<ExpressionFunctionBody>());
+    expect(constructor.body, new TypeMatcher<ExpressionFunctionBody>());
   }
 
   void test_parseConstructor_initializers_field() {
@@ -1602,7 +1611,7 @@ void Function<A>(core.List<core.int> x) m() => null;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<ConstructorDeclaration>());
+    expect(member, new TypeMatcher<ConstructorDeclaration>());
     ConstructorDeclaration constructor = member as ConstructorDeclaration;
     NodeList<ConstructorInitializer> initializers = constructor.initializers;
     expect(initializers, hasLength(2));
@@ -1642,7 +1651,7 @@ void Function<A>(core.List<core.int> x) m() => null;
     expect(constructor.separator, isNull);
     expect(constructor.initializers, isEmpty);
     expect(constructor.redirectedConstructor, isNull);
-    expect(constructor.body, new isInstanceOf<EmptyFunctionBody>());
+    expect(constructor.body, new TypeMatcher<EmptyFunctionBody>());
   }
 
   void test_parseConstructor_unnamed() {
@@ -1662,7 +1671,7 @@ void Function<A>(core.List<core.int> x) m() => null;
     expect(constructor.separator, isNull);
     expect(constructor.initializers, isEmpty);
     expect(constructor.redirectedConstructor, isNull);
-    expect(constructor.body, new isInstanceOf<EmptyFunctionBody>());
+    expect(constructor.body, new TypeMatcher<EmptyFunctionBody>());
   }
 
   void test_parseConstructor_with_pseudo_function_literal() {
@@ -1672,7 +1681,7 @@ void Function<A>(core.List<core.int> x) m() => null;
     ClassMember member = parser.parseClassMember('C');
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<ConstructorDeclaration>());
+    expect(member, new TypeMatcher<ConstructorDeclaration>());
     ConstructorDeclaration constructor = member as ConstructorDeclaration;
     NodeList<ConstructorInitializer> initializers = constructor.initializers;
     expect(initializers, hasLength(1));
@@ -1877,18 +1886,17 @@ class ComplexParserTest extends ParserTestCase with ComplexParserTestMixin {
   void test_logicalAndExpression_precedence_nullableType() {
     enableNnbd = true;
     BinaryExpression expression = parseExpression("x is C? && y is D");
-    expect(expression.leftOperand, new isInstanceOf<IsExpression>());
-    expect(expression.rightOperand, new isInstanceOf<IsExpression>());
+    expect(expression.leftOperand, new TypeMatcher<IsExpression>());
+    expect(expression.rightOperand, new TypeMatcher<IsExpression>());
   }
 
   void test_logicalOrExpression_precedence_nullableType() {
     enableNnbd = true;
     BinaryExpression expression = parseExpression("a is X? || (b ? c : d)");
-    expect(expression.leftOperand, new isInstanceOf<IsExpression>());
-    expect(
-        expression.rightOperand, new isInstanceOf<ParenthesizedExpression>());
+    expect(expression.leftOperand, new TypeMatcher<IsExpression>());
+    expect(expression.rightOperand, new TypeMatcher<ParenthesizedExpression>());
     expect((expression.rightOperand as ParenthesizedExpression).expression,
-        new isInstanceOf<ConditionalExpression>());
+        new TypeMatcher<ConditionalExpression>());
   }
 }
 
@@ -2131,27 +2139,27 @@ abstract class ComplexParserTestMixin implements AbstractParserTestCase {
   void test_conditionalExpression_precedence_nullableType_as() {
     Expression expression = parseExpression('x as String ? (x + y) : z');
     expect(expression, isNotNull);
-    expect(expression, new isInstanceOf<ConditionalExpression>());
+    expect(expression, new TypeMatcher<ConditionalExpression>());
     ConditionalExpression conditional = expression;
     Expression condition = conditional.condition;
-    expect(condition, new isInstanceOf<AsExpression>());
+    expect(condition, new TypeMatcher<AsExpression>());
     Expression thenExpression = conditional.thenExpression;
-    expect(thenExpression, new isInstanceOf<ParenthesizedExpression>());
+    expect(thenExpression, new TypeMatcher<ParenthesizedExpression>());
     Expression elseExpression = conditional.elseExpression;
-    expect(elseExpression, new isInstanceOf<SimpleIdentifier>());
+    expect(elseExpression, new TypeMatcher<SimpleIdentifier>());
   }
 
   void test_conditionalExpression_precedence_nullableType_is() {
     Expression expression = parseExpression('x is String ? (x + y) : z');
     expect(expression, isNotNull);
-    expect(expression, new isInstanceOf<ConditionalExpression>());
+    expect(expression, new TypeMatcher<ConditionalExpression>());
     ConditionalExpression conditional = expression;
     Expression condition = conditional.condition;
-    expect(condition, new isInstanceOf<IsExpression>());
+    expect(condition, new TypeMatcher<IsExpression>());
     Expression thenExpression = conditional.thenExpression;
-    expect(thenExpression, new isInstanceOf<ParenthesizedExpression>());
+    expect(thenExpression, new TypeMatcher<ParenthesizedExpression>());
     Expression elseExpression = conditional.elseExpression;
-    expect(elseExpression, new isInstanceOf<SimpleIdentifier>());
+    expect(elseExpression, new TypeMatcher<SimpleIdentifier>());
   }
 
   void test_constructor_initializer_withParenthesizedExpression() {
@@ -2211,34 +2219,34 @@ class C {
 
   void test_logicalAndExpression() {
     BinaryExpression expression = parseExpression("x && y && z");
-    expect(expression.leftOperand, new isInstanceOf<BinaryExpression>());
+    expect(expression.leftOperand, new TypeMatcher<BinaryExpression>());
   }
 
   void test_logicalAndExpression_precedence_bitwiseOr_left() {
     BinaryExpression expression = parseExpression("x | y < z");
-    expect(expression.leftOperand, new isInstanceOf<BinaryExpression>());
+    expect(expression.leftOperand, new TypeMatcher<BinaryExpression>());
   }
 
   void test_logicalAndExpression_precedence_bitwiseOr_right() {
     BinaryExpression expression = parseExpression("x < y | z");
-    expect(expression.rightOperand, new isInstanceOf<BinaryExpression>());
+    expect(expression.rightOperand, new TypeMatcher<BinaryExpression>());
   }
 
   void test_logicalAndExpressionStatement() {
     // Assert that `<` and `>` are not interpreted as type arguments.
     ExpressionStatement statement = parseStatement("C<T && T>U;");
     BinaryExpression expression = statement.expression;
-    expect(expression.leftOperand, new isInstanceOf<BinaryExpression>());
+    expect(expression.leftOperand, new TypeMatcher<BinaryExpression>());
   }
 
   void test_logicalOrExpression() {
     BinaryExpression expression = parseExpression("x || y || z");
-    expect(expression.leftOperand, new isInstanceOf<BinaryExpression>());
+    expect(expression.leftOperand, new TypeMatcher<BinaryExpression>());
   }
 
   void test_logicalOrExpression_precedence_logicalAnd_left() {
     BinaryExpression expression = parseExpression("x && y || z");
-    expect(expression.leftOperand, new isInstanceOf<BinaryExpression>());
+    expect(expression.leftOperand, new TypeMatcher<BinaryExpression>());
   }
 
   void test_logicalOrExpression_precedence_logicalAnd_right() {
@@ -2391,36 +2399,6 @@ void f() {
  */
 @reflectiveTest
 class ErrorParserTest extends ParserTestCase with ErrorParserTestMixin {
-  @failingTest
-  @override
-  void test_expectedListOrMapLiteral() {
-    super.test_expectedListOrMapLiteral();
-  }
-
-  @failingTest
-  @override
-  void test_invalidCommentReference__new_nonIdentifier() {
-    super.test_invalidCommentReference__new_nonIdentifier();
-  }
-
-  @failingTest
-  @override
-  void test_invalidCommentReference__new_tooMuch() {
-    super.test_invalidCommentReference__new_tooMuch();
-  }
-
-  @failingTest
-  @override
-  void test_invalidCommentReference__nonNew_nonIdentifier() {
-    super.test_invalidCommentReference__nonNew_nonIdentifier();
-  }
-
-  @failingTest
-  @override
-  void test_invalidCommentReference__nonNew_tooMuch() {
-    super.test_invalidCommentReference__nonNew_tooMuch();
-  }
-
   void test_missingIdentifier_number() {
     createParser('1');
     SimpleIdentifier expression = parser.parseSimpleIdentifier();
@@ -2545,13 +2523,13 @@ abstract class ErrorParserTestMixin implements AbstractParserTestCase {
   void test_breakOutsideOfLoop_breakInDoStatement() {
     DoStatement statement = parseStatement('do {break;} while (x);');
     expectNotNullIfNoErrors(statement);
-    listener.assertNoErrors();
+    assertNoErrors();
   }
 
   void test_breakOutsideOfLoop_breakInForStatement() {
     Statement statement = parseStatement('for (; x;) {break;}');
     expectNotNullIfNoErrors(statement);
-    listener.assertNoErrors();
+    assertNoErrors();
   }
 
   void test_breakOutsideOfLoop_breakInIfStatement() {
@@ -2564,13 +2542,13 @@ abstract class ErrorParserTestMixin implements AbstractParserTestCase {
   void test_breakOutsideOfLoop_breakInSwitchStatement() {
     SwitchStatement statement = parseStatement('switch (x) {case 1: break;}');
     expectNotNullIfNoErrors(statement);
-    listener.assertNoErrors();
+    assertNoErrors();
   }
 
   void test_breakOutsideOfLoop_breakInWhileStatement() {
     WhileStatement statement = parseStatement('while (x) {break;}');
     expectNotNullIfNoErrors(statement);
-    listener.assertNoErrors();
+    assertNoErrors();
   }
 
   void test_breakOutsideOfLoop_functionExpression_inALoop() {
@@ -2601,11 +2579,16 @@ abstract class ErrorParserTestMixin implements AbstractParserTestCase {
   void test_classTypeAlias_abstractAfterEq() {
     // This syntax has been removed from the language in favor of
     // "abstract class A = B with C;" (issue 18098).
-    createParser('class A = abstract B with C;');
+    createParser('class A = abstract B with C;', expectedEndOffset: 21);
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expectNotNullIfNoErrors(member);
     listener.assertErrors(usingFastaParser
-        ? [expectedError(ParserErrorCode.EXPECTED_TYPE_NAME, 10, 8)]
+        ? [
+            expectedError(
+                CompileTimeErrorCode.BUILT_IN_IDENTIFIER_AS_TYPE, 10, 8),
+            expectedError(ParserErrorCode.EXPECTED_TOKEN, 19, 1),
+            expectedError(ParserErrorCode.EXPECTED_TOKEN, 19, 1)
+          ]
         : [
             expectedError(ParserErrorCode.EXPECTED_TOKEN, 0, 0),
             expectedError(ParserErrorCode.EXPECTED_TOKEN, 0, 0)
@@ -2698,6 +2681,42 @@ abstract class ErrorParserTestMixin implements AbstractParserTestCase {
           ]);
   }
 
+  void test_constructorPartial2() {
+    createParser('class C { C<@Foo }');
+    parser.parseCompilationUnit2();
+    listener.assertErrors(usingFastaParser
+        ? [
+            expectedError(ParserErrorCode.MISSING_IDENTIFIER, 17, 1),
+            expectedError(ParserErrorCode.EXPECTED_TOKEN, 17, 1),
+            expectedError(ParserErrorCode.MISSING_METHOD_PARAMETERS, 10, 1),
+            expectedError(ParserErrorCode.MISSING_FUNCTION_BODY, 17, 1)
+          ]
+        : [
+            expectedError(ParserErrorCode.EXPECTED_TYPE_NAME, 12, 1),
+            expectedError(ParserErrorCode.EXPECTED_TOKEN, 12, 1),
+            expectedError(ParserErrorCode.EXPECTED_CLASS_MEMBER, 12, 1),
+            expectedError(ParserErrorCode.EXPECTED_CLASS_MEMBER, 17, 1)
+          ]);
+  }
+
+  void test_constructorPartial3() {
+    createParser('class C { C<@Foo @Bar() }');
+    parser.parseCompilationUnit2();
+    listener.assertErrors(usingFastaParser
+        ? [
+            expectedError(ParserErrorCode.MISSING_IDENTIFIER, 24, 1),
+            expectedError(ParserErrorCode.EXPECTED_TOKEN, 24, 1),
+            expectedError(ParserErrorCode.MISSING_METHOD_PARAMETERS, 10, 1),
+            expectedError(ParserErrorCode.MISSING_FUNCTION_BODY, 24, 1)
+          ]
+        : [
+            expectedError(ParserErrorCode.EXPECTED_TYPE_NAME, 12, 1),
+            expectedError(ParserErrorCode.EXPECTED_TOKEN, 12, 1),
+            expectedError(ParserErrorCode.EXPECTED_CLASS_MEMBER, 12, 1),
+            expectedError(ParserErrorCode.EXPECTED_CLASS_MEMBER, 24, 1)
+          ]);
+  }
+
   void test_constructorWithReturnType() {
     createParser('C C() {}');
     ClassMember member = parser.parseClassMember('C');
@@ -2730,13 +2749,13 @@ abstract class ErrorParserTestMixin implements AbstractParserTestCase {
   void test_continueOutsideOfLoop_continueInDoStatement() {
     DoStatement statement = parseStatement('do {continue;} while (x);');
     expectNotNullIfNoErrors(statement);
-    listener.assertNoErrors();
+    assertNoErrors();
   }
 
   void test_continueOutsideOfLoop_continueInForStatement() {
     Statement statement = parseStatement('for (; x;) {continue;}');
     expectNotNullIfNoErrors(statement);
-    listener.assertNoErrors();
+    assertNoErrors();
   }
 
   void test_continueOutsideOfLoop_continueInIfStatement() {
@@ -2750,13 +2769,13 @@ abstract class ErrorParserTestMixin implements AbstractParserTestCase {
     SwitchStatement statement =
         parseStatement('switch (x) {case 1: continue a;}');
     expectNotNullIfNoErrors(statement);
-    listener.assertNoErrors();
+    assertNoErrors();
   }
 
   void test_continueOutsideOfLoop_continueInWhileStatement() {
     WhileStatement statement = parseStatement('while (x) {continue;}');
     expectNotNullIfNoErrors(statement);
-    listener.assertNoErrors();
+    assertNoErrors();
   }
 
   void test_continueOutsideOfLoop_functionExpression_inALoop() {
@@ -2781,14 +2800,14 @@ abstract class ErrorParserTestMixin implements AbstractParserTestCase {
     SwitchStatement statement =
         parseStatement('switch (x) {case 1: continue a;}');
     expectNotNullIfNoErrors(statement);
-    listener.assertNoErrors();
+    assertNoErrors();
   }
 
   void test_continueWithoutLabelInCase_noError_switchInLoop() {
     WhileStatement statement =
         parseStatement('while (a) { switch (b) {default: continue;}}');
     expectNotNullIfNoErrors(statement);
-    listener.assertNoErrors();
+    assertNoErrors();
   }
 
   void test_covariantAfterVar() {
@@ -3050,11 +3069,11 @@ class Foo {
             ? [
                 expectedError(
                     ParserErrorCode.MISSING_CONST_FINAL_VAR_OR_TYPE, 9, 5),
-                expectedError(ParserErrorCode.EXPECTED_TOKEN, 15, 1),
+                expectedError(ParserErrorCode.EXPECTED_TOKEN, 9, 5),
                 expectedError(ParserErrorCode.EXPECTED_CLASS_MEMBER, 15, 1),
                 expectedError(
                     ParserErrorCode.MISSING_CONST_FINAL_VAR_OR_TYPE, 17, 5),
-                expectedError(ParserErrorCode.EXPECTED_TOKEN, 23, 1)
+                expectedError(ParserErrorCode.EXPECTED_TOKEN, 17, 5)
               ]
             : [
                 expectedError(ParserErrorCode.UNEXPECTED_TOKEN, 15, 1),
@@ -3072,7 +3091,7 @@ class Foo {
                 expectedError(ParserErrorCode.EXPECTED_CLASS_MEMBER, 10, 1),
                 expectedError(
                     ParserErrorCode.MISSING_CONST_FINAL_VAR_OR_TYPE, 12, 5),
-                expectedError(ParserErrorCode.EXPECTED_TOKEN, 18, 1)
+                expectedError(ParserErrorCode.EXPECTED_TOKEN, 12, 5)
               ]
             : [
                 expectedError(ParserErrorCode.EXPECTED_CLASS_MEMBER, 10, 1),
@@ -3112,11 +3131,11 @@ class Foo {
             ? [
                 expectedError(
                     ParserErrorCode.MISSING_CONST_FINAL_VAR_OR_TYPE, 0, 5),
-                expectedError(ParserErrorCode.EXPECTED_TOKEN, 6, 1),
+                expectedError(ParserErrorCode.EXPECTED_TOKEN, 0, 5),
                 expectedError(ParserErrorCode.EXPECTED_EXECUTABLE, 6, 1),
                 expectedError(
                     ParserErrorCode.MISSING_CONST_FINAL_VAR_OR_TYPE, 8, 5),
-                expectedError(ParserErrorCode.EXPECTED_TOKEN, 13, 0),
+                expectedError(ParserErrorCode.EXPECTED_TOKEN, 8, 5),
               ]
             : [
                 expectedError(ParserErrorCode.EXPECTED_EXECUTABLE, 6, 1),
@@ -3153,7 +3172,7 @@ class Foo {
                 expectedError(ParserErrorCode.EXPECTED_EXECUTABLE, 0, 1),
                 expectedError(
                     ParserErrorCode.MISSING_CONST_FINAL_VAR_OR_TYPE, 2, 5),
-                expectedError(ParserErrorCode.EXPECTED_TOKEN, 7, 0),
+                expectedError(ParserErrorCode.EXPECTED_TOKEN, 2, 5),
               ]
             : [
                 expectedError(ParserErrorCode.EXPECTED_EXECUTABLE, 0, 1),
@@ -3168,16 +3187,16 @@ class Foo {
             ? [
                 expectedError(
                     ParserErrorCode.MISSING_CONST_FINAL_VAR_OR_TYPE, 0, 1),
-                expectedError(ParserErrorCode.EXPECTED_TOKEN, 1, 0)
+                expectedError(ParserErrorCode.EXPECTED_TOKEN, 0, 1)
               ]
             : [expectedError(ParserErrorCode.EXPECTED_EXECUTABLE, 0, 1)]);
   }
 
   void test_expectedInterpolationIdentifier() {
     StringLiteral literal = parseExpression("'\$x\$'", errors: [
-      fe.Scanner.useFasta
-          ? expectedError(ScannerErrorCode.MISSING_IDENTIFIER, 4, 1)
-          : expectedError(ParserErrorCode.MISSING_IDENTIFIER, 3, 1)
+      usingFastaParser
+          ? expectedError(ScannerErrorCode.UNEXPECTED_DOLLAR_IN_STRING, 4, 1)
+          : expectedError(ScannerErrorCode.MISSING_IDENTIFIER, 4, 1)
     ]);
     expectNotNullIfNoErrors(literal);
   }
@@ -3186,16 +3205,15 @@ class Foo {
     // The scanner inserts an empty string token between the two $'s; we need to
     // make sure that the MISSING_IDENTIFIER error that is generated has a
     // nonzero width so that it will show up in the editor UI.
-    StringLiteral literal = parseExpression("'\$\$foo'",
-//        codes: fe.Scanner.useFasta
-//            ? [ScannerErrorCode.MISSING_IDENTIFIER]
-//            : [ParserErrorCode.MISSING_IDENTIFIER],
-        errors: fe.Scanner.useFasta
-            ? [expectedError(ScannerErrorCode.MISSING_IDENTIFIER, 2, 1)]
-            : [expectedError(ParserErrorCode.MISSING_IDENTIFIER, 2, 1)]);
+    StringLiteral literal = parseExpression("'\$\$foo'", errors: [
+      usingFastaParser
+          ? expectedError(ScannerErrorCode.UNEXPECTED_DOLLAR_IN_STRING, 2, 1)
+          : expectedError(ScannerErrorCode.MISSING_IDENTIFIER, 2, 1)
+    ]);
     expectNotNullIfNoErrors(literal);
   }
 
+  @failingTest
   void test_expectedListOrMapLiteral() {
     // It isn't clear that this test can ever pass. The parser is currently
     // create a synthetic list literal in this case, but isSynthetic() isn't
@@ -3796,7 +3814,7 @@ class Wrong<T> {
       // TODO(danrubel): Investigate better recovery.
       ExpressionStatement statement = result;
       listener
-          .assertErrors([expectedError(ParserErrorCode.EXPECTED_TOKEN, 4, 1)]);
+          .assertErrors([expectedError(ParserErrorCode.EXPECTED_TOKEN, 0, 3)]);
       expect(statement.expression.toSource(), 'get');
     } else {
       FunctionDeclarationStatement statement = result;
@@ -3811,7 +3829,7 @@ class Wrong<T> {
     // Fasta considers `get` to be an identifier in this situation.
     parseStatement("int get x { return _x; }", expectedEndOffset: 8);
     listener.assertErrors(usingFastaParser
-        ? [expectedError(ParserErrorCode.EXPECTED_TOKEN, 8, 1)]
+        ? [expectedError(ParserErrorCode.EXPECTED_TOKEN, 4, 3)]
         : [expectedError(ParserErrorCode.GETTER_IN_FUNCTION, 4, 3)]);
   }
 
@@ -3819,7 +3837,7 @@ class Wrong<T> {
     // Fasta considers `get` to be an identifier in this situation.
     parseStatement("get x => _x;", expectedEndOffset: 4);
     listener.assertErrors(usingFastaParser
-        ? [expectedError(ParserErrorCode.EXPECTED_TOKEN, 4, 1)]
+        ? [expectedError(ParserErrorCode.EXPECTED_TOKEN, 0, 3)]
         : [expectedError(ParserErrorCode.GETTER_IN_FUNCTION, 0, 3)]);
   }
 
@@ -3827,7 +3845,7 @@ class Wrong<T> {
     // Fasta considers `get` to be an identifier in this situation.
     parseStatement("int get x => _x;", expectedEndOffset: 8);
     listener.assertErrors(usingFastaParser
-        ? [expectedError(ParserErrorCode.EXPECTED_TOKEN, 8, 1)]
+        ? [expectedError(ParserErrorCode.EXPECTED_TOKEN, 4, 3)]
         : [expectedError(ParserErrorCode.GETTER_IN_FUNCTION, 4, 3)]);
   }
 
@@ -3932,7 +3950,7 @@ class Wrong<T> {
     expectNotNullIfNoErrors(statement);
     listener.assertErrors(usingFastaParser
         ? [
-            expectedError(ParserErrorCode.EXPECTED_TOKEN, 8, 1),
+            expectedError(ParserErrorCode.EXPECTED_TOKEN, 7, 1),
             expectedError(ParserErrorCode.MISSING_IDENTIFIER, 8, 1),
             expectedError(ParserErrorCode.EXPECTED_TOKEN, 8, 1)
           ]
@@ -3948,9 +3966,9 @@ class Wrong<T> {
     expectNotNullIfNoErrors(statement);
     listener.assertErrors(usingFastaParser
         ? [
-            expectedError(ParserErrorCode.EXPECTED_TOKEN, 8, 1),
+            expectedError(ParserErrorCode.EXPECTED_TOKEN, 7, 1),
             expectedError(ParserErrorCode.MISSING_IDENTIFIER, 9, 1),
-            expectedError(ParserErrorCode.EXPECTED_TOKEN, 10, 1)
+            expectedError(ParserErrorCode.EXPECTED_TOKEN, 9, 1)
           ]
         : [
             expectedError(ParserErrorCode.EXPECTED_TOKEN, 5, 1),
@@ -3974,11 +3992,12 @@ class Wrong<T> {
   }
 
   void test_invalidCodePoint() {
-    StringLiteral literal = parseExpression("'\\u{110000}'",
-        errors: [expectedError(ParserErrorCode.INVALID_CODE_POINT, 0, 10)]);
+    StringLiteral literal = parseExpression("'begin \\u{110000}'",
+        errors: [expectedError(ParserErrorCode.INVALID_CODE_POINT, 7, 9)]);
     expectNotNullIfNoErrors(literal);
   }
 
+  @failingTest
   void test_invalidCommentReference__new_nonIdentifier() {
     // This test fails because the method parseCommentReference returns null.
     createParser('');
@@ -3988,6 +4007,7 @@ class Wrong<T> {
         [expectedError(ParserErrorCode.INVALID_COMMENT_REFERENCE, 0, 6)]);
   }
 
+  @failingTest
   void test_invalidCommentReference__new_tooMuch() {
     createParser('');
     CommentReference reference = parser.parseCommentReference('new a.b.c.d', 0);
@@ -3996,6 +4016,7 @@ class Wrong<T> {
         [expectedError(ParserErrorCode.INVALID_COMMENT_REFERENCE, 0, 11)]);
   }
 
+  @failingTest
   void test_invalidCommentReference__nonNew_nonIdentifier() {
     // This test fails because the method parseCommentReference returns null.
     createParser('');
@@ -4005,6 +4026,7 @@ class Wrong<T> {
         [expectedError(ParserErrorCode.INVALID_COMMENT_REFERENCE, 0, 2)]);
   }
 
+  @failingTest
   void test_invalidCommentReference__nonNew_tooMuch() {
     createParser('');
     CommentReference reference = parser.parseCommentReference('a.b.c.d', 0);
@@ -4037,8 +4059,8 @@ class Wrong<T> {
   }
 
   void test_invalidHexEscape_invalidDigit() {
-    StringLiteral literal = parseExpression("'\\x0 a'",
-        errors: [expectedError(ParserErrorCode.INVALID_HEX_ESCAPE, 1, 3)]);
+    StringLiteral literal = parseExpression("'not \\x0 a'",
+        errors: [expectedError(ParserErrorCode.INVALID_HEX_ESCAPE, 5, 3)]);
     expectNotNullIfNoErrors(literal);
   }
 
@@ -4050,9 +4072,9 @@ class Wrong<T> {
 
   void test_invalidInterpolationIdentifier_startWithDigit() {
     StringLiteral literal = parseExpression("'\$1'", errors: [
-      fe.Scanner.useFasta
-          ? expectedError(ScannerErrorCode.MISSING_IDENTIFIER, 2, 1)
-          : expectedError(ParserErrorCode.MISSING_IDENTIFIER, 2, 1)
+      usingFastaParser
+          ? expectedError(ScannerErrorCode.UNEXPECTED_DOLLAR_IN_STRING, 2, 1)
+          : expectedError(ScannerErrorCode.MISSING_IDENTIFIER, 2, 1)
     ]);
     expectNotNullIfNoErrors(literal);
   }
@@ -4104,10 +4126,10 @@ class Wrong<T> {
   }
 
   void test_invalidOperatorAfterSuper_primaryExpression() {
-    Expression expression = parsePrimaryExpression('super?.v');
+    Expression expression = parseExpression('super?.v', errors: [
+      expectedError(ParserErrorCode.INVALID_OPERATOR_FOR_SUPER, 5, 2)
+    ]);
     expectNotNullIfNoErrors(expression);
-    listener.assertErrors(
-        [expectedError(ParserErrorCode.INVALID_OPERATOR_FOR_SUPER, 5, 2)]);
   }
 
   void test_invalidOperatorForSuper() {
@@ -4121,19 +4143,27 @@ class Wrong<T> {
     ]);
   }
 
+  void test_invalidPropertyAccess_this() {
+    parseExpression('x.this',
+        errors: [expectedError(ParserErrorCode.MISSING_IDENTIFIER, 2, 4)]);
+  }
+
   void test_invalidStarAfterAsync() {
-    createParser('async* => 0;');
-    FunctionBody functionBody = parser.parseFunctionBody(false, null, false);
-    expectNotNullIfNoErrors(functionBody);
-    listener.assertErrors(
-        [expectedError(ParserErrorCode.INVALID_STAR_AFTER_ASYNC, 5, 1)]);
+    createParser('foo() async* => 0;');
+    CompilationUnit unit = parser.parseCompilationUnit2();
+    expectNotNullIfNoErrors(unit);
+    listener.assertErrors(usingFastaParser
+        ? [expectedError(CompileTimeErrorCode.RETURN_IN_GENERATOR, 13, 2)]
+        : [expectedError(ParserErrorCode.INVALID_STAR_AFTER_ASYNC, 11, 1)]);
   }
 
   void test_invalidSync() {
-    createParser('sync* => 0;');
-    FunctionBody functionBody = parser.parseFunctionBody(false, null, false);
-    expectNotNullIfNoErrors(functionBody);
-    listener.assertErrors([expectedError(ParserErrorCode.INVALID_SYNC, 0, 4)]);
+    createParser('foo() sync* => 0;');
+    CompilationUnit unit = parser.parseCompilationUnit2();
+    expectNotNullIfNoErrors(unit);
+    listener.assertErrors(usingFastaParser
+        ? [expectedError(CompileTimeErrorCode.RETURN_IN_GENERATOR, 12, 2)]
+        : [expectedError(ParserErrorCode.INVALID_SYNC, 0, 4)]);
   }
 
   void test_invalidTopLevelSetter() {
@@ -4163,17 +4193,42 @@ class Wrong<T> {
     parseCompilationUnit("typedef var Function(var arg);",
         errors: usingFastaParser
             ? [
-                expectedError(ParserErrorCode.EXPECTED_TYPE_NAME, 8, 3),
-                expectedError(ParserErrorCode.VAR_AND_TYPE, 21, 3),
-                expectedError(ParserErrorCode.MISSING_IDENTIFIER, 29, 1),
-                expectedError(
-                    ParserErrorCode.MISSING_TYPEDEF_PARAMETERS, 29, 1),
+                expectedError(ParserErrorCode.MISSING_IDENTIFIER, 8, 3),
+                expectedError(ParserErrorCode.MISSING_TYPEDEF_PARAMETERS, 8, 3),
+                expectedError(ParserErrorCode.EXPECTED_TOKEN, 8, 3),
+                expectedError(ParserErrorCode.VAR_RETURN_TYPE, 8, 3),
+                expectedError(ParserErrorCode.MISSING_FUNCTION_BODY, 29, 1),
               ]
             : [
                 expectedError(ParserErrorCode.MISSING_IDENTIFIER, 8, 3),
                 expectedError(ParserErrorCode.MISSING_TYPEDEF_PARAMETERS, 8, 3),
                 expectedError(ParserErrorCode.EXPECTED_EXECUTABLE, 29, 2),
                 expectedError(ParserErrorCode.UNEXPECTED_TOKEN, 29, 2),
+              ]);
+  }
+
+  void test_invalidTypedef2() {
+    // https://github.com/dart-lang/sdk/issues/31171
+    parseCompilationUnit(
+        "typedef T = typedef F = Map<String, dynamic> Function();",
+        errors: usingFastaParser
+            ? [
+                expectedError(ParserErrorCode.EXPECTED_TYPE_NAME, 12, 7),
+                expectedError(ParserErrorCode.EXPECTED_TOKEN, 12, 7),
+                expectedError(
+                    ParserErrorCode.INVALID_GENERIC_FUNCTION_TYPE, 10, 1),
+              ]
+            : [
+                expectedError(ParserErrorCode.EXPECTED_TOKEN, 12, 7),
+                expectedError(
+                    ParserErrorCode.INVALID_GENERIC_FUNCTION_TYPE, 20, 1),
+                expectedError(
+                    ParserErrorCode.MISSING_CONST_FINAL_VAR_OR_TYPE, 20, 1),
+                expectedError(ParserErrorCode.EXPECTED_TOKEN, 36, 7),
+                expectedError(ParserErrorCode.EXPECTED_EXECUTABLE, 43, 1),
+                expectedError(ParserErrorCode.UNEXPECTED_TOKEN, 43, 1),
+                expectedError(ParserErrorCode.EXPECTED_EXECUTABLE, 55, 1),
+                expectedError(ParserErrorCode.UNEXPECTED_TOKEN, 55, 1),
               ]);
   }
 
@@ -4192,7 +4247,7 @@ class Wrong<T> {
   }
 
   void test_invalidUnicodeEscape_invalidDigit() {
-    Expression expression = parseStringLiteral("'\\u0 a'");
+    Expression expression = parseStringLiteral("'\\u0 and some more'");
     expectNotNullIfNoErrors(expression);
     listener.assertErrors(
         [expectedError(ParserErrorCode.INVALID_UNICODE_ESCAPE, 1, 3)]);
@@ -4215,10 +4270,12 @@ class Wrong<T> {
   void test_invalidUnicodeEscape_tooManyDigits_variable() {
     Expression expression = parseStringLiteral("'\\u{12345678}'");
     expectNotNullIfNoErrors(expression);
-    listener.assertErrors([
-      expectedError(ParserErrorCode.INVALID_UNICODE_ESCAPE, 1, 12),
-      expectedError(ParserErrorCode.INVALID_CODE_POINT, 1, 12)
-    ]);
+    listener.assertErrors(usingFastaParser
+        ? [expectedError(ParserErrorCode.INVALID_CODE_POINT, 1, 9)]
+        : [
+            expectedError(ParserErrorCode.INVALID_UNICODE_ESCAPE, 1, 12),
+            expectedError(ParserErrorCode.INVALID_CODE_POINT, 1, 12)
+          ]);
   }
 
   void test_libraryDirectiveNotFirst() {
@@ -4275,7 +4332,7 @@ class Wrong<T> {
   void test_localFunctionDeclarationModifier_factory() {
     parseCompilationUnit("class C { m() { factory f() {} } }",
         errors: usingFastaParser
-            ? [expectedError(ParserErrorCode.EXPECTED_TOKEN, 24, 1)]
+            ? [expectedError(ParserErrorCode.EXPECTED_TOKEN, 16, 7)]
             : [
                 expectedError(
                     ParserErrorCode.LOCAL_FUNCTION_DECLARATION_MODIFIER, 16, 7)
@@ -4317,7 +4374,7 @@ class Wrong<T> {
         HintCode.GENERIC_METHOD_COMMENT
       ]);
     }
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.typeParameters.toString(), '<E, hello>',
         reason: 'parser recovers what it can');
@@ -4339,7 +4396,7 @@ class Wrong<T> {
             expectedError(ParserErrorCode.EXPECTED_TOKEN, 0, 0), // close paren
             expectedError(ParserErrorCode.MISSING_FUNCTION_BODY, 0, 0)
           ]);
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(
         method.parameters.toString(), usingFastaParser ? '(E)' : '(E, extends)',
@@ -4379,7 +4436,7 @@ class Wrong<T> {
         HintCode.GENERIC_METHOD_COMMENT
       ]);
     }
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.parameters.toString(), '(E extends, extends)',
         reason: 'parser recovers what it can');
@@ -4394,9 +4451,7 @@ class Wrong<T> {
     ClassMember member = parser.parseClassMember('C');
     expectNotNullIfNoErrors(member);
     listener.assertErrors(usingFastaParser
-        ? [
-            expectedError(ParserErrorCode.EXPECTED_TOKEN, 15, 1) /*>*/
-          ]
+        ? [expectedError(ParserErrorCode.UNEXPECTED_TOKEN, 15, 1)]
         : [
             expectedError(ParserErrorCode.EXPECTED_TOKEN, 0, 0) /*>*/,
             expectedError(ParserErrorCode.MISSING_IDENTIFIER, 0, 0),
@@ -4404,7 +4459,7 @@ class Wrong<T> {
             expectedError(ParserErrorCode.EXPECTED_TOKEN, 0, 0) /*)*/,
             expectedError(ParserErrorCode.MISSING_FUNCTION_BODY, 0, 0)
           ]);
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.typeParameters.toString(), '<E, hello>',
         reason: 'parser recovers what it can');
@@ -4438,7 +4493,7 @@ class Wrong<T> {
     BlockFunctionBody blockBody = declaration.functionExpression.body;
     ExpressionStatement statement = (blockBody).block.statements.first;
     Expression expression = (statement).expression;
-    expect(expression, new isInstanceOf<SuperExpression>());
+    expect(expression, new TypeMatcher<SuperExpression>());
     SuperExpression superExpression = expression;
     expect(superExpression.superKeyword, isNotNull);
   }
@@ -4465,18 +4520,15 @@ class Wrong<T> {
     // being reported in code that cannot actually be reached), but that hasn't
     // been proven yet.
     createParser('(int a, int b ;',
-        expectedEndOffset: 0 /* ErrorToken at end of token stream */);
+        expectedEndOffset: 14 /* ErrorToken at end of token stream */);
     FormalParameterList list = parser.parseFormalParameterList();
     expectNotNullIfNoErrors(list);
     if (usingFastaParser) {
-      listener
-          .assertErrors([expectedError(ParserErrorCode.EXPECTED_TOKEN, 14, 1)]);
-    } else if (fe.Scanner.useFasta) {
+      // Fasta scanner reports missing `)` error
+      listener.assertNoErrors();
+    } else {
       listener.errors
           .contains(expectedError(ParserErrorCode.EXPECTED_TOKEN, 14, 1));
-    } else {
-      listener
-          .assertErrorsWithCodes([ParserErrorCode.MISSING_CLOSING_PARENTHESIS]);
     }
   }
 
@@ -4540,7 +4592,7 @@ class Wrong<T> {
     // error message is in this case.
     parseStatement("int f { return x;}", expectedEndOffset: 6);
     listener
-        .assertErrors([expectedError(ParserErrorCode.EXPECTED_TOKEN, 6, 1)]);
+        .assertErrors([expectedError(ParserErrorCode.EXPECTED_TOKEN, 4, 1)]);
   }
 
   void test_missingFunctionParameters_local_nonVoid_expression() {
@@ -4556,7 +4608,7 @@ class Wrong<T> {
   void test_missingFunctionParameters_local_void_block() {
     parseStatement("void f { return x;}", expectedEndOffset: 7);
     listener.assertErrors(usingFastaParser
-        ? [expectedError(ParserErrorCode.EXPECTED_TOKEN, 7, 1)]
+        ? [expectedError(ParserErrorCode.EXPECTED_TOKEN, 5, 1)]
         : [expectedError(ParserErrorCode.MISSING_FUNCTION_PARAMETERS, 5, 1)]);
   }
 
@@ -4610,7 +4662,7 @@ class Wrong<T> {
         ? [
             expectedError(
                 ParserErrorCode.MISSING_CONST_FINAL_VAR_OR_TYPE, 0, 3),
-            expectedError(ParserErrorCode.EXPECTED_TOKEN, 3, 1)
+            expectedError(ParserErrorCode.EXPECTED_TOKEN, 0, 3)
           ]
         : [
             expectedError(ParserErrorCode.MISSING_IDENTIFIER, 3, 1),
@@ -4711,7 +4763,7 @@ class Wrong<T> {
       expectedError(ParserErrorCode.MISSING_METHOD_PARAMETERS,
           usingFastaParser ? 5 : 7, 1)
     ]);
-    expect(member, new isInstanceOf<MethodDeclaration>());
+    expect(member, new TypeMatcher<MethodDeclaration>());
     MethodDeclaration method = member;
     expect(method.parameters, hasLength(0));
   }
@@ -4836,26 +4888,18 @@ class Wrong<T> {
     createParser('(a, {b: 0)');
     FormalParameterList list = parser.parseFormalParameterList();
     expectNotNullIfNoErrors(list);
-    if (fe.Scanner.useFasta) {
-      listener
-          .assertErrors([expectedError(ScannerErrorCode.EXPECTED_TOKEN, 9, 1)]);
-    } else {
-      listener.assertErrorsWithCodes(
-          [ParserErrorCode.MISSING_TERMINATOR_FOR_PARAMETER_GROUP]);
-    }
+    listener.assertErrors(usingFastaParser
+        ? [expectedError(ParserErrorCode.EXPECTED_TOKEN, 4, 1)]
+        : [expectedError(ScannerErrorCode.EXPECTED_TOKEN, 9, 1)]);
   }
 
   void test_missingTerminatorForParameterGroup_optional() {
     createParser('(a, [b = 0)');
     FormalParameterList list = parser.parseFormalParameterList();
     expectNotNullIfNoErrors(list);
-    if (fe.Scanner.useFasta) {
-      listener.assertErrors(
-          [expectedError(ScannerErrorCode.EXPECTED_TOKEN, 10, 1)]);
-    } else {
-      listener.assertErrorsWithCodes(
-          [ParserErrorCode.MISSING_TERMINATOR_FOR_PARAMETER_GROUP]);
-    }
+    listener.assertErrors(usingFastaParser
+        ? [expectedError(ParserErrorCode.EXPECTED_TOKEN, 4, 1)]
+        : [expectedError(ScannerErrorCode.EXPECTED_TOKEN, 10, 1)]);
   }
 
   void test_missingTypedefParameters_nonVoid() {
@@ -4976,14 +5020,14 @@ class Wrong<T> {
       expression = parser.parsePrimaryExpression();
       listener.assertErrors(
           [expectedError(ParserErrorCode.NAMED_FUNCTION_EXPRESSION, 0, 1)]);
-      expect(expression, new isInstanceOf<FunctionExpression>());
+      expect(expression, new TypeMatcher<FunctionExpression>());
     } else {
       expression = parsePrimaryExpression('f() {}');
       expectNotNullIfNoErrors(expression);
       // Should generate an error.
       //listener.assertErrors(
       //    [expectedError(ParserErrorCode.NAMED_FUNCTION_EXPRESSION, 0, 1)]);
-      //expect(expression, new isInstanceOf<FunctionExpression>());
+      //expect(expression, new TypeMatcher<FunctionExpression>());
     }
   }
 
@@ -5322,28 +5366,18 @@ m() {
                 ParserErrorCode.EXPECTED_TOKEN,
                 ParserErrorCode.EXPECTED_TOKEN
               ]
-            : fe.Scanner.useFasta
-                ? [
-                    ScannerErrorCode.UNTERMINATED_STRING_LITERAL,
-                    ScannerErrorCode.EXPECTED_TOKEN,
-                    ScannerErrorCode.EXPECTED_TOKEN,
-                    ScannerErrorCode.EXPECTED_TOKEN,
-                    ScannerErrorCode.EXPECTED_TOKEN,
-                    ParserErrorCode.EXPECTED_TOKEN,
-                    ParserErrorCode.EXPECTED_TOKEN,
-                    ParserErrorCode.EXPECTED_TOKEN,
-                    ParserErrorCode.UNEXPECTED_TOKEN,
-                    ParserErrorCode.EXPECTED_EXECUTABLE,
-                  ]
-                : [
-                    ScannerErrorCode.UNTERMINATED_STRING_LITERAL,
-                    ParserErrorCode.EXPECTED_TOKEN,
-                    ParserErrorCode.EXPECTED_TOKEN,
-                    ParserErrorCode.EXPECTED_TOKEN,
-                    ParserErrorCode.EXPECTED_TOKEN,
-                    ParserErrorCode.EXPECTED_TOKEN,
-                    ParserErrorCode.EXPECTED_TOKEN,
-                  ]);
+            : [
+                ScannerErrorCode.UNTERMINATED_STRING_LITERAL,
+                ScannerErrorCode.EXPECTED_TOKEN,
+                ScannerErrorCode.EXPECTED_TOKEN,
+                ScannerErrorCode.EXPECTED_TOKEN,
+                ScannerErrorCode.EXPECTED_TOKEN,
+                ParserErrorCode.EXPECTED_TOKEN,
+                ParserErrorCode.EXPECTED_TOKEN,
+                ParserErrorCode.EXPECTED_TOKEN,
+                ParserErrorCode.UNEXPECTED_TOKEN,
+                ParserErrorCode.EXPECTED_EXECUTABLE,
+              ]);
   }
 
   void test_switchCase_missingColon() {
@@ -5416,8 +5450,8 @@ m() {
     createParser('get x => 7;');
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expectNotNullIfNoErrors(member);
-    listener.assertNoErrors();
-    expect(member, new isInstanceOf<FunctionDeclaration>());
+    assertNoErrors();
+    expect(member, new TypeMatcher<FunctionDeclaration>());
     FunctionDeclaration function = member;
     expect(function.functionExpression.parameters, isNull);
   }
@@ -5490,7 +5524,7 @@ main() {
 ''',
         errors: usingFastaParser
             ? [
-                expectedError(ParserErrorCode.EXPECTED_TOKEN, 51, 1),
+                expectedError(ParserErrorCode.EXPECTED_TOKEN, 49, 1),
                 expectedError(ParserErrorCode.EXPECTED_EXECUTABLE, 51, 1),
               ]
             : [
@@ -5501,13 +5535,9 @@ main() {
   }
 
   void test_typedef_namedFunction() {
-    // TODO(brianwilkerson) Improve recovery for this case.
     parseCompilationUnit('typedef void Function();',
         codes: usingFastaParser
-            ? [
-                ParserErrorCode.MISSING_IDENTIFIER,
-                ParserErrorCode.MISSING_TYPEDEF_PARAMETERS
-              ]
+            ? [ParserErrorCode.MISSING_IDENTIFIER]
             : [
                 ParserErrorCode.UNEXPECTED_TOKEN,
                 ParserErrorCode.MISSING_IDENTIFIER,
@@ -5555,7 +5585,7 @@ main() {
   void test_unexpectedToken_endOfFieldDeclarationStatement() {
     parseStatement("String s = (null));", expectedEndOffset: 17);
     listener.assertErrors(usingFastaParser
-        ? [expectedError(ParserErrorCode.EXPECTED_TOKEN, 17, 1)]
+        ? [expectedError(ParserErrorCode.EXPECTED_TOKEN, 16, 1)]
         : [expectedError(ParserErrorCode.UNEXPECTED_TOKEN, 17, 1)]);
   }
 
@@ -5603,10 +5633,8 @@ main() {
 void main() {
   var x = "''', errors: [
       expectedError(ScannerErrorCode.UNTERMINATED_STRING_LITERAL, 24, 1),
-      fe.Scanner.useFasta
-          ? expectedError(ScannerErrorCode.EXPECTED_TOKEN, 25, 1)
-          : expectedError(ParserErrorCode.EXPECTED_TOKEN, 12, 1),
-      expectedError(ParserErrorCode.EXPECTED_TOKEN, 25, 0)
+      expectedError(ScannerErrorCode.EXPECTED_TOKEN, 25, 1),
+      expectedError(ParserErrorCode.EXPECTED_TOKEN, 24, 1)
     ]);
   }
 
@@ -5633,15 +5661,11 @@ void main() {
 void main() {
   var x = """''', codes: [
       ScannerErrorCode.UNTERMINATED_STRING_LITERAL,
-      fe.Scanner.useFasta
-          ? ScannerErrorCode.EXPECTED_TOKEN
-          : ParserErrorCode.EXPECTED_TOKEN,
+      ScannerErrorCode.EXPECTED_TOKEN,
       ParserErrorCode.EXPECTED_TOKEN
     ], errors: [
       expectedError(ScannerErrorCode.UNTERMINATED_STRING_LITERAL, 24, 1),
-      fe.Scanner.useFasta
-          ? expectedError(ScannerErrorCode.EXPECTED_TOKEN, 30, 0)
-          : expectedError(ParserErrorCode.EXPECTED_TOKEN, 30, 0),
+      expectedError(ScannerErrorCode.EXPECTED_TOKEN, 30, 0),
       expectedError(ParserErrorCode.EXPECTED_TOKEN, 30, 0)
     ]);
   }
@@ -5655,15 +5679,11 @@ void main() {
 void main() {
   var x = """"''', codes: [
       ScannerErrorCode.UNTERMINATED_STRING_LITERAL,
-      fe.Scanner.useFasta
-          ? ScannerErrorCode.EXPECTED_TOKEN
-          : ParserErrorCode.EXPECTED_TOKEN,
+      ScannerErrorCode.EXPECTED_TOKEN,
       ParserErrorCode.EXPECTED_TOKEN
     ], errors: [
       expectedError(ScannerErrorCode.UNTERMINATED_STRING_LITERAL, 24, 1),
-      fe.Scanner.useFasta
-          ? expectedError(ScannerErrorCode.EXPECTED_TOKEN, 31, 0)
-          : expectedError(ParserErrorCode.EXPECTED_TOKEN, 31, 0),
+      expectedError(ScannerErrorCode.EXPECTED_TOKEN, 31, 0),
       expectedError(ParserErrorCode.EXPECTED_TOKEN, 31, 0)
     ]);
   }
@@ -5677,15 +5697,11 @@ void main() {
 void main() {
   var x = """""''', codes: [
       ScannerErrorCode.UNTERMINATED_STRING_LITERAL,
-      fe.Scanner.useFasta
-          ? ScannerErrorCode.EXPECTED_TOKEN
-          : ParserErrorCode.EXPECTED_TOKEN,
+      ScannerErrorCode.EXPECTED_TOKEN,
       ParserErrorCode.EXPECTED_TOKEN
     ], errors: [
       expectedError(ScannerErrorCode.UNTERMINATED_STRING_LITERAL, 28, 1),
-      fe.Scanner.useFasta
-          ? expectedError(ScannerErrorCode.EXPECTED_TOKEN, 32, 0)
-          : expectedError(ParserErrorCode.EXPECTED_TOKEN, 32, 0),
+      expectedError(ScannerErrorCode.EXPECTED_TOKEN, 32, 0),
       expectedError(ParserErrorCode.EXPECTED_TOKEN, 32, 0)
     ]);
   }
@@ -5794,21 +5810,21 @@ void main() {
     NormalFormalParameter parameter =
         parseFormalParameterList('(void a)').parameters[0];
     expectNotNullIfNoErrors(parameter);
-    listener.assertNoErrors();
+    assertNoErrors();
   }
 
   void test_voidVariable_parseClassMember_initializer() {
     createParser('void x = 0;');
     ClassMember member = parser.parseClassMember('C');
     expectNotNullIfNoErrors(member);
-    listener.assertNoErrors();
+    assertNoErrors();
   }
 
   void test_voidVariable_parseClassMember_noInitializer() {
     createParser('void x;');
     ClassMember member = parser.parseClassMember('C');
     expectNotNullIfNoErrors(member);
-    listener.assertNoErrors();
+    assertNoErrors();
   }
 
   void test_voidVariable_parseCompilationUnit_initializer() {
@@ -5823,24 +5839,24 @@ void main() {
     createParser('void a = 0;');
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expectNotNullIfNoErrors(member);
-    listener.assertNoErrors();
+    assertNoErrors();
   }
 
   void test_voidVariable_parseCompilationUnitMember_noInitializer() {
     createParser('void a;');
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expectNotNullIfNoErrors(member);
-    listener.assertNoErrors();
+    assertNoErrors();
   }
 
   void test_voidVariable_statement_initializer() {
     parseStatement("void x = 0;");
-    listener.assertNoErrors();
+    assertNoErrors();
   }
 
   void test_voidVariable_statement_noInitializer() {
     parseStatement("void x;");
-    listener.assertNoErrors();
+    assertNoErrors();
   }
 
   void test_withBeforeExtends() {
@@ -5874,7 +5890,7 @@ void main() {
     if (usingFastaParser) {
       listener.assertErrors([
         expectedError(ParserErrorCode.EXPECTED_TOKEN, 9, 1),
-        expectedError(ScannerErrorCode.EXPECTED_TOKEN, 10, 1)
+        expectedError(ParserErrorCode.EXPECTED_TOKEN, 4, 1)
       ]);
     } else {
       listener.assertErrors([
@@ -5893,7 +5909,7 @@ void main() {
     if (usingFastaParser) {
       listener.assertErrors([
         expectedError(ParserErrorCode.EXPECTED_TOKEN, 9, 1),
-        expectedError(ScannerErrorCode.EXPECTED_TOKEN, 10, 1)
+        expectedError(ParserErrorCode.EXPECTED_TOKEN, 4, 1)
       ]);
     } else {
       listener.assertErrors([
@@ -5936,7 +5952,7 @@ class ExpressionParserTest extends ParserTestCase
     var asExpression = expression as AsExpression;
     expect(asExpression.expression, isNotNull);
     expect(asExpression.asOperator, isNotNull);
-    expect(asExpression.type, new isInstanceOf<TypeName>());
+    expect(asExpression.type, new TypeMatcher<TypeName>());
   }
 
   void test_parseRelationalExpression_is_nullable() {
@@ -5982,7 +5998,7 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     expect(expression, isNotNull);
     assertNoErrors();
     var binaryExpression = expression as BinaryExpression;
-    expect(binaryExpression.leftOperand, new isInstanceOf<SuperExpression>());
+    expect(binaryExpression.leftOperand, new TypeMatcher<SuperExpression>());
     expect(binaryExpression.operator, isNotNull);
     expect(binaryExpression.operator.type, TokenType.PLUS);
     expect(binaryExpression.rightOperand, isNotNull);
@@ -6180,7 +6196,7 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     expect(expression, isNotNull);
     assertNoErrors();
     var indexExpression = expression as IndexExpression;
-    expect(indexExpression.target, new isInstanceOf<SuperExpression>());
+    expect(indexExpression.target, new TypeMatcher<SuperExpression>());
     expect(indexExpression.leftBracket, isNotNull);
     expect(indexExpression.index, isNotNull);
     expect(indexExpression.rightBracket, isNotNull);
@@ -6246,7 +6262,7 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     expect(expression, isNotNull);
     assertNoErrors();
     var binaryExpression = expression as BinaryExpression;
-    expect(binaryExpression.leftOperand, new isInstanceOf<SuperExpression>());
+    expect(binaryExpression.leftOperand, new TypeMatcher<SuperExpression>());
     expect(binaryExpression.operator, isNotNull);
     expect(binaryExpression.operator.type, TokenType.AMPERSAND);
     expect(binaryExpression.rightOperand, isNotNull);
@@ -6268,7 +6284,7 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     expect(expression, isNotNull);
     assertNoErrors();
     var binaryExpression = expression as BinaryExpression;
-    expect(binaryExpression.leftOperand, new isInstanceOf<SuperExpression>());
+    expect(binaryExpression.leftOperand, new TypeMatcher<SuperExpression>());
     expect(binaryExpression.operator, isNotNull);
     expect(binaryExpression.operator.type, TokenType.BAR);
     expect(binaryExpression.rightOperand, isNotNull);
@@ -6290,7 +6306,7 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     expect(expression, isNotNull);
     assertNoErrors();
     var binaryExpression = expression as BinaryExpression;
-    expect(binaryExpression.leftOperand, new isInstanceOf<SuperExpression>());
+    expect(binaryExpression.leftOperand, new TypeMatcher<SuperExpression>());
     expect(binaryExpression.operator, isNotNull);
     expect(binaryExpression.operator.type, TokenType.CARET);
     expect(binaryExpression.rightOperand, isNotNull);
@@ -6312,7 +6328,7 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     expect(expression, isNotNull);
     assertNoErrors();
     var section = expression as FunctionExpressionInvocation;
-    expect(section.function, new isInstanceOf<IndexExpression>());
+    expect(section.function, new TypeMatcher<IndexExpression>());
     expect(section.typeArguments, isNull);
     expect(section.argumentList, isNotNull);
   }
@@ -6327,7 +6343,7 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
       assertErrorsWithCodes([HintCode.GENERIC_METHOD_COMMENT]);
     }
     var section = expression as FunctionExpressionInvocation;
-    expect(section.function, new isInstanceOf<IndexExpression>());
+    expect(section.function, new TypeMatcher<IndexExpression>());
     expect(section.typeArguments, isNotNull);
     expect(section.argumentList, isNotNull);
   }
@@ -6337,7 +6353,7 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     expect(expression, isNotNull);
     assertNoErrors();
     var section = expression as FunctionExpressionInvocation;
-    expect(section.function, new isInstanceOf<IndexExpression>());
+    expect(section.function, new TypeMatcher<IndexExpression>());
     expect(section.typeArguments, isNotNull);
     expect(section.argumentList, isNotNull);
   }
@@ -6347,7 +6363,7 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     expect(expression, isNotNull);
     assertNoErrors();
     var section = expression as MethodInvocation;
-    expect(section.target, new isInstanceOf<MethodInvocation>());
+    expect(section.target, new TypeMatcher<MethodInvocation>());
     expect(section.operator, isNotNull);
     expect(section.methodName, isNotNull);
     expect(section.typeArguments, isNull);
@@ -6366,7 +6382,7 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
           [HintCode.GENERIC_METHOD_COMMENT, HintCode.GENERIC_METHOD_COMMENT]);
     }
     var section = expression as MethodInvocation;
-    expect(section.target, new isInstanceOf<MethodInvocation>());
+    expect(section.target, new TypeMatcher<MethodInvocation>());
     expect(section.operator, isNotNull);
     expect(section.methodName, isNotNull);
     expect(section.typeArguments, isNotNull);
@@ -6379,7 +6395,7 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     expect(expression, isNotNull);
     assertNoErrors();
     var section = expression as MethodInvocation;
-    expect(section.target, new isInstanceOf<MethodInvocation>());
+    expect(section.target, new TypeMatcher<MethodInvocation>());
     expect(section.operator, isNotNull);
     expect(section.methodName, isNotNull);
     expect(section.typeArguments, isNotNull);
@@ -6504,7 +6520,7 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     expect(expression, isNotNull);
     assertNoErrors();
     var section = expression as FunctionExpressionInvocation;
-    expect(section.function, new isInstanceOf<MethodInvocation>());
+    expect(section.function, new TypeMatcher<MethodInvocation>());
     expect(section.typeArguments, isNull);
     expect(section.argumentList, isNotNull);
     expect(section.argumentList.arguments, hasLength(1));
@@ -6521,7 +6537,7 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
           [HintCode.GENERIC_METHOD_COMMENT, HintCode.GENERIC_METHOD_COMMENT]);
     }
     var section = expression as FunctionExpressionInvocation;
-    expect(section.function, new isInstanceOf<MethodInvocation>());
+    expect(section.function, new TypeMatcher<MethodInvocation>());
     expect(section.typeArguments, isNotNull);
     expect(section.argumentList, isNotNull);
     expect(section.argumentList.arguments, hasLength(1));
@@ -6532,7 +6548,7 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     expect(expression, isNotNull);
     assertNoErrors();
     var section = expression as FunctionExpressionInvocation;
-    expect(section.function, new isInstanceOf<MethodInvocation>());
+    expect(section.function, new TypeMatcher<MethodInvocation>());
     expect(section.typeArguments, isNotNull);
     expect(section.argumentList, isNotNull);
     expect(section.argumentList.arguments, hasLength(1));
@@ -6543,7 +6559,7 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     expect(expression, isNotNull);
     assertNoErrors();
     var section = expression as FunctionExpressionInvocation;
-    expect(section.function, new isInstanceOf<MethodInvocation>());
+    expect(section.function, new TypeMatcher<MethodInvocation>());
     expect(section.typeArguments, isNull);
     expect(section.argumentList, isNotNull);
     expect(section.argumentList.arguments, hasLength(1));
@@ -6565,7 +6581,7 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
       ]);
     }
     var section = expression as FunctionExpressionInvocation;
-    expect(section.function, new isInstanceOf<MethodInvocation>());
+    expect(section.function, new TypeMatcher<MethodInvocation>());
     expect(section.typeArguments, isNotNull);
     expect(section.argumentList, isNotNull);
     expect(section.argumentList.arguments, hasLength(1));
@@ -6577,7 +6593,7 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     expect(expression, isNotNull);
     assertNoErrors();
     var section = expression as FunctionExpressionInvocation;
-    expect(section.function, new isInstanceOf<MethodInvocation>());
+    expect(section.function, new TypeMatcher<MethodInvocation>());
     expect(section.typeArguments, isNotNull);
     expect(section.argumentList, isNotNull);
     expect(section.argumentList.arguments, hasLength(1));
@@ -6633,7 +6649,7 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     Expression expression = parseConstExpression('const A()');
     expect(expression, isNotNull);
     assertNoErrors();
-    expect(expression, new isInstanceOf<InstanceCreationExpression>());
+    expect(expression, new TypeMatcher<InstanceCreationExpression>());
     InstanceCreationExpression instanceCreation = expression;
     expect(instanceCreation.keyword, isNotNull);
     ConstructorName name = instanceCreation.constructorName;
@@ -6712,6 +6728,17 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     expect(literal.typeArguments, isNotNull);
   }
 
+  void test_parseConstExpression_mapLiteral_typed_missingGt() {
+    Expression expression = parseExpression('const <A, B {}',
+        errors: [expectedError(ParserErrorCode.EXPECTED_TOKEN, 12, 1)]);
+    expect(expression, isNotNull);
+    var literal = expression as MapLiteral;
+    expect(literal.leftBracket, isNotNull);
+    expect(literal.entries, hasLength(0));
+    expect(literal.rightBracket, isNotNull);
+    expect(literal.typeArguments, isNotNull);
+  }
+
   void test_parseConstExpression_mapLiteral_untyped() {
     Expression expression = parseConstExpression('const {}');
     expect(expression, isNotNull);
@@ -6737,7 +6764,7 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     BinaryExpression expression = parseEqualityExpression('super == y');
     expect(expression, isNotNull);
     assertNoErrors();
-    expect(expression.leftOperand, new isInstanceOf<SuperExpression>());
+    expect(expression.leftOperand, new TypeMatcher<SuperExpression>());
     expect(expression.operator, isNotNull);
     expect(expression.operator.type, TokenType.EQ_EQ);
     expect(expression.rightOperand, isNotNull);
@@ -6772,6 +6799,17 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     expect(binaryExpression.operator, isNotNull);
     expect(binaryExpression.operator.type, TokenType.EQ_EQ);
     expect(binaryExpression.rightOperand, isNotNull);
+  }
+
+  void test_parseExpression_constAndTypeParameters() {
+    Expression expression = parseExpression('const <E>',
+        codes: usingFastaParser
+            ? [
+                // TODO(danrubel): Improve this error message.
+                ParserErrorCode.EXPECTED_TOKEN
+              ]
+            : [ParserErrorCode.EXPECTED_LIST_OR_MAP_LITERAL]);
+    expect(expression, isNotNull);
   }
 
   void test_parseExpression_function_async() {
@@ -6813,7 +6851,7 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
   void test_parseExpression_invokeFunctionExpression() {
     Expression expression = parseExpression('(a) {return a + a;} (3)');
     var invocation = expression as FunctionExpressionInvocation;
-    expect(invocation.function, new isInstanceOf<FunctionExpression>());
+    expect(invocation.function, new TypeMatcher<FunctionExpression>());
     FunctionExpression functionExpression =
         invocation.function as FunctionExpression;
     expect(functionExpression.parameters, isNotNull);
@@ -6866,7 +6904,7 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     Expression expression = parseExpression('super.b.c<D>()');
     MethodInvocation invocation = expression as MethodInvocation;
     Expression target = invocation.target;
-    expect(target, new isInstanceOf<PropertyAccess>());
+    expect(target, new TypeMatcher<PropertyAccess>());
     expect(invocation.methodName, isNotNull);
     expect(invocation.methodName.name, 'c');
     expect(invocation.typeArguments, isNotNull);
@@ -6958,6 +6996,46 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     expect(expression.typeParameters, isNull);
     expect(expression.parameters, isNotNull);
     expect((expression.body as ExpressionFunctionBody).semicolon, isNull);
+  }
+
+  void test_parseFunctionExpression_constAndTypeParameters2() {
+    FunctionExpression expression =
+        parseFunctionExpression('const <E>(E i) => i++');
+    expect(expression, isNotNull);
+    assertErrorsWithCodes(usingFastaParser
+        ? [ParserErrorCode.UNEXPECTED_TOKEN]
+        : [
+            ParserErrorCode.EXPECTED_TOKEN,
+            ParserErrorCode.EXPECTED_TOKEN,
+            ParserErrorCode.MISSING_IDENTIFIER,
+            ParserErrorCode.FUNCTION_TYPED_PARAMETER_VAR,
+            ParserErrorCode.MISSING_CLOSING_PARENTHESIS,
+          ]);
+    expect(expression.body, isNotNull);
+    if (usingFastaParser) {
+      expect(expression.typeParameters, isNotNull);
+      expect(expression.parameters, isNotNull);
+      expect((expression.body as ExpressionFunctionBody).semicolon, isNull);
+    }
+  }
+
+  void test_parseFunctionExpression_functionInPlaceOfTypeName() {
+    Expression expression = parseExpression('<test(' ', (){});>[0, 1, 2]',
+        codes: usingFastaParser
+            ? [
+                ParserErrorCode.EXPECTED_TOKEN,
+                ParserErrorCode.UNEXPECTED_TOKEN,
+                ParserErrorCode.MISSING_IDENTIFIER,
+                ParserErrorCode.MISSING_IDENTIFIER,
+                ParserErrorCode.EXPECTED_TOKEN,
+                ParserErrorCode.MISSING_FUNCTION_BODY,
+              ]
+            : [
+                ParserErrorCode.EXPECTED_TOKEN,
+                ParserErrorCode.MISSING_IDENTIFIER,
+                ParserErrorCode.EXPECTED_LIST_OR_MAP_LITERAL,
+              ]);
+    expect(expression, isNotNull);
   }
 
   void test_parseFunctionExpression_typeParameterComments() {
@@ -7431,7 +7509,7 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     expect(expression, isNotNull);
     assertNoErrors();
     var binaryExpression = expression as BinaryExpression;
-    expect(binaryExpression.leftOperand, new isInstanceOf<SuperExpression>());
+    expect(binaryExpression.leftOperand, new TypeMatcher<SuperExpression>());
     expect(binaryExpression.operator, isNotNull);
     expect(binaryExpression.operator.type, TokenType.STAR);
     expect(binaryExpression.rightOperand, isNotNull);
@@ -7758,7 +7836,7 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     Expression expression = parsePrimaryExpression('null');
     expect(expression, isNotNull);
     assertNoErrors();
-    expect(expression, new isInstanceOf<NullLiteral>());
+    expect(expression, new TypeMatcher<NullLiteral>());
     NullLiteral literal = expression;
     expect(literal.literal, isNotNull);
   }
@@ -7849,6 +7927,19 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     expect(invocation.period, isNull);
   }
 
+  void test_parseRelationalExpression_as_chained() {
+    AsExpression asExpression = parseExpression('x as Y as Z',
+        errors: usingFastaParser
+            ? [expectedError(ParserErrorCode.UNEXPECTED_TOKEN, 7, 2)]
+            : []);
+    expect(asExpression, isNotNull);
+    SimpleIdentifier identifier = asExpression.expression;
+    expect(identifier.name, 'x');
+    expect(asExpression.asOperator, isNotNull);
+    TypeName typeName = asExpression.type;
+    expect(typeName.name.name, 'Y');
+  }
+
   void test_parseRelationalExpression_as_functionType_noReturnType() {
     Expression expression = parseRelationalExpression('x as Function(int)');
     expect(expression, isNotNull);
@@ -7856,7 +7947,7 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     var asExpression = expression as AsExpression;
     expect(asExpression.expression, isNotNull);
     expect(asExpression.asOperator, isNotNull);
-    expect(asExpression.type, new isInstanceOf<GenericFunctionType>());
+    expect(asExpression.type, new TypeMatcher<GenericFunctionType>());
   }
 
   void test_parseRelationalExpression_as_functionType_returnType() {
@@ -7867,7 +7958,7 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     var asExpression = expression as AsExpression;
     expect(asExpression.expression, isNotNull);
     expect(asExpression.asOperator, isNotNull);
-    expect(asExpression.type, new isInstanceOf<GenericFunctionType>());
+    expect(asExpression.type, new TypeMatcher<GenericFunctionType>());
   }
 
   void test_parseRelationalExpression_as_generic() {
@@ -7877,7 +7968,7 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     var asExpression = expression as AsExpression;
     expect(asExpression.expression, isNotNull);
     expect(asExpression.asOperator, isNotNull);
-    expect(asExpression.type, new isInstanceOf<TypeName>());
+    expect(asExpression.type, new TypeMatcher<TypeName>());
   }
 
   void test_parseRelationalExpression_as_simple() {
@@ -7887,7 +7978,7 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     var asExpression = expression as AsExpression;
     expect(asExpression.expression, isNotNull);
     expect(asExpression.asOperator, isNotNull);
-    expect(asExpression.type, new isInstanceOf<TypeName>());
+    expect(asExpression.type, new TypeMatcher<TypeName>());
   }
 
   void test_parseRelationalExpression_as_simple_function() {
@@ -7897,7 +7988,7 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     var asExpression = expression as AsExpression;
     expect(asExpression.expression, isNotNull);
     expect(asExpression.asOperator, isNotNull);
-    expect(asExpression.type, new isInstanceOf<TypeName>());
+    expect(asExpression.type, new TypeMatcher<TypeName>());
   }
 
   void test_parseRelationalExpression_is() {
@@ -7909,6 +8000,19 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     expect(isExpression.isOperator, isNotNull);
     expect(isExpression.notOperator, isNull);
     expect(isExpression.type, isNotNull);
+  }
+
+  void test_parseRelationalExpression_is_chained() {
+    IsExpression isExpression = parseExpression('x is Y is! Z',
+        errors: usingFastaParser
+            ? [expectedError(ParserErrorCode.UNEXPECTED_TOKEN, 7, 2)]
+            : []);
+    expect(isExpression, isNotNull);
+    SimpleIdentifier identifier = isExpression.expression;
+    expect(identifier.name, 'x');
+    expect(isExpression.isOperator, isNotNull);
+    TypeName typeName = isExpression.type;
+    expect(typeName.name.name, 'Y');
   }
 
   void test_parseRelationalExpression_isNot() {
@@ -8012,16 +8116,16 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     assertNoErrors();
     var interpolation = expression as StringInterpolation;
     expect(interpolation.elements, hasLength(3));
-    expect(interpolation.elements[0], new isInstanceOf<InterpolationString>());
+    expect(interpolation.elements[0], new TypeMatcher<InterpolationString>());
     InterpolationString element0 = interpolation.elements[0];
     expect(element0.value, 'x');
     expect(
-        interpolation.elements[1], new isInstanceOf<InterpolationExpression>());
+        interpolation.elements[1], new TypeMatcher<InterpolationExpression>());
     InterpolationExpression element1 = interpolation.elements[1];
     expect(element1.leftBracket.lexeme, '\$');
-    expect(element1.expression, new isInstanceOf<SimpleIdentifier>());
+    expect(element1.expression, new TypeMatcher<SimpleIdentifier>());
     expect(element1.rightBracket, isNull);
-    expect(interpolation.elements[2], new isInstanceOf<InterpolationString>());
+    expect(interpolation.elements[2], new TypeMatcher<InterpolationString>());
     InterpolationString element2 = interpolation.elements[2];
     expect(element2.value, '');
   }
@@ -8030,7 +8134,7 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     Expression expression = parseStringLiteral("'a \${b} c \$this d'");
     expect(expression, isNotNull);
     assertNoErrors();
-    expect(expression, new isInstanceOf<StringInterpolation>());
+    expect(expression, new TypeMatcher<StringInterpolation>());
     StringInterpolation literal = expression;
     NodeList<InterpolationElement> elements = literal.elements;
     expect(elements, hasLength(5));
@@ -8060,14 +8164,14 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     assertNoErrors();
     var interpolation = expression as StringInterpolation;
     expect(interpolation.elements, hasLength(3));
-    expect(interpolation.elements[0], new isInstanceOf<InterpolationString>());
+    expect(interpolation.elements[0], new TypeMatcher<InterpolationString>());
     InterpolationString element0 = interpolation.elements[0];
     expect(element0.value, 'x');
     expect(
-        interpolation.elements[1], new isInstanceOf<InterpolationExpression>());
+        interpolation.elements[1], new TypeMatcher<InterpolationExpression>());
     InterpolationExpression element1 = interpolation.elements[1];
-    expect(element1.expression, new isInstanceOf<SimpleIdentifier>());
-    expect(interpolation.elements[2], new isInstanceOf<InterpolationString>());
+    expect(element1.expression, new TypeMatcher<SimpleIdentifier>());
+    expect(interpolation.elements[2], new TypeMatcher<InterpolationString>());
     InterpolationString element2 = interpolation.elements[2];
     expect(element2.value, '');
   }
@@ -8150,14 +8254,14 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     assertNoErrors();
     var interpolation = expression as StringInterpolation;
     expect(interpolation.elements, hasLength(3));
-    expect(interpolation.elements[0], new isInstanceOf<InterpolationString>());
+    expect(interpolation.elements[0], new TypeMatcher<InterpolationString>());
     InterpolationString element0 = interpolation.elements[0];
     expect(element0.value, '');
     expect(
-        interpolation.elements[1], new isInstanceOf<InterpolationExpression>());
+        interpolation.elements[1], new TypeMatcher<InterpolationExpression>());
     InterpolationExpression element1 = interpolation.elements[1];
-    expect(element1.expression, new isInstanceOf<SimpleIdentifier>());
-    expect(interpolation.elements[2], new isInstanceOf<InterpolationString>());
+    expect(element1.expression, new TypeMatcher<SimpleIdentifier>());
+    expect(interpolation.elements[2], new TypeMatcher<InterpolationString>());
     InterpolationString element2 = interpolation.elements[2];
     expect(element2.value, "'y");
   }
@@ -8168,14 +8272,14 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     assertNoErrors();
     var interpolation = expression as StringInterpolation;
     expect(interpolation.elements, hasLength(3));
-    expect(interpolation.elements[0], new isInstanceOf<InterpolationString>());
+    expect(interpolation.elements[0], new TypeMatcher<InterpolationString>());
     InterpolationString element0 = interpolation.elements[0];
     expect(element0.value, '');
     expect(
-        interpolation.elements[1], new isInstanceOf<InterpolationExpression>());
+        interpolation.elements[1], new TypeMatcher<InterpolationExpression>());
     InterpolationExpression element1 = interpolation.elements[1];
-    expect(element1.expression, new isInstanceOf<SimpleIdentifier>());
-    expect(interpolation.elements[2], new isInstanceOf<InterpolationString>());
+    expect(element1.expression, new TypeMatcher<SimpleIdentifier>());
+    expect(interpolation.elements[2], new TypeMatcher<InterpolationString>());
     InterpolationString element2 = interpolation.elements[2];
     expect(element2.value, 'y');
   }
@@ -8213,14 +8317,14 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     assertNoErrors();
     var interpolation = expression as StringInterpolation;
     expect(interpolation.elements, hasLength(3));
-    expect(interpolation.elements[0], new isInstanceOf<InterpolationString>());
+    expect(interpolation.elements[0], new TypeMatcher<InterpolationString>());
     InterpolationString element0 = interpolation.elements[0];
     expect(element0.value, '');
     expect(
-        interpolation.elements[1], new isInstanceOf<InterpolationExpression>());
+        interpolation.elements[1], new TypeMatcher<InterpolationExpression>());
     InterpolationExpression element1 = interpolation.elements[1];
-    expect(element1.expression, new isInstanceOf<SimpleIdentifier>());
-    expect(interpolation.elements[2], new isInstanceOf<InterpolationString>());
+    expect(element1.expression, new TypeMatcher<SimpleIdentifier>());
+    expect(interpolation.elements[2], new TypeMatcher<InterpolationString>());
     InterpolationString element2 = interpolation.elements[2];
     expect(element2.value, '"');
   }
@@ -8240,14 +8344,14 @@ abstract class ExpressionParserTestMixin implements AbstractParserTestCase {
     assertNoErrors();
     var interpolation = expression as StringInterpolation;
     expect(interpolation.elements, hasLength(3));
-    expect(interpolation.elements[0], new isInstanceOf<InterpolationString>());
+    expect(interpolation.elements[0], new TypeMatcher<InterpolationString>());
     InterpolationString element0 = interpolation.elements[0];
     expect(element0.value, '');
     expect(
-        interpolation.elements[1], new isInstanceOf<InterpolationExpression>());
+        interpolation.elements[1], new TypeMatcher<InterpolationExpression>());
     InterpolationExpression element1 = interpolation.elements[1];
-    expect(element1.expression, new isInstanceOf<SimpleIdentifier>());
-    expect(interpolation.elements[2], new isInstanceOf<InterpolationString>());
+    expect(element1.expression, new TypeMatcher<SimpleIdentifier>());
+    expect(interpolation.elements[2], new TypeMatcher<InterpolationString>());
     InterpolationString element2 = interpolation.elements[2];
     expect(element2.value, 'y');
   }
@@ -8496,7 +8600,7 @@ class FormalParameterParserTest extends ParserTestCase
     NormalFormalParameter parameter = parseNormalFormalParameter('a()?');
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<FunctionTypedFormalParameter>());
+    expect(parameter, new TypeMatcher<FunctionTypedFormalParameter>());
     FunctionTypedFormalParameter functionParameter = parameter;
     expect(functionParameter.returnType, isNull);
     expect(functionParameter.identifier, isNotNull);
@@ -8511,7 +8615,7 @@ class FormalParameterParserTest extends ParserTestCase
     NormalFormalParameter parameter = parseNormalFormalParameter('a<E>()?');
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<FunctionTypedFormalParameter>());
+    expect(parameter, new TypeMatcher<FunctionTypedFormalParameter>());
     FunctionTypedFormalParameter functionParameter = parameter;
     expect(functionParameter.returnType, isNull);
     expect(functionParameter.identifier, isNotNull);
@@ -8525,7 +8629,7 @@ class FormalParameterParserTest extends ParserTestCase
     NormalFormalParameter parameter = parseNormalFormalParameter('A a()?');
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<FunctionTypedFormalParameter>());
+    expect(parameter, new TypeMatcher<FunctionTypedFormalParameter>());
     FunctionTypedFormalParameter functionParameter = parameter;
     expect(functionParameter.returnType, isNotNull);
     expect(functionParameter.identifier, isNotNull);
@@ -8539,7 +8643,7 @@ class FormalParameterParserTest extends ParserTestCase
     NormalFormalParameter parameter = parseNormalFormalParameter('A a<E>()?');
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<FunctionTypedFormalParameter>());
+    expect(parameter, new TypeMatcher<FunctionTypedFormalParameter>());
     FunctionTypedFormalParameter functionParameter = parameter;
     expect(functionParameter.returnType, isNotNull);
     expect(functionParameter.identifier, isNotNull);
@@ -8553,7 +8657,7 @@ class FormalParameterParserTest extends ParserTestCase
     NormalFormalParameter parameter = parseNormalFormalParameter('void a()?');
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<FunctionTypedFormalParameter>());
+    expect(parameter, new TypeMatcher<FunctionTypedFormalParameter>());
     FunctionTypedFormalParameter functionParameter = parameter;
     expect(functionParameter.returnType, isNotNull);
     expect(functionParameter.identifier, isNotNull);
@@ -8568,7 +8672,7 @@ class FormalParameterParserTest extends ParserTestCase
         parseNormalFormalParameter('void a<E>()?');
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<FunctionTypedFormalParameter>());
+    expect(parameter, new TypeMatcher<FunctionTypedFormalParameter>());
     FunctionTypedFormalParameter functionParameter = parameter;
     expect(functionParameter.returnType, isNotNull);
     expect(functionParameter.identifier, isNotNull);
@@ -8584,13 +8688,37 @@ class FormalParameterParserTest extends ParserTestCase
  */
 abstract class FormalParameterParserTestMixin
     implements AbstractParserTestCase {
+  void test_parseConstructorParameter_this() {
+    parseCompilationUnit('''
+class C {
+  final int field;
+  C(this.field);
+}''');
+  }
+
+  void test_parseConstructorParameter_this_Function() {
+    parseCompilationUnit('''
+class C {
+  final Object Function(int, double) field;
+  C(String Function(num, Object) this.field);
+}''');
+  }
+
+  void test_parseConstructorParameter_this_int() {
+    parseCompilationUnit('''
+class C {
+  final int field;
+  C(int this.field);
+}''');
+  }
+
   void test_parseFormalParameter_covariant_final_named() {
     ParameterKind kind = ParameterKind.NAMED;
     FormalParameter parameter =
         parseFormalParameter('covariant final a : null', kind);
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<DefaultFormalParameter>());
+    expect(parameter, new TypeMatcher<DefaultFormalParameter>());
     DefaultFormalParameter defaultParameter = parameter;
     SimpleFormalParameter simpleParameter =
         defaultParameter.parameter as SimpleFormalParameter;
@@ -8609,7 +8737,7 @@ abstract class FormalParameterParserTestMixin
     FormalParameter parameter = parseFormalParameter('covariant final a', kind);
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<SimpleFormalParameter>());
+    expect(parameter, new TypeMatcher<SimpleFormalParameter>());
     SimpleFormalParameter simpleParameter = parameter;
     expect(simpleParameter.covariantKeyword, isNotNull);
     expect(simpleParameter.identifier, isNotNull);
@@ -8624,7 +8752,7 @@ abstract class FormalParameterParserTestMixin
         parseFormalParameter('covariant final a = null', kind);
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<DefaultFormalParameter>());
+    expect(parameter, new TypeMatcher<DefaultFormalParameter>());
     DefaultFormalParameter defaultParameter = parameter;
     SimpleFormalParameter simpleParameter =
         defaultParameter.parameter as SimpleFormalParameter;
@@ -8644,7 +8772,7 @@ abstract class FormalParameterParserTestMixin
         parseFormalParameter('covariant final A a : null', kind);
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<DefaultFormalParameter>());
+    expect(parameter, new TypeMatcher<DefaultFormalParameter>());
     DefaultFormalParameter defaultParameter = parameter;
     SimpleFormalParameter simpleParameter =
         defaultParameter.parameter as SimpleFormalParameter;
@@ -8664,7 +8792,7 @@ abstract class FormalParameterParserTestMixin
         parseFormalParameter('covariant final A a', kind);
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<SimpleFormalParameter>());
+    expect(parameter, new TypeMatcher<SimpleFormalParameter>());
     SimpleFormalParameter simpleParameter = parameter;
     expect(simpleParameter.covariantKeyword, isNotNull);
     expect(simpleParameter.identifier, isNotNull);
@@ -8679,7 +8807,7 @@ abstract class FormalParameterParserTestMixin
         parseFormalParameter('covariant final A a = null', kind);
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<DefaultFormalParameter>());
+    expect(parameter, new TypeMatcher<DefaultFormalParameter>());
     DefaultFormalParameter defaultParameter = parameter;
     SimpleFormalParameter simpleParameter =
         defaultParameter.parameter as SimpleFormalParameter;
@@ -8699,12 +8827,12 @@ abstract class FormalParameterParserTestMixin
         parseFormalParameter('covariant String Function(int) a', kind);
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<SimpleFormalParameter>());
+    expect(parameter, new TypeMatcher<SimpleFormalParameter>());
     SimpleFormalParameter simpleParameter = parameter;
     expect(simpleParameter.covariantKeyword, isNotNull);
     expect(simpleParameter.identifier, isNotNull);
     expect(simpleParameter.keyword, isNull);
-    expect(simpleParameter.type, new isInstanceOf<GenericFunctionType>());
+    expect(simpleParameter.type, new TypeMatcher<GenericFunctionType>());
     expect(simpleParameter.isRequired, isTrue);
   }
 
@@ -8714,7 +8842,7 @@ abstract class FormalParameterParserTestMixin
         parseFormalParameter('covariant A a : null', kind);
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<DefaultFormalParameter>());
+    expect(parameter, new TypeMatcher<DefaultFormalParameter>());
     DefaultFormalParameter defaultParameter = parameter;
     SimpleFormalParameter simpleParameter =
         defaultParameter.parameter as SimpleFormalParameter;
@@ -8734,7 +8862,7 @@ abstract class FormalParameterParserTestMixin
         parseFormalParameter('covariant A<B<C>> a', kind);
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<SimpleFormalParameter>());
+    expect(parameter, new TypeMatcher<SimpleFormalParameter>());
     SimpleFormalParameter simpleParameter = parameter;
     expect(simpleParameter.covariantKeyword, isNotNull);
     expect(simpleParameter.identifier, isNotNull);
@@ -8749,7 +8877,7 @@ abstract class FormalParameterParserTestMixin
         parseFormalParameter('covariant A a = null', kind);
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<DefaultFormalParameter>());
+    expect(parameter, new TypeMatcher<DefaultFormalParameter>());
     DefaultFormalParameter defaultParameter = parameter;
     SimpleFormalParameter simpleParameter =
         defaultParameter.parameter as SimpleFormalParameter;
@@ -8769,7 +8897,7 @@ abstract class FormalParameterParserTestMixin
         parseFormalParameter('covariant var a : null', kind);
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<DefaultFormalParameter>());
+    expect(parameter, new TypeMatcher<DefaultFormalParameter>());
     DefaultFormalParameter defaultParameter = parameter;
     SimpleFormalParameter simpleParameter =
         defaultParameter.parameter as SimpleFormalParameter;
@@ -8788,7 +8916,7 @@ abstract class FormalParameterParserTestMixin
     FormalParameter parameter = parseFormalParameter('covariant var a', kind);
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<SimpleFormalParameter>());
+    expect(parameter, new TypeMatcher<SimpleFormalParameter>());
     SimpleFormalParameter simpleParameter = parameter;
     expect(simpleParameter.covariantKeyword, isNotNull);
     expect(simpleParameter.identifier, isNotNull);
@@ -8803,7 +8931,7 @@ abstract class FormalParameterParserTestMixin
         parseFormalParameter('covariant var a = null', kind);
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<DefaultFormalParameter>());
+    expect(parameter, new TypeMatcher<DefaultFormalParameter>());
     DefaultFormalParameter defaultParameter = parameter;
     SimpleFormalParameter simpleParameter =
         defaultParameter.parameter as SimpleFormalParameter;
@@ -8822,7 +8950,7 @@ abstract class FormalParameterParserTestMixin
     FormalParameter parameter = parseFormalParameter('final a : null', kind);
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<DefaultFormalParameter>());
+    expect(parameter, new TypeMatcher<DefaultFormalParameter>());
     DefaultFormalParameter defaultParameter = parameter;
     SimpleFormalParameter simpleParameter =
         defaultParameter.parameter as SimpleFormalParameter;
@@ -8841,7 +8969,7 @@ abstract class FormalParameterParserTestMixin
     FormalParameter parameter = parseFormalParameter('final a', kind);
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<SimpleFormalParameter>());
+    expect(parameter, new TypeMatcher<SimpleFormalParameter>());
     SimpleFormalParameter simpleParameter = parameter;
     expect(simpleParameter.covariantKeyword, isNull);
     expect(simpleParameter.identifier, isNotNull);
@@ -8855,7 +8983,7 @@ abstract class FormalParameterParserTestMixin
     FormalParameter parameter = parseFormalParameter('final a = null', kind);
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<DefaultFormalParameter>());
+    expect(parameter, new TypeMatcher<DefaultFormalParameter>());
     DefaultFormalParameter defaultParameter = parameter;
     SimpleFormalParameter simpleParameter =
         defaultParameter.parameter as SimpleFormalParameter;
@@ -8874,7 +9002,7 @@ abstract class FormalParameterParserTestMixin
     FormalParameter parameter = parseFormalParameter('final A a : null', kind);
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<DefaultFormalParameter>());
+    expect(parameter, new TypeMatcher<DefaultFormalParameter>());
     DefaultFormalParameter defaultParameter = parameter;
     SimpleFormalParameter simpleParameter =
         defaultParameter.parameter as SimpleFormalParameter;
@@ -8893,7 +9021,7 @@ abstract class FormalParameterParserTestMixin
     FormalParameter parameter = parseFormalParameter('final A a', kind);
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<SimpleFormalParameter>());
+    expect(parameter, new TypeMatcher<SimpleFormalParameter>());
     SimpleFormalParameter simpleParameter = parameter;
     expect(simpleParameter.covariantKeyword, isNull);
     expect(simpleParameter.identifier, isNotNull);
@@ -8907,7 +9035,7 @@ abstract class FormalParameterParserTestMixin
     FormalParameter parameter = parseFormalParameter('final A a = null', kind);
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<DefaultFormalParameter>());
+    expect(parameter, new TypeMatcher<DefaultFormalParameter>());
     DefaultFormalParameter defaultParameter = parameter;
     SimpleFormalParameter simpleParameter =
         defaultParameter.parameter as SimpleFormalParameter;
@@ -8927,12 +9055,12 @@ abstract class FormalParameterParserTestMixin
         parseFormalParameter('String Function(int) a', kind);
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<SimpleFormalParameter>());
+    expect(parameter, new TypeMatcher<SimpleFormalParameter>());
     SimpleFormalParameter simpleParameter = parameter;
     expect(simpleParameter.covariantKeyword, isNull);
     expect(simpleParameter.identifier, isNotNull);
     expect(simpleParameter.keyword, isNull);
-    expect(simpleParameter.type, new isInstanceOf<GenericFunctionType>());
+    expect(simpleParameter.type, new TypeMatcher<GenericFunctionType>());
     expect(simpleParameter.isRequired, isTrue);
   }
 
@@ -8941,7 +9069,7 @@ abstract class FormalParameterParserTestMixin
     FormalParameter parameter = parseFormalParameter('A a : null', kind);
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<DefaultFormalParameter>());
+    expect(parameter, new TypeMatcher<DefaultFormalParameter>());
     DefaultFormalParameter defaultParameter = parameter;
     SimpleFormalParameter simpleParameter =
         defaultParameter.parameter as SimpleFormalParameter;
@@ -8960,7 +9088,7 @@ abstract class FormalParameterParserTestMixin
     FormalParameter parameter = parseFormalParameter('A a', kind);
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<DefaultFormalParameter>());
+    expect(parameter, new TypeMatcher<DefaultFormalParameter>());
     DefaultFormalParameter defaultParameter = parameter;
     SimpleFormalParameter simpleParameter =
         defaultParameter.parameter as SimpleFormalParameter;
@@ -8979,7 +9107,7 @@ abstract class FormalParameterParserTestMixin
     FormalParameter parameter = parseFormalParameter('A a', kind);
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<SimpleFormalParameter>());
+    expect(parameter, new TypeMatcher<SimpleFormalParameter>());
     SimpleFormalParameter simpleParameter = parameter;
     expect(simpleParameter.covariantKeyword, isNull);
     expect(simpleParameter.identifier, isNotNull);
@@ -8993,7 +9121,7 @@ abstract class FormalParameterParserTestMixin
     FormalParameter parameter = parseFormalParameter('A a = null', kind);
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<DefaultFormalParameter>());
+    expect(parameter, new TypeMatcher<DefaultFormalParameter>());
     DefaultFormalParameter defaultParameter = parameter;
     SimpleFormalParameter simpleParameter =
         defaultParameter.parameter as SimpleFormalParameter;
@@ -9012,7 +9140,7 @@ abstract class FormalParameterParserTestMixin
     FormalParameter parameter = parseFormalParameter('A a', kind);
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<DefaultFormalParameter>());
+    expect(parameter, new TypeMatcher<DefaultFormalParameter>());
     DefaultFormalParameter defaultParameter = parameter;
     SimpleFormalParameter simpleParameter =
         defaultParameter.parameter as SimpleFormalParameter;
@@ -9031,7 +9159,7 @@ abstract class FormalParameterParserTestMixin
     FormalParameter parameter = parseFormalParameter('var a : null', kind);
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<DefaultFormalParameter>());
+    expect(parameter, new TypeMatcher<DefaultFormalParameter>());
     DefaultFormalParameter defaultParameter = parameter;
     SimpleFormalParameter simpleParameter =
         defaultParameter.parameter as SimpleFormalParameter;
@@ -9050,7 +9178,7 @@ abstract class FormalParameterParserTestMixin
     FormalParameter parameter = parseFormalParameter('var a', kind);
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<SimpleFormalParameter>());
+    expect(parameter, new TypeMatcher<SimpleFormalParameter>());
     SimpleFormalParameter simpleParameter = parameter;
     expect(simpleParameter.covariantKeyword, isNull);
     expect(simpleParameter.identifier, isNotNull);
@@ -9064,7 +9192,7 @@ abstract class FormalParameterParserTestMixin
     FormalParameter parameter = parseFormalParameter('var a = null', kind);
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<DefaultFormalParameter>());
+    expect(parameter, new TypeMatcher<DefaultFormalParameter>());
     DefaultFormalParameter defaultParameter = parameter;
     SimpleFormalParameter simpleParameter =
         defaultParameter.parameter as SimpleFormalParameter;
@@ -9157,18 +9285,18 @@ abstract class FormalParameterParserTestMixin
     NodeList<FormalParameter> parameters = list.parameters;
     expect(parameters, hasLength(2));
 
-    expect(parameters[0], new isInstanceOf<SimpleFormalParameter>());
+    expect(parameters[0], new TypeMatcher<SimpleFormalParameter>());
     SimpleFormalParameter required = parameters[0];
     expect(required.identifier, isNull);
-    expect(required.type, new isInstanceOf<TypeName>());
+    expect(required.type, new TypeMatcher<TypeName>());
     expect((required.type as TypeName).name.name, 'A');
 
-    expect(parameters[1], new isInstanceOf<DefaultFormalParameter>());
+    expect(parameters[1], new TypeMatcher<DefaultFormalParameter>());
     DefaultFormalParameter named = parameters[1];
     expect(named.identifier, isNotNull);
-    expect(named.parameter, new isInstanceOf<SimpleFormalParameter>());
+    expect(named.parameter, new TypeMatcher<SimpleFormalParameter>());
     SimpleFormalParameter simple = named.parameter;
-    expect(simple.type, new isInstanceOf<TypeName>());
+    expect(simple.type, new TypeMatcher<TypeName>());
     expect((simple.type as TypeName).name.name, 'B');
   }
 
@@ -9332,7 +9460,7 @@ abstract class FormalParameterParserTestMixin
         errorCodes:
             usingFastaParser ? [ParserErrorCode.EXTRANEOUS_MODIFIER] : []);
     expect(parameter, isNotNull);
-    expect(parameter, new isInstanceOf<FieldFormalParameter>());
+    expect(parameter, new TypeMatcher<FieldFormalParameter>());
     FieldFormalParameter fieldParameter = parameter;
     expect(fieldParameter.keyword, isNotNull);
     expect(fieldParameter.type, isNull);
@@ -9346,7 +9474,7 @@ abstract class FormalParameterParserTestMixin
         errorCodes:
             usingFastaParser ? [ParserErrorCode.EXTRANEOUS_MODIFIER] : []);
     expect(parameter, isNotNull);
-    expect(parameter, new isInstanceOf<FieldFormalParameter>());
+    expect(parameter, new TypeMatcher<FieldFormalParameter>());
     FieldFormalParameter fieldParameter = parameter;
     expect(fieldParameter.keyword, isNotNull);
     expect(fieldParameter.type, isNotNull);
@@ -9359,7 +9487,7 @@ abstract class FormalParameterParserTestMixin
         parseNormalFormalParameter('final this.a');
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<FieldFormalParameter>());
+    expect(parameter, new TypeMatcher<FieldFormalParameter>());
     FieldFormalParameter fieldParameter = parameter;
     expect(fieldParameter.keyword, isNotNull);
     expect(fieldParameter.type, isNull);
@@ -9372,7 +9500,7 @@ abstract class FormalParameterParserTestMixin
         parseNormalFormalParameter('final A this.a');
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<FieldFormalParameter>());
+    expect(parameter, new TypeMatcher<FieldFormalParameter>());
     FieldFormalParameter fieldParameter = parameter;
     expect(fieldParameter.keyword, isNotNull);
     expect(fieldParameter.type, isNotNull);
@@ -9384,7 +9512,7 @@ abstract class FormalParameterParserTestMixin
     NormalFormalParameter parameter = parseNormalFormalParameter('this.a(B b)');
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<FieldFormalParameter>());
+    expect(parameter, new TypeMatcher<FieldFormalParameter>());
     FieldFormalParameter fieldParameter = parameter;
     expect(fieldParameter.keyword, isNull);
     expect(fieldParameter.type, isNull);
@@ -9398,7 +9526,7 @@ abstract class FormalParameterParserTestMixin
     NormalFormalParameter parameter = parseNormalFormalParameter('this.a()');
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<FieldFormalParameter>());
+    expect(parameter, new TypeMatcher<FieldFormalParameter>());
     FieldFormalParameter fieldParameter = parameter;
     expect(fieldParameter.keyword, isNull);
     expect(fieldParameter.type, isNull);
@@ -9417,7 +9545,7 @@ abstract class FormalParameterParserTestMixin
     NormalFormalParameter parameter = parseNormalFormalParameter('this.a');
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<FieldFormalParameter>());
+    expect(parameter, new TypeMatcher<FieldFormalParameter>());
     FieldFormalParameter fieldParameter = parameter;
     expect(fieldParameter.keyword, isNull);
     expect(fieldParameter.type, isNull);
@@ -9429,7 +9557,7 @@ abstract class FormalParameterParserTestMixin
     NormalFormalParameter parameter = parseNormalFormalParameter('A this.a');
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<FieldFormalParameter>());
+    expect(parameter, new TypeMatcher<FieldFormalParameter>());
     FieldFormalParameter fieldParameter = parameter;
     expect(fieldParameter.keyword, isNull);
     expect(fieldParameter.type, isNotNull);
@@ -9441,7 +9569,7 @@ abstract class FormalParameterParserTestMixin
     NormalFormalParameter parameter = parseNormalFormalParameter('var this.a');
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<FieldFormalParameter>());
+    expect(parameter, new TypeMatcher<FieldFormalParameter>());
     FieldFormalParameter fieldParameter = parameter;
     expect(fieldParameter.keyword, isNotNull);
     expect(fieldParameter.type, isNull);
@@ -9475,7 +9603,7 @@ abstract class FormalParameterParserTestMixin
     NormalFormalParameter parameter = parseNormalFormalParameter('a()');
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<FunctionTypedFormalParameter>());
+    expect(parameter, new TypeMatcher<FunctionTypedFormalParameter>());
     FunctionTypedFormalParameter functionParameter = parameter;
     expect(functionParameter.returnType, isNull);
     expect(functionParameter.identifier, isNotNull);
@@ -9488,7 +9616,7 @@ abstract class FormalParameterParserTestMixin
         parseNormalFormalParameter('covariant a()');
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<FunctionTypedFormalParameter>());
+    expect(parameter, new TypeMatcher<FunctionTypedFormalParameter>());
     FunctionTypedFormalParameter functionParameter = parameter;
     expect(functionParameter.covariantKeyword, isNotNull);
     expect(functionParameter.returnType, isNull);
@@ -9502,7 +9630,7 @@ abstract class FormalParameterParserTestMixin
     NormalFormalParameter parameter = parseNormalFormalParameter('a/*<E>*/()',
         errorCodes: usingFastaParser ? [] : [HintCode.GENERIC_METHOD_COMMENT]);
     expect(parameter, isNotNull);
-    expect(parameter, new isInstanceOf<FunctionTypedFormalParameter>());
+    expect(parameter, new TypeMatcher<FunctionTypedFormalParameter>());
     FunctionTypedFormalParameter functionParameter = parameter;
     expect(functionParameter.returnType, isNull);
     expect(functionParameter.identifier, isNotNull);
@@ -9514,7 +9642,7 @@ abstract class FormalParameterParserTestMixin
     NormalFormalParameter parameter = parseNormalFormalParameter('a<E>()');
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<FunctionTypedFormalParameter>());
+    expect(parameter, new TypeMatcher<FunctionTypedFormalParameter>());
     FunctionTypedFormalParameter functionParameter = parameter;
     expect(functionParameter.returnType, isNull);
     expect(functionParameter.identifier, isNotNull);
@@ -9528,7 +9656,7 @@ abstract class FormalParameterParserTestMixin
     NormalFormalParameter parameter = parseNormalFormalParameter('A a()');
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<FunctionTypedFormalParameter>());
+    expect(parameter, new TypeMatcher<FunctionTypedFormalParameter>());
     FunctionTypedFormalParameter functionParameter = parameter;
     expect(functionParameter.returnType, isNotNull);
     expect(functionParameter.identifier, isNotNull);
@@ -9542,7 +9670,7 @@ abstract class FormalParameterParserTestMixin
     NormalFormalParameter parameter = parseNormalFormalParameter('A a/*<E>*/()',
         errorCodes: usingFastaParser ? [] : [HintCode.GENERIC_METHOD_COMMENT]);
     expect(parameter, isNotNull);
-    expect(parameter, new isInstanceOf<FunctionTypedFormalParameter>());
+    expect(parameter, new TypeMatcher<FunctionTypedFormalParameter>());
     FunctionTypedFormalParameter functionParameter = parameter;
     expect(functionParameter.returnType, isNotNull);
     expect(functionParameter.identifier, isNotNull);
@@ -9555,7 +9683,7 @@ abstract class FormalParameterParserTestMixin
     NormalFormalParameter parameter = parseNormalFormalParameter('A a<E>()');
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<FunctionTypedFormalParameter>());
+    expect(parameter, new TypeMatcher<FunctionTypedFormalParameter>());
     FunctionTypedFormalParameter functionParameter = parameter;
     expect(functionParameter.returnType, isNotNull);
     expect(functionParameter.identifier, isNotNull);
@@ -9569,7 +9697,7 @@ abstract class FormalParameterParserTestMixin
         parseNormalFormalParameter('covariant void a()');
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<FunctionTypedFormalParameter>());
+    expect(parameter, new TypeMatcher<FunctionTypedFormalParameter>());
     FunctionTypedFormalParameter functionParameter = parameter;
     expect(functionParameter.covariantKeyword, isNotNull);
     expect(functionParameter.returnType, isNotNull);
@@ -9582,7 +9710,7 @@ abstract class FormalParameterParserTestMixin
     NormalFormalParameter parameter = parseNormalFormalParameter('void a()');
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<FunctionTypedFormalParameter>());
+    expect(parameter, new TypeMatcher<FunctionTypedFormalParameter>());
     FunctionTypedFormalParameter functionParameter = parameter;
     expect(functionParameter.returnType, isNotNull);
     expect(functionParameter.identifier, isNotNull);
@@ -9597,7 +9725,7 @@ abstract class FormalParameterParserTestMixin
         'void a/*<E>*/()',
         errorCodes: usingFastaParser ? [] : [HintCode.GENERIC_METHOD_COMMENT]);
     expect(parameter, isNotNull);
-    expect(parameter, new isInstanceOf<FunctionTypedFormalParameter>());
+    expect(parameter, new TypeMatcher<FunctionTypedFormalParameter>());
     FunctionTypedFormalParameter functionParameter = parameter;
     expect(functionParameter.returnType, isNotNull);
     expect(functionParameter.identifier, isNotNull);
@@ -9610,7 +9738,7 @@ abstract class FormalParameterParserTestMixin
     NormalFormalParameter parameter = parseNormalFormalParameter('void a<E>()');
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<FunctionTypedFormalParameter>());
+    expect(parameter, new TypeMatcher<FunctionTypedFormalParameter>());
     FunctionTypedFormalParameter functionParameter = parameter;
     expect(functionParameter.returnType, isNotNull);
     expect(functionParameter.identifier, isNotNull);
@@ -9630,7 +9758,7 @@ abstract class FormalParameterParserTestMixin
         errorCodes:
             usingFastaParser ? [ParserErrorCode.EXTRANEOUS_MODIFIER] : []);
     expect(parameter, isNotNull);
-    expect(parameter, new isInstanceOf<SimpleFormalParameter>());
+    expect(parameter, new TypeMatcher<SimpleFormalParameter>());
     SimpleFormalParameter simpleParameter = parameter;
     expect(simpleParameter.keyword, isNotNull);
     expect(simpleParameter.type, isNull);
@@ -9642,7 +9770,7 @@ abstract class FormalParameterParserTestMixin
         errorCodes:
             usingFastaParser ? [ParserErrorCode.EXTRANEOUS_MODIFIER] : []);
     expect(parameter, isNotNull);
-    expect(parameter, new isInstanceOf<SimpleFormalParameter>());
+    expect(parameter, new TypeMatcher<SimpleFormalParameter>());
     SimpleFormalParameter simpleParameter = parameter;
     expect(simpleParameter.keyword, isNotNull);
     expect(simpleParameter.type, isNotNull);
@@ -9653,7 +9781,7 @@ abstract class FormalParameterParserTestMixin
     NormalFormalParameter parameter = parseNormalFormalParameter('final a');
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<SimpleFormalParameter>());
+    expect(parameter, new TypeMatcher<SimpleFormalParameter>());
     SimpleFormalParameter simpleParameter = parameter;
     expect(simpleParameter.keyword, isNotNull);
     expect(simpleParameter.type, isNull);
@@ -9664,7 +9792,7 @@ abstract class FormalParameterParserTestMixin
     NormalFormalParameter parameter = parseNormalFormalParameter('final A a');
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<SimpleFormalParameter>());
+    expect(parameter, new TypeMatcher<SimpleFormalParameter>());
     SimpleFormalParameter simpleParameter = parameter;
     expect(simpleParameter.keyword, isNotNull);
     expect(simpleParameter.type, isNotNull);
@@ -9676,7 +9804,7 @@ abstract class FormalParameterParserTestMixin
         parseNormalFormalParameter('a', inFunctionType: true);
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<SimpleFormalParameter>());
+    expect(parameter, new TypeMatcher<SimpleFormalParameter>());
     SimpleFormalParameter simpleParameter = parameter;
     expect(simpleParameter.keyword, isNull);
     expect(simpleParameter.type, isNotNull);
@@ -9687,7 +9815,7 @@ abstract class FormalParameterParserTestMixin
     NormalFormalParameter parameter = parseNormalFormalParameter('a');
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<SimpleFormalParameter>());
+    expect(parameter, new TypeMatcher<SimpleFormalParameter>());
     SimpleFormalParameter simpleParameter = parameter;
     expect(simpleParameter.keyword, isNull);
     expect(simpleParameter.type, isNull);
@@ -9698,7 +9826,7 @@ abstract class FormalParameterParserTestMixin
     NormalFormalParameter parameter = parseNormalFormalParameter('covariant');
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<SimpleFormalParameter>());
+    expect(parameter, new TypeMatcher<SimpleFormalParameter>());
     SimpleFormalParameter simpleParameter = parameter;
     expect(simpleParameter.covariantKeyword, isNull);
     expect(simpleParameter.keyword, isNull);
@@ -9710,7 +9838,7 @@ abstract class FormalParameterParserTestMixin
     NormalFormalParameter parameter = parseNormalFormalParameter('A a');
     expect(parameter, isNotNull);
     assertNoErrors();
-    expect(parameter, new isInstanceOf<SimpleFormalParameter>());
+    expect(parameter, new TypeMatcher<SimpleFormalParameter>());
     SimpleFormalParameter simpleParameter = parameter;
     expect(simpleParameter.keyword, isNull);
     expect(simpleParameter.type, isNotNull);
@@ -9724,14 +9852,14 @@ class NonErrorParserTest extends ParserTestCase {
     createParser("enum E { @override C }");
     CompilationUnit unit = parser.parseCompilationUnit2();
     expectNotNullIfNoErrors(unit);
-    listener.assertNoErrors();
+    assertNoErrors();
   }
 
   void test_annotationOnEnumConstant_middle() {
     createParser("enum E { C, @override D, E }");
     CompilationUnit unit = parser.parseCompilationUnit2();
     expectNotNullIfNoErrors(unit);
-    listener.assertNoErrors();
+    assertNoErrors();
   }
 
   void test_staticMethod_notParsingFunctionBodies() {
@@ -9740,7 +9868,7 @@ class NonErrorParserTest extends ParserTestCase {
       createParser('class C { static void m() {} }');
       CompilationUnit unit = parser.parseCompilationUnit2();
       expectNotNullIfNoErrors(unit);
-      listener.assertNoErrors();
+      assertNoErrors();
     } finally {
       ParserTestCase.parseFunctionBodies = true;
     }
@@ -9974,7 +10102,7 @@ class ParserTestCase extends EngineTestCase
     listener ??= AnalysisErrorListener.NULL_LISTENER;
     Scanner scanner = new Scanner(null, new CharSequenceReader(code), listener);
     Token token = scanner.tokenize();
-    Parser parser = new Parser(null, listener);
+    Parser parser = new Parser(NonExistingSource.unknown, listener);
     parser.enableOptionalNewAndConst = enableOptionalNewAndConst;
     CompilationUnit unit = parser.parseCompilationUnit(token);
     unit.lineInfo = new LineInfo(scanner.lineStarts);
@@ -10400,8 +10528,6 @@ class ParserTestCase extends EngineTestCase
  * Intended to be mixed in to parser test case classes.
  */
 class ParserTestHelpers {
-  bool get usingFastaScanner => fe.Scanner.useFasta;
-
   void expectCommentText(Comment comment, String expectedText) {
     expect(comment.beginToken, same(comment.endToken));
     expect(comment.beginToken.lexeme, expectedText);
@@ -10501,7 +10627,7 @@ abstract class RecoveryParserTestMixin implements AbstractParserTestCase {
     IndexExpression expression =
         parseExpression("a.b[]", codes: [ParserErrorCode.MISSING_IDENTIFIER]);
     Expression index = expression.index;
-    expect(index, new isInstanceOf<SimpleIdentifier>());
+    expect(index, new TypeMatcher<SimpleIdentifier>());
     expect(index.isSynthetic, isTrue);
   }
 
@@ -10761,6 +10887,25 @@ class B = Object with A {}''',
             : [ParserErrorCode.EXPECTED_TOKEN]);
   }
 
+  void test_combinator_badIdentifier() {
+    createParser('import "/testB.dart" show @');
+    parser.parseCompilationUnit2();
+    listener.assertErrors(usingFastaParser
+        ? [
+            expectedError(ParserErrorCode.MISSING_IDENTIFIER, 26, 1),
+            expectedError(ParserErrorCode.EXPECTED_TOKEN, 27, 0),
+            expectedError(
+                ParserErrorCode.MISSING_CONST_FINAL_VAR_OR_TYPE, 27, 0),
+            expectedError(ParserErrorCode.EXPECTED_TOKEN, 27, 0)
+          ]
+        : [
+            expectedError(ParserErrorCode.MISSING_IDENTIFIER, 26, 1),
+            expectedError(ParserErrorCode.EXPECTED_TOKEN, 26, 1),
+            expectedError(ParserErrorCode.MISSING_IDENTIFIER, 26, 1),
+            expectedError(ParserErrorCode.EXPECTED_EXECUTABLE, 27, 1)
+          ]);
+  }
+
   void test_combinator_missingIdentifier() {
     createParser('import "/testB.dart" show ;');
     parser.parseCompilationUnit2();
@@ -10772,10 +10917,10 @@ class B = Object with A {}''',
     Expression expression =
         parseExpression('x ? y :', codes: [ParserErrorCode.MISSING_IDENTIFIER]);
     expectNotNullIfNoErrors(expression);
-    expect(expression, new isInstanceOf<ConditionalExpression>());
+    expect(expression, new TypeMatcher<ConditionalExpression>());
     ConditionalExpression conditionalExpression = expression;
     expect(conditionalExpression.elseExpression,
-        new isInstanceOf<SimpleIdentifier>());
+        new TypeMatcher<SimpleIdentifier>());
     expect(conditionalExpression.elseExpression.isSynthetic, isTrue);
   }
 
@@ -10783,10 +10928,10 @@ class B = Object with A {}''',
     Expression expression =
         parseExpression('x ? : z', codes: [ParserErrorCode.MISSING_IDENTIFIER]);
     expectNotNullIfNoErrors(expression);
-    expect(expression, new isInstanceOf<ConditionalExpression>());
+    expect(expression, new TypeMatcher<ConditionalExpression>());
     ConditionalExpression conditionalExpression = expression;
     expect(conditionalExpression.thenExpression,
-        new isInstanceOf<SimpleIdentifier>());
+        new TypeMatcher<SimpleIdentifier>());
     expect(conditionalExpression.thenExpression.isSynthetic, isTrue);
   }
 
@@ -10905,7 +11050,7 @@ class B = Object with A {}''',
     // and instead parseExpressionList is mapped to parseExpression('[$code]')
     // which allows and ignores an optional trailing comma.
     if (usingFastaParser) {
-      listener.assertNoErrors();
+      assertNoErrors();
       expect(result, hasLength(3));
     } else {
       listener.assertErrors(
@@ -11005,20 +11150,20 @@ class B = Object with A {}''',
     listener.assertErrors([
       expectedError(ParserErrorCode.MISSING_ASSIGNMENT_IN_INITIALIZER, 6, 1)
     ]);
-    expect(member, new isInstanceOf<ConstructorDeclaration>());
+    expect(member, new TypeMatcher<ConstructorDeclaration>());
     NodeList<ConstructorInitializer> initializers =
         (member as ConstructorDeclaration).initializers;
     expect(initializers, hasLength(1));
     ConstructorInitializer initializer = initializers[0];
-    expect(initializer, new isInstanceOf<ConstructorFieldInitializer>());
+    expect(initializer, new TypeMatcher<ConstructorFieldInitializer>());
     Expression expression =
         (initializer as ConstructorFieldInitializer).expression;
     expect(expression, isNotNull);
     expect(
         expression,
         usingFastaParser
-            ? new isInstanceOf<MethodInvocation>()
-            : new isInstanceOf<ParenthesizedExpression>());
+            ? new TypeMatcher<MethodInvocation>()
+            : new TypeMatcher<ParenthesizedExpression>());
   }
 
   void test_incomplete_constructorInitializers_this() {
@@ -11114,7 +11259,7 @@ Map<Symbol, convertStringToSymbolMap(Map<String, dynamic> map) {
             ? [
                 expectedError(
                     ParserErrorCode.MISSING_CONST_FINAL_VAR_OR_TYPE, 0, 6),
-                expectedError(ParserErrorCode.EXPECTED_TOKEN, 6, 0)
+                expectedError(ParserErrorCode.EXPECTED_TOKEN, 0, 6)
               ]
             : [expectedError(ParserErrorCode.EXPECTED_EXECUTABLE, 0, 6)]);
     NodeList<CompilationUnitMember> declarations = unit.declarations;
@@ -11360,11 +11505,10 @@ class C {
   void test_incompleteForEach() {
     ForStatement statement = parseStatement('for (String item i) {}');
     listener.assertErrors([
-      expectedError(ParserErrorCode.EXPECTED_TOKEN, 17, 1),
-      expectedError(
-          ParserErrorCode.EXPECTED_TOKEN, usingFastaParser ? 18 : 17, 1)
+      expectedError(ParserErrorCode.EXPECTED_TOKEN, 12, 4),
+      expectedError(ParserErrorCode.EXPECTED_TOKEN, 17, 1)
     ]);
-    expect(statement, new isInstanceOf<ForStatement>());
+    expect(statement, new TypeMatcher<ForStatement>());
     expect(statement.toSource(), 'for (String item; i;) {}');
     expect(statement.leftSeparator, isNotNull);
     expect(statement.leftSeparator.type, TokenType.SEMICOLON);
@@ -11375,8 +11519,8 @@ class C {
   void test_incompleteLocalVariable_atTheEndOfBlock() {
     Statement statement = parseStatement('String v }', expectedEndOffset: 9);
     listener
-        .assertErrors([expectedError(ParserErrorCode.EXPECTED_TOKEN, 9, 1)]);
-    expect(statement, new isInstanceOf<VariableDeclarationStatement>());
+        .assertErrors([expectedError(ParserErrorCode.EXPECTED_TOKEN, 7, 1)]);
+    expect(statement, new TypeMatcher<VariableDeclarationStatement>());
     expect(statement.toSource(), 'String v;');
   }
 
@@ -11386,7 +11530,7 @@ class C {
       expectedError(ParserErrorCode.MISSING_IDENTIFIER, 6, 1),
       expectedError(ParserErrorCode.EXPECTED_TOKEN, 6, 1)
     ]);
-    expect(statement, new isInstanceOf<VariableDeclarationStatement>());
+    expect(statement, new TypeMatcher<VariableDeclarationStatement>());
     expect(statement.toSource(), 'final ;');
   }
 
@@ -11394,8 +11538,8 @@ class C {
     Statement statement =
         parseStatement('String v String v2;', expectedEndOffset: 9);
     listener
-        .assertErrors([expectedError(ParserErrorCode.EXPECTED_TOKEN, 9, 6)]);
-    expect(statement, new isInstanceOf<VariableDeclarationStatement>());
+        .assertErrors([expectedError(ParserErrorCode.EXPECTED_TOKEN, 7, 1)]);
+    expect(statement, new TypeMatcher<VariableDeclarationStatement>());
     expect(statement.toSource(), 'String v;');
   }
 
@@ -11403,16 +11547,16 @@ class C {
     Statement statement =
         parseStatement('String v if (true) {}', expectedEndOffset: 9);
     listener
-        .assertErrors([expectedError(ParserErrorCode.EXPECTED_TOKEN, 9, 2)]);
-    expect(statement, new isInstanceOf<VariableDeclarationStatement>());
+        .assertErrors([expectedError(ParserErrorCode.EXPECTED_TOKEN, 7, 1)]);
+    expect(statement, new TypeMatcher<VariableDeclarationStatement>());
     expect(statement.toSource(), 'String v;');
   }
 
   void test_incompleteLocalVariable_beforeNextBlock() {
     Statement statement = parseStatement('String v {}', expectedEndOffset: 9);
     listener
-        .assertErrors([expectedError(ParserErrorCode.EXPECTED_TOKEN, 9, 1)]);
-    expect(statement, new isInstanceOf<VariableDeclarationStatement>());
+        .assertErrors([expectedError(ParserErrorCode.EXPECTED_TOKEN, 7, 1)]);
+    expect(statement, new TypeMatcher<VariableDeclarationStatement>());
     expect(statement.toSource(), 'String v;');
   }
 
@@ -11420,8 +11564,8 @@ class C {
     Statement statement =
         parseStatement('List<String> v {}', expectedEndOffset: 15);
     listener
-        .assertErrors([expectedError(ParserErrorCode.EXPECTED_TOKEN, 15, 1)]);
-    expect(statement, new isInstanceOf<VariableDeclarationStatement>());
+        .assertErrors([expectedError(ParserErrorCode.EXPECTED_TOKEN, 13, 1)]);
+    expect(statement, new TypeMatcher<VariableDeclarationStatement>());
     expect(statement.toSource(), 'List<String> v;');
   }
 
@@ -11429,7 +11573,7 @@ class C {
     CompilationUnit unit = parseCompilationUnit(r'''
 class C {
   final List<int f;
-}''', codes: [ParserErrorCode.EXPECTED_TOKEN]);
+}''', errors: [expectedError(ParserErrorCode.EXPECTED_TOKEN, 27, 1)]);
     // one class
     List<CompilationUnitMember> declarations = unit.declarations;
     expect(declarations, hasLength(1));
@@ -11487,6 +11631,26 @@ class C<K extends L<T> {
     expect(token.isSynthetic, isTrue);
   }
 
+  void test_incompleteTypeParameters3() {
+    CompilationUnit unit = parseCompilationUnit(r'''
+class C<K extends L<T {
+}''', errors: [
+      expectedError(ParserErrorCode.EXPECTED_TOKEN, 22, 1),
+      expectedError(ParserErrorCode.EXPECTED_TOKEN, 22, 1)
+    ]);
+    // one class
+    List<CompilationUnitMember> declarations = unit.declarations;
+    expect(declarations, hasLength(1));
+    ClassDeclaration classDecl = declarations[0] as ClassDeclaration;
+    // validate the type parameters
+    TypeParameterList typeParameters = classDecl.typeParameters;
+    expect(typeParameters.typeParameters, hasLength(1));
+    // synthetic '>'
+    Token token = typeParameters.endToken;
+    expect(token.type, TokenType.GT);
+    expect(token.isSynthetic, isTrue);
+  }
+
   void test_invalidFunctionBodyModifier() {
     parseCompilationUnit("f() sync {}",
         codes: [ParserErrorCode.MISSING_STAR_AFTER_SYNC]);
@@ -11498,14 +11662,7 @@ class C {
   G<int double> g;
 }''',
         errors: usingFastaParser
-            ? [
-                // TODO(danrubel): Improve missing comma recovery.
-                expectedError(ParserErrorCode.EXPECTED_TOKEN, 18, 6),
-                expectedError(ParserErrorCode.MISSING_METHOD_PARAMETERS, 12, 1),
-                expectedError(ParserErrorCode.MISSING_FUNCTION_BODY, 26, 1),
-                expectedError(
-                    ParserErrorCode.MISSING_CONST_FINAL_VAR_OR_TYPE, 26, 1),
-              ]
+            ? [expectedError(ParserErrorCode.EXPECTED_TOKEN, 18, 6)]
             : [
                 expectedError(ParserErrorCode.EXPECTED_TOKEN, 18, 6),
                 expectedError(ParserErrorCode.EXPECTED_TOKEN, 18, 6),
@@ -11519,12 +11676,12 @@ class C {
     expect(declarations, hasLength(1));
     // validate members
     if (usingFastaParser) {
-//      ClassDeclaration classDecl = declarations[0] as ClassDeclaration;
-//      expect(classDecl.members, hasLength(1));
-//      FieldDeclaration fields = classDecl.members.first;
-//      expect(fields.fields.variables, hasLength(1));
-//      VariableDeclaration field = fields.fields.variables.first;
-//      expect(field.name.name, 'g');
+      ClassDeclaration classDecl = declarations[0] as ClassDeclaration;
+      expect(classDecl.members, hasLength(1));
+      FieldDeclaration fields = classDecl.members.first;
+      expect(fields.fields.variables, hasLength(1));
+      VariableDeclaration field = fields.fields.variables.first;
+      expect(field.name.name, 'g');
     }
   }
 
@@ -11724,23 +11881,29 @@ class C {
   }
 
   void test_missingIdentifier_afterAnnotation() {
-    createParser('@override }');
+    createParser('@override }', expectedEndOffset: 10);
     ClassMember member = parser.parseClassMember('C');
     expectNotNullIfNoErrors(member);
     listener.assertErrors(
         [expectedError(ParserErrorCode.EXPECTED_CLASS_MEMBER, 10, 1)]);
-    expect(member, new isInstanceOf<MethodDeclaration>());
-    MethodDeclaration method = member;
-    expect(method.documentationComment, isNull);
-    NodeList<Annotation> metadata = method.metadata;
-    expect(metadata, hasLength(1));
-    expect(metadata[0].name.name, "override");
+    if (usingFastaParser) {
+      // TODO(danrubel): Consider generating a sub method so that the
+      // existing annotation can be associated with a class member.
+      expect(member, isNull);
+    } else {
+      expect(member, new TypeMatcher<MethodDeclaration>());
+      MethodDeclaration method = member;
+      expect(method.documentationComment, isNull);
+      NodeList<Annotation> metadata = method.metadata;
+      expect(metadata, hasLength(1));
+      expect(metadata[0].name.name, "override");
+    }
   }
 
   void test_missingSemicolon_varialeDeclarationList() {
     void verify(CompilationUnitMember member, String expectedTypeName,
         String expectedName, String expectedSemicolon) {
-      expect(member, new isInstanceOf<TopLevelVariableDeclaration>());
+      expect(member, new TypeMatcher<TopLevelVariableDeclaration>());
       TopLevelVariableDeclaration declaration = member;
       VariableDeclarationList variableList = declaration.variables;
       expect(variableList, isNotNull);
@@ -11857,7 +12020,7 @@ class C {
                 expectedError(ParserErrorCode.EXPECTED_TOKEN, 7, 4),
                 expectedError(
                     ParserErrorCode.MISSING_CONST_FINAL_VAR_OR_TYPE, 7, 4),
-                expectedError(ParserErrorCode.EXPECTED_TOKEN, 11, 1),
+                expectedError(ParserErrorCode.EXPECTED_TOKEN, 7, 4),
                 expectedError(ParserErrorCode.EXPECTED_EXECUTABLE, 11, 1),
                 expectedError(
                     ParserErrorCode.MISSING_CONST_FINAL_VAR_OR_TYPE, 12, 2)
@@ -12322,8 +12485,8 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('');
     CommentReference reference = parser.parseCommentReference('new a.b', 7);
     expectNotNullIfNoErrors(reference);
-    listener.assertNoErrors();
-    expect(reference.identifier, new isInstanceOf<PrefixedIdentifier>());
+    assertNoErrors();
+    expect(reference.identifier, new TypeMatcher<PrefixedIdentifier>());
     PrefixedIdentifier prefixedIdentifier = reference.identifier;
     SimpleIdentifier prefix = prefixedIdentifier.prefix;
     expect(prefix.token, isNotNull);
@@ -12340,8 +12503,8 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('');
     CommentReference reference = parser.parseCommentReference('new a', 5);
     expectNotNullIfNoErrors(reference);
-    listener.assertNoErrors();
-    expect(reference.identifier, new isInstanceOf<SimpleIdentifier>());
+    assertNoErrors();
+    expect(reference.identifier, new TypeMatcher<SimpleIdentifier>());
     SimpleIdentifier identifier = reference.identifier;
     expect(identifier.token, isNotNull);
     expect(identifier.name, "a");
@@ -12352,8 +12515,8 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('');
     CommentReference reference = parser.parseCommentReference('operator ==', 5);
     expectNotNullIfNoErrors(reference);
-    listener.assertNoErrors();
-    expect(reference.identifier, new isInstanceOf<SimpleIdentifier>());
+    assertNoErrors();
+    expect(reference.identifier, new TypeMatcher<SimpleIdentifier>());
     SimpleIdentifier identifier = reference.identifier;
     expect(identifier.token, isNotNull);
     expect(identifier.name, "==");
@@ -12365,8 +12528,8 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     CommentReference reference =
         parser.parseCommentReference('Object.operator==', 7);
     expectNotNullIfNoErrors(reference);
-    listener.assertNoErrors();
-    expect(reference.identifier, new isInstanceOf<PrefixedIdentifier>());
+    assertNoErrors();
+    expect(reference.identifier, new TypeMatcher<PrefixedIdentifier>());
     PrefixedIdentifier prefixedIdentifier = reference.identifier;
     SimpleIdentifier prefix = prefixedIdentifier.prefix;
     expect(prefix.token, isNotNull);
@@ -12383,8 +12546,8 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('');
     CommentReference reference = parser.parseCommentReference('==', 5);
     expectNotNullIfNoErrors(reference);
-    listener.assertNoErrors();
-    expect(reference.identifier, new isInstanceOf<SimpleIdentifier>());
+    assertNoErrors();
+    expect(reference.identifier, new TypeMatcher<SimpleIdentifier>());
     SimpleIdentifier identifier = reference.identifier;
     expect(identifier.token, isNotNull);
     expect(identifier.name, "==");
@@ -12395,8 +12558,8 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('');
     CommentReference reference = parser.parseCommentReference('Object.==', 7);
     expectNotNullIfNoErrors(reference);
-    listener.assertNoErrors();
-    expect(reference.identifier, new isInstanceOf<PrefixedIdentifier>());
+    assertNoErrors();
+    expect(reference.identifier, new TypeMatcher<PrefixedIdentifier>());
     PrefixedIdentifier prefixedIdentifier = reference.identifier;
     SimpleIdentifier prefix = prefixedIdentifier.prefix;
     expect(prefix.token, isNotNull);
@@ -12413,8 +12576,8 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('');
     CommentReference reference = parser.parseCommentReference('a.b', 7);
     expectNotNullIfNoErrors(reference);
-    listener.assertNoErrors();
-    expect(reference.identifier, new isInstanceOf<PrefixedIdentifier>());
+    assertNoErrors();
+    expect(reference.identifier, new TypeMatcher<PrefixedIdentifier>());
     PrefixedIdentifier prefixedIdentifier = reference.identifier;
     SimpleIdentifier prefix = prefixedIdentifier.prefix;
     expect(prefix.token, isNotNull);
@@ -12431,8 +12594,8 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('');
     CommentReference reference = parser.parseCommentReference('a', 5);
     expectNotNullIfNoErrors(reference);
-    listener.assertNoErrors();
-    expect(reference.identifier, new isInstanceOf<SimpleIdentifier>());
+    assertNoErrors();
+    expect(reference.identifier, new TypeMatcher<SimpleIdentifier>());
     SimpleIdentifier identifier = reference.identifier;
     expect(identifier.token, isNotNull);
     expect(identifier.name, "a");
@@ -12443,8 +12606,8 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('');
     CommentReference reference = parser.parseCommentReference('', 5);
     expectNotNullIfNoErrors(reference);
-    listener.assertNoErrors();
-    expect(reference.identifier, new isInstanceOf<SimpleIdentifier>());
+    assertNoErrors();
+    expect(reference.identifier, new TypeMatcher<SimpleIdentifier>());
     SimpleIdentifier identifier = reference.identifier;
     expect(identifier, isNotNull);
     expect(identifier.isSynthetic, isTrue);
@@ -12464,7 +12627,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('');
     CommentReference reference = parser.parseCommentReference('this', 5);
     expectNotNullIfNoErrors(reference);
-    listener.assertNoErrors();
+    assertNoErrors();
     SimpleIdentifier identifier = EngineTestCase.assertInstanceOf(
         (obj) => obj is SimpleIdentifier,
         SimpleIdentifier,
@@ -12481,7 +12644,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('');
     List<CommentReference> references = parser.parseCommentReferences(tokens);
     expectNotNullIfNoErrors(references);
-    listener.assertNoErrors();
+    assertNoErrors();
     List<Token> tokenReferences = token.references;
     expect(references, hasLength(2));
     expect(tokenReferences, hasLength(2));
@@ -12514,7 +12677,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     List<CommentReference> references =
         parser.parseCommentReferences(<DocumentationCommentToken>[docToken]);
     expectNotNullIfNoErrors(references);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(docToken.references, hasLength(1));
     expect(references, hasLength(1));
     Token referenceToken = docToken.references[0];
@@ -12537,7 +12700,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     List<CommentReference> references =
         parser.parseCommentReferences(<DocumentationCommentToken>[docToken]);
     expectNotNullIfNoErrors(references);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(docToken.references, hasLength(1));
     expect(references, hasLength(1));
     Token referenceToken = docToken.references[0];
@@ -12563,7 +12726,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('');
     List<CommentReference> references = parser.parseCommentReferences(tokens);
     expectNotNullIfNoErrors(references);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(references, hasLength(3));
     CommentReference reference = references[0];
     expect(reference, isNotNull);
@@ -12587,7 +12750,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('');
     List<CommentReference> references = parser.parseCommentReferences(tokens);
     expectNotNullIfNoErrors(references);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(references, isEmpty);
   }
 
@@ -12601,7 +12764,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('');
     List<CommentReference> references = parser.parseCommentReferences(tokens);
     expectNotNullIfNoErrors(references);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(references, isEmpty);
   }
 
@@ -12613,7 +12776,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('');
     List<CommentReference> references = parser.parseCommentReferences(tokens);
     expectNotNullIfNoErrors(references);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(references, hasLength(1));
     CommentReference reference = references[0];
     expect(reference, isNotNull);
@@ -12629,7 +12792,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('');
     List<CommentReference> references = parser.parseCommentReferences(tokens);
     expectNotNullIfNoErrors(references);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(references, hasLength(1));
     CommentReference reference = references[0];
     expect(reference, isNotNull);
@@ -12655,7 +12818,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('');
     List<CommentReference> references = parser.parseCommentReferences(tokens);
     expectNotNullIfNoErrors(references);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(references, isEmpty);
   }
 
@@ -12675,7 +12838,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('');
     List<CommentReference> references = parser.parseCommentReferences(tokens);
     expectNotNullIfNoErrors(references);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(references, isEmpty);
   }
 
@@ -12687,7 +12850,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('');
     List<CommentReference> references = parser.parseCommentReferences(tokens);
     expectNotNullIfNoErrors(references);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(references, hasLength(2));
   }
 
@@ -12699,7 +12862,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('');
     List<CommentReference> references = parser.parseCommentReferences(tokens);
     expectNotNullIfNoErrors(references);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(references, hasLength(1));
     CommentReference reference = references[0];
     expect(reference, isNotNull);
@@ -12715,7 +12878,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('');
     List<CommentReference> references = parser.parseCommentReferences(tokens);
     expectNotNullIfNoErrors(references);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(references, hasLength(1));
     CommentReference reference = references[0];
     expect(reference, isNotNull);
@@ -12731,7 +12894,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('');
     List<CommentReference> references = parser.parseCommentReferences(tokens);
     expectNotNullIfNoErrors(references);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(references, hasLength(1));
     CommentReference reference = references[0];
     expect(reference, isNotNull);
@@ -12747,7 +12910,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('');
     List<CommentReference> references = parser.parseCommentReferences(tokens);
     expectNotNullIfNoErrors(references);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(references, hasLength(1));
     CommentReference reference = references[0];
     expect(reference, isNotNull);
@@ -12759,7 +12922,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('a.b.c');
     DottedName name = parser.parseDottedName();
     expectNotNullIfNoErrors(name);
-    listener.assertNoErrors();
+    assertNoErrors();
     expectDottedName(name, ["a", "b", "c"]);
   }
 
@@ -12767,7 +12930,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('a');
     DottedName name = parser.parseDottedName();
     expectNotNullIfNoErrors(name);
-    listener.assertNoErrors();
+    assertNoErrors();
     expectDottedName(name, ["a"]);
   }
 
@@ -12775,7 +12938,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('const int Function(int) f');
     FinalConstVarOrType result = parser.parseFinalConstVarOrType(false);
     expectNotNullIfNoErrors(result);
-    listener.assertNoErrors();
+    assertNoErrors();
     Token keyword = result.keyword;
     expect(keyword, isNotNull);
     expect(keyword.type.isKeyword, true);
@@ -12787,7 +12950,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('const A a');
     FinalConstVarOrType result = parser.parseFinalConstVarOrType(false);
     expectNotNullIfNoErrors(result);
-    listener.assertNoErrors();
+    assertNoErrors();
     Token keyword = result.keyword;
     expect(keyword, isNotNull);
     expect(keyword.type.isKeyword, true);
@@ -12799,7 +12962,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('const');
     FinalConstVarOrType result = parser.parseFinalConstVarOrType(false);
     expectNotNullIfNoErrors(result);
-    listener.assertNoErrors();
+    assertNoErrors();
     Token keyword = result.keyword;
     expect(keyword, isNotNull);
     expect(keyword.type.isKeyword, true);
@@ -12811,7 +12974,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('final int Function(int) f');
     FinalConstVarOrType result = parser.parseFinalConstVarOrType(false);
     expectNotNullIfNoErrors(result);
-    listener.assertNoErrors();
+    assertNoErrors();
     Token keyword = result.keyword;
     expect(keyword, isNotNull);
     expect(keyword.type.isKeyword, true);
@@ -12823,7 +12986,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('final A a');
     FinalConstVarOrType result = parser.parseFinalConstVarOrType(false);
     expectNotNullIfNoErrors(result);
-    listener.assertNoErrors();
+    assertNoErrors();
     Token keyword = result.keyword;
     expect(keyword, isNotNull);
     expect(keyword.type.isKeyword, true);
@@ -12835,7 +12998,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('final');
     FinalConstVarOrType result = parser.parseFinalConstVarOrType(false);
     expectNotNullIfNoErrors(result);
-    listener.assertNoErrors();
+    assertNoErrors();
     Token keyword = result.keyword;
     expect(keyword, isNotNull);
     expect(keyword.type.isKeyword, true);
@@ -12847,7 +13010,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('final p.A a');
     FinalConstVarOrType result = parser.parseFinalConstVarOrType(false);
     expectNotNullIfNoErrors(result);
-    listener.assertNoErrors();
+    assertNoErrors();
     Token keyword = result.keyword;
     expect(keyword, isNotNull);
     expect(keyword.type.isKeyword, true);
@@ -12859,7 +13022,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('int Function(int) f');
     FinalConstVarOrType result = parser.parseFinalConstVarOrType(false);
     expectNotNullIfNoErrors(result);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(result.keyword, isNull);
     expect(result.type, isNotNull);
   }
@@ -12868,7 +13031,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('A<B> a');
     FinalConstVarOrType result = parser.parseFinalConstVarOrType(false);
     expectNotNullIfNoErrors(result);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(result.keyword, isNull);
     expect(result.type, isNotNull);
   }
@@ -12877,7 +13040,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('p.A a');
     FinalConstVarOrType result = parser.parseFinalConstVarOrType(false);
     expectNotNullIfNoErrors(result);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(result.keyword, isNull);
     expect(result.type, isNotNull);
   }
@@ -12886,7 +13049,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('p.A,');
     FinalConstVarOrType result = parser.parseFinalConstVarOrType(false);
     expectNotNullIfNoErrors(result);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(result.keyword, isNull);
     expect(result.type, isNotNull);
   }
@@ -12895,7 +13058,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('p.A<B> a');
     FinalConstVarOrType result = parser.parseFinalConstVarOrType(false);
     expectNotNullIfNoErrors(result);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(result.keyword, isNull);
     expect(result.type, isNotNull);
   }
@@ -12904,7 +13067,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('A a');
     FinalConstVarOrType result = parser.parseFinalConstVarOrType(false);
     expectNotNullIfNoErrors(result);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(result.keyword, isNull);
     expect(result.type, isNotNull);
   }
@@ -12914,7 +13077,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     FinalConstVarOrType result =
         parser.parseFinalConstVarOrType(false, inFunctionType: true);
     expectNotNullIfNoErrors(result);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(result.keyword, isNull);
     expect(result.type, isNotNull);
   }
@@ -12923,7 +13086,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('var');
     FinalConstVarOrType result = parser.parseFinalConstVarOrType(false);
     expectNotNullIfNoErrors(result);
-    listener.assertNoErrors();
+    assertNoErrors();
     Token keyword = result.keyword;
     expect(keyword, isNotNull);
     expect(keyword.type.isKeyword, true);
@@ -12935,7 +13098,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('void f()');
     FinalConstVarOrType result = parser.parseFinalConstVarOrType(false);
     expectNotNullIfNoErrors(result);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(result.keyword, isNull);
     expect(result.type, isNotNull);
   }
@@ -12944,7 +13107,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('void x');
     FinalConstVarOrType result = parser.parseFinalConstVarOrType(false);
     expectNotNullIfNoErrors(result);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(result.keyword, isNull);
     expect(result.type, isNotNull);
   }
@@ -12962,8 +13125,8 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('{}');
     FunctionBody functionBody = parser.parseFunctionBody(false, null, false);
     expectNotNullIfNoErrors(functionBody);
-    listener.assertNoErrors();
-    expect(functionBody, new isInstanceOf<EmptyFunctionBody>());
+    assertNoErrors();
+    expect(functionBody, new TypeMatcher<EmptyFunctionBody>());
   }
 
   void test_parseFunctionBody_skip_block_invalid() {
@@ -12971,12 +13134,8 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('{');
     FunctionBody functionBody = parser.parseFunctionBody(false, null, false);
     expectNotNullIfNoErrors(functionBody);
-    listener.assertErrorsWithCodes([
-      fe.Scanner.useFasta
-          ? ScannerErrorCode.EXPECTED_TOKEN
-          : ParserErrorCode.EXPECTED_TOKEN
-    ]);
-    expect(functionBody, new isInstanceOf<EmptyFunctionBody>());
+    listener.assertErrorsWithCodes([ScannerErrorCode.EXPECTED_TOKEN]);
+    expect(functionBody, new TypeMatcher<EmptyFunctionBody>());
   }
 
   void test_parseFunctionBody_skip_blocks() {
@@ -12984,8 +13143,8 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('{ {} }');
     FunctionBody functionBody = parser.parseFunctionBody(false, null, false);
     expectNotNullIfNoErrors(functionBody);
-    listener.assertNoErrors();
-    expect(functionBody, new isInstanceOf<EmptyFunctionBody>());
+    assertNoErrors();
+    expect(functionBody, new TypeMatcher<EmptyFunctionBody>());
   }
 
   void test_parseFunctionBody_skip_expression() {
@@ -12993,15 +13152,15 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('=> y;');
     FunctionBody functionBody = parser.parseFunctionBody(false, null, false);
     expectNotNullIfNoErrors(functionBody);
-    listener.assertNoErrors();
-    expect(functionBody, new isInstanceOf<EmptyFunctionBody>());
+    assertNoErrors();
+    expect(functionBody, new TypeMatcher<EmptyFunctionBody>());
   }
 
   void test_parseModifiers_abstract() {
     createParser('abstract A');
     Modifiers modifiers = parser.parseModifiers();
     expectNotNullIfNoErrors(modifiers);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(modifiers.abstractKeyword, isNotNull);
   }
 
@@ -13009,7 +13168,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('const A');
     Modifiers modifiers = parser.parseModifiers();
     expectNotNullIfNoErrors(modifiers);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(modifiers.constKeyword, isNotNull);
   }
 
@@ -13017,7 +13176,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('covariant A');
     Modifiers modifiers = parser.parseModifiers();
     expectNotNullIfNoErrors(modifiers);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(modifiers.covariantKeyword, isNotNull);
   }
 
@@ -13025,7 +13184,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('external A');
     Modifiers modifiers = parser.parseModifiers();
     expectNotNullIfNoErrors(modifiers);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(modifiers.externalKeyword, isNotNull);
   }
 
@@ -13033,7 +13192,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('factory A');
     Modifiers modifiers = parser.parseModifiers();
     expectNotNullIfNoErrors(modifiers);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(modifiers.factoryKeyword, isNotNull);
   }
 
@@ -13041,7 +13200,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('final A');
     Modifiers modifiers = parser.parseModifiers();
     expectNotNullIfNoErrors(modifiers);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(modifiers.finalKeyword, isNotNull);
   }
 
@@ -13049,7 +13208,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('static A');
     Modifiers modifiers = parser.parseModifiers();
     expectNotNullIfNoErrors(modifiers);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(modifiers.staticKeyword, isNotNull);
   }
 
@@ -13057,12 +13216,12 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('var A');
     Modifiers modifiers = parser.parseModifiers();
     expectNotNullIfNoErrors(modifiers);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(modifiers.varKeyword, isNotNull);
   }
 
   void test_Parser() {
-    expect(new Parser(null, null), isNotNull);
+    expect(new Parser(NonExistingSource.unknown, null), isNotNull);
   }
 
   void test_parseTypeName_parameterized_nullable() {
@@ -13070,7 +13229,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('List<int>?');
     TypeName typeName = parser.parseTypeName(false);
     expectNotNullIfNoErrors(typeName);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(typeName.name, isNotNull);
     expect(typeName.typeArguments, isNotNull);
     expect(typeName.question, isNotNull);
@@ -13081,7 +13240,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('String?');
     TypeName typeName = parser.parseTypeName(false);
     expectNotNullIfNoErrors(typeName);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(typeName.name, isNotNull);
     expect(typeName.typeArguments, isNull);
     expect(typeName.question, isNotNull);
@@ -13092,8 +13251,8 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
     createParser('A extends B?');
     TypeParameter parameter = parser.parseTypeParameter();
     expectNotNullIfNoErrors(parameter);
-    listener.assertNoErrors();
-    expect(parameter.bound, new isInstanceOf<TypeName>());
+    assertNoErrors();
+    expect(parameter.bound, new TypeMatcher<TypeName>());
     expect(parameter.extendsKeyword, isNotNull);
     expect(parameter.name, isNotNull);
     TypeName bound = parameter.bound;
@@ -13243,7 +13402,7 @@ class SimpleParserTest extends ParserTestCase with SimpleParserTestMixin {
   String _computeStringValue(String lexeme, bool first, bool last) {
     createParser('');
     String value = parser.computeStringValue(lexeme, first, last);
-    listener.assertNoErrors();
+    assertNoErrors();
     return value;
   }
 
@@ -13317,9 +13476,9 @@ abstract class SimpleParserTestMixin implements AbstractParserTestCase {
   ConstructorName parseConstructorName(String name) {
     createParser('new $name();');
     Statement statement = parser.parseStatement2();
-    expect(statement, new isInstanceOf<ExpressionStatement>());
+    expect(statement, new TypeMatcher<ExpressionStatement>());
     Expression expression = (statement as ExpressionStatement).expression;
-    expect(expression, new isInstanceOf<InstanceCreationExpression>());
+    expect(expression, new TypeMatcher<InstanceCreationExpression>());
     return (expression as InstanceCreationExpression).constructorName;
   }
 
@@ -13367,7 +13526,7 @@ abstract class SimpleParserTestMixin implements AbstractParserTestCase {
    */
   void parseStatementList(String content, int expectedCount) {
     Statement statement = parseStatement('{$content}');
-    expect(statement, new isInstanceOf<Block>());
+    expect(statement, new TypeMatcher<Block>());
     Block block = statement;
     expect(block.statements, hasLength(expectedCount));
   }
@@ -13410,7 +13569,7 @@ class C<@Foo.bar(const [], const [1], const{"":r""}, 0xFF + 2, .3, 4.5) T> {}
     createParser('@A');
     Annotation annotation = parser.parseAnnotation();
     expectNotNullIfNoErrors(annotation);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(annotation.atSign, isNotNull);
     expect(annotation.name, isNotNull);
     expect(annotation.period, isNull);
@@ -13422,7 +13581,7 @@ class C<@Foo.bar(const [], const [1], const{"":r""}, 0xFF + 2, .3, 4.5) T> {}
     createParser('@A(x,y)');
     Annotation annotation = parser.parseAnnotation();
     expectNotNullIfNoErrors(annotation);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(annotation.atSign, isNotNull);
     expect(annotation.name, isNotNull);
     expect(annotation.period, isNull);
@@ -13434,7 +13593,7 @@ class C<@Foo.bar(const [], const [1], const{"":r""}, 0xFF + 2, .3, 4.5) T> {}
     createParser('@A.B');
     Annotation annotation = parser.parseAnnotation();
     expectNotNullIfNoErrors(annotation);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(annotation.atSign, isNotNull);
     expect(annotation.name, isNotNull);
     expect(annotation.period, isNull);
@@ -13446,7 +13605,7 @@ class C<@Foo.bar(const [], const [1], const{"":r""}, 0xFF + 2, .3, 4.5) T> {}
     createParser('@A.B(x,y)');
     Annotation annotation = parser.parseAnnotation();
     expectNotNullIfNoErrors(annotation);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(annotation.atSign, isNotNull);
     expect(annotation.name, isNotNull);
     expect(annotation.period, isNull);
@@ -13458,7 +13617,7 @@ class C<@Foo.bar(const [], const [1], const{"":r""}, 0xFF + 2, .3, 4.5) T> {}
     createParser('@A.B.C');
     Annotation annotation = parser.parseAnnotation();
     expectNotNullIfNoErrors(annotation);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(annotation.atSign, isNotNull);
     expect(annotation.name, isNotNull);
     expect(annotation.period, isNotNull);
@@ -13470,7 +13629,7 @@ class C<@Foo.bar(const [], const [1], const{"":r""}, 0xFF + 2, .3, 4.5) T> {}
     createParser('@A.B.C(x,y)');
     Annotation annotation = parser.parseAnnotation();
     expectNotNullIfNoErrors(annotation);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(annotation.atSign, isNotNull);
     expect(annotation.name, isNotNull);
     expect(annotation.period, isNotNull);
@@ -13482,7 +13641,7 @@ class C<@Foo.bar(const [], const [1], const{"":r""}, 0xFF + 2, .3, 4.5) T> {}
     createParser('()');
     ArgumentList argumentList = parser.parseArgumentList();
     expectNotNullIfNoErrors(argumentList);
-    listener.assertNoErrors();
+    assertNoErrors();
     NodeList<Expression> arguments = argumentList.arguments;
     expect(arguments, hasLength(0));
   }
@@ -13491,7 +13650,7 @@ class C<@Foo.bar(const [], const [1], const{"":r""}, 0xFF + 2, .3, 4.5) T> {}
     createParser('(w, x, y: y, z: z)');
     ArgumentList argumentList = parser.parseArgumentList();
     expectNotNullIfNoErrors(argumentList);
-    listener.assertNoErrors();
+    assertNoErrors();
     NodeList<Expression> arguments = argumentList.arguments;
     expect(arguments, hasLength(4));
   }
@@ -13500,7 +13659,7 @@ class C<@Foo.bar(const [], const [1], const{"":r""}, 0xFF + 2, .3, 4.5) T> {}
     createParser('(x, y, z)');
     ArgumentList argumentList = parser.parseArgumentList();
     expectNotNullIfNoErrors(argumentList);
-    listener.assertNoErrors();
+    assertNoErrors();
     NodeList<Expression> arguments = argumentList.arguments;
     expect(arguments, hasLength(3));
   }
@@ -13509,7 +13668,7 @@ class C<@Foo.bar(const [], const [1], const{"":r""}, 0xFF + 2, .3, 4.5) T> {}
     createParser('(x: x, y: y)');
     ArgumentList argumentList = parser.parseArgumentList();
     expectNotNullIfNoErrors(argumentList);
-    listener.assertNoErrors();
+    assertNoErrors();
     NodeList<Expression> arguments = argumentList.arguments;
     expect(arguments, hasLength(2));
   }
@@ -13518,16 +13677,43 @@ class C<@Foo.bar(const [], const [1], const{"":r""}, 0xFF + 2, .3, 4.5) T> {}
     createParser('(x, y, z,)');
     ArgumentList argumentList = parser.parseArgumentList();
     expectNotNullIfNoErrors(argumentList);
-    listener.assertNoErrors();
+    assertNoErrors();
     NodeList<Expression> arguments = argumentList.arguments;
     expect(arguments, hasLength(3));
+  }
+
+  void test_parseArgumentList_typeArguments() {
+    createParser('(a<b,c>(d))');
+    ArgumentList argumentList = parser.parseArgumentList();
+    expectNotNullIfNoErrors(argumentList);
+    assertNoErrors();
+    NodeList<Expression> arguments = argumentList.arguments;
+    expect(arguments, hasLength(1));
+  }
+
+  void test_parseArgumentList_typeArguments_none() {
+    createParser('(a<b,p.q.c>(d))');
+    ArgumentList argumentList = parser.parseArgumentList();
+    expectNotNullIfNoErrors(argumentList);
+    assertNoErrors();
+    NodeList<Expression> arguments = argumentList.arguments;
+    expect(arguments, hasLength(2));
+  }
+
+  void test_parseArgumentList_typeArguments_prefixed() {
+    createParser('(a<b,p.c>(d))');
+    ArgumentList argumentList = parser.parseArgumentList();
+    expectNotNullIfNoErrors(argumentList);
+    assertNoErrors();
+    NodeList<Expression> arguments = argumentList.arguments;
+    expect(arguments, hasLength(1));
   }
 
   void test_parseCombinators_h() {
     createParser('hide a');
     List<Combinator> combinators = parser.parseCombinators();
     expectNotNullIfNoErrors(combinators);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(combinators, hasLength(1));
     HideCombinator combinator = combinators[0] as HideCombinator;
     expect(combinator, isNotNull);
@@ -13539,7 +13725,7 @@ class C<@Foo.bar(const [], const [1], const{"":r""}, 0xFF + 2, .3, 4.5) T> {}
     createParser('hide a show b');
     List<Combinator> combinators = parser.parseCombinators();
     expectNotNullIfNoErrors(combinators);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(combinators, hasLength(2));
     HideCombinator hideCombinator = combinators[0] as HideCombinator;
     expect(hideCombinator, isNotNull);
@@ -13555,7 +13741,7 @@ class C<@Foo.bar(const [], const [1], const{"":r""}, 0xFF + 2, .3, 4.5) T> {}
     createParser('hide a show b hide c show d');
     List<Combinator> combinators = parser.parseCombinators();
     expectNotNullIfNoErrors(combinators);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(combinators, hasLength(4));
   }
 
@@ -13563,7 +13749,7 @@ class C<@Foo.bar(const [], const [1], const{"":r""}, 0xFF + 2, .3, 4.5) T> {}
     createParser('show a');
     List<Combinator> combinators = parser.parseCombinators();
     expectNotNullIfNoErrors(combinators);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(combinators, hasLength(1));
     ShowCombinator combinator = combinators[0] as ShowCombinator;
     expect(combinator, isNotNull);
@@ -13575,7 +13761,7 @@ class C<@Foo.bar(const [], const [1], const{"":r""}, 0xFF + 2, .3, 4.5) T> {}
     createParser('/** 1 */ class C {}');
     CompilationUnit unit = parser.parseCompilationUnit2();
     expectNotNullIfNoErrors(unit);
-    listener.assertNoErrors();
+    assertNoErrors();
     ClassDeclaration declaration = unit.declarations[0];
     expect(declaration.documentationComment, isNotNull);
     expect(declaration.metadata, isEmpty);
@@ -13585,7 +13771,7 @@ class C<@Foo.bar(const [], const [1], const{"":r""}, 0xFF + 2, .3, 4.5) T> {}
     createParser('/** 1 */ @A /** 2 */ class C {}');
     CompilationUnit unit = parser.parseCompilationUnit2();
     expectNotNullIfNoErrors(unit);
-    listener.assertNoErrors();
+    assertNoErrors();
     ClassDeclaration declaration = unit.declarations[0];
     expect(declaration.documentationComment, isNotNull);
     expect(declaration.metadata, hasLength(1));
@@ -13595,7 +13781,7 @@ class C<@Foo.bar(const [], const [1], const{"":r""}, 0xFF + 2, .3, 4.5) T> {}
     createParser('/** 1 */ @A /** 2 */ @B class C {}');
     CompilationUnit unit = parser.parseCompilationUnit2();
     expectNotNullIfNoErrors(unit);
-    listener.assertNoErrors();
+    assertNoErrors();
     ClassDeclaration declaration = unit.declarations[0];
     expect(declaration.documentationComment, isNotNull);
     expect(declaration.metadata, hasLength(2));
@@ -13605,7 +13791,7 @@ class C<@Foo.bar(const [], const [1], const{"":r""}, 0xFF + 2, .3, 4.5) T> {}
     createParser('/** 1 */ @A @B class C {}');
     CompilationUnit unit = parser.parseCompilationUnit2();
     expectNotNullIfNoErrors(unit);
-    listener.assertNoErrors();
+    assertNoErrors();
     ClassDeclaration declaration = unit.declarations[0];
     expect(declaration.documentationComment, isNotNull);
     expect(declaration.metadata, hasLength(2));
@@ -13615,7 +13801,7 @@ class C<@Foo.bar(const [], const [1], const{"":r""}, 0xFF + 2, .3, 4.5) T> {}
     createParser('@A class C {}');
     CompilationUnit unit = parser.parseCompilationUnit2();
     expectNotNullIfNoErrors(unit);
-    listener.assertNoErrors();
+    assertNoErrors();
     ClassDeclaration declaration = unit.declarations[0];
     expect(declaration.documentationComment, isNull);
     expect(declaration.metadata, hasLength(1));
@@ -13625,7 +13811,7 @@ class C<@Foo.bar(const [], const [1], const{"":r""}, 0xFF + 2, .3, 4.5) T> {}
     createParser('@A /** 1 */ @B class C {}');
     CompilationUnit unit = parser.parseCompilationUnit2();
     expectNotNullIfNoErrors(unit);
-    listener.assertNoErrors();
+    assertNoErrors();
     ClassDeclaration declaration = unit.declarations[0];
     expect(declaration.documentationComment, isNotNull);
     expect(declaration.metadata, hasLength(2));
@@ -13635,7 +13821,7 @@ class C<@Foo.bar(const [], const [1], const{"":r""}, 0xFF + 2, .3, 4.5) T> {}
     createParser('@A /** 1 */ @B /** 2 */ class C {}');
     CompilationUnit unit = parser.parseCompilationUnit2();
     expectNotNullIfNoErrors(unit);
-    listener.assertNoErrors();
+    assertNoErrors();
     ClassDeclaration declaration = unit.declarations[0];
     expect(declaration.documentationComment, isNotNull);
     expect(declaration.documentationComment.tokens[0].lexeme, contains('2'));
@@ -13646,7 +13832,7 @@ class C<@Foo.bar(const [], const [1], const{"":r""}, 0xFF + 2, .3, 4.5) T> {}
     createParser('@A @B(x) class C {}');
     CompilationUnit unit = parser.parseCompilationUnit2();
     expectNotNullIfNoErrors(unit);
-    listener.assertNoErrors();
+    assertNoErrors();
     ClassDeclaration declaration = unit.declarations[0];
     expect(declaration.documentationComment, isNull);
     expect(declaration.metadata, hasLength(2));
@@ -13656,7 +13842,7 @@ class C<@Foo.bar(const [], const [1], const{"":r""}, 0xFF + 2, .3, 4.5) T> {}
     createParser('class C {}');
     CompilationUnit unit = parser.parseCompilationUnit2();
     expectNotNullIfNoErrors(unit);
-    listener.assertNoErrors();
+    assertNoErrors();
     ClassDeclaration declaration = unit.declarations[0];
     expect(declaration.documentationComment, isNull);
     expect(declaration.metadata, isEmpty);
@@ -13670,17 +13856,31 @@ class C {}
 ''');
     CompilationUnit unit = parser.parseCompilationUnit2();
     expectNotNullIfNoErrors(unit);
-    listener.assertNoErrors();
+    assertNoErrors();
     ClassDeclaration declaration = unit.declarations[0];
     expect(declaration.documentationComment, isNotNull);
     expect(declaration.metadata, isEmpty);
+  }
+
+  void test_parseCommentReferences_33738() {
+    CompilationUnit unit =
+        parseCompilationUnit('/** [String] */ abstract class Foo {}');
+    ClassDeclaration clazz = unit.declarations[0];
+    Comment comment = clazz.documentationComment;
+    expect(clazz.isAbstract, isTrue);
+    List<CommentReference> references = comment.references;
+    expect(references, hasLength(1));
+    CommentReference reference = references[0];
+    expect(reference, isNotNull);
+    expect(reference.identifier, isNotNull);
+    expect(reference.offset, 5);
   }
 
   void test_parseConfiguration_noOperator_dottedIdentifier() {
     createParser("if (a.b) 'c.dart'");
     Configuration configuration = parser.parseConfiguration();
     expectNotNullIfNoErrors(configuration);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(configuration.ifKeyword, isNotNull);
     expect(configuration.leftParenthesis, isNotNull);
     expectDottedName(configuration.name, ["a", "b"]);
@@ -13694,7 +13894,7 @@ class C {}
     createParser("if (a) 'b.dart'");
     Configuration configuration = parser.parseConfiguration();
     expectNotNullIfNoErrors(configuration);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(configuration.ifKeyword, isNotNull);
     expect(configuration.leftParenthesis, isNotNull);
     expectDottedName(configuration.name, ["a"]);
@@ -13708,7 +13908,7 @@ class C {}
     createParser("if (a.b == 'c') 'd.dart'");
     Configuration configuration = parser.parseConfiguration();
     expectNotNullIfNoErrors(configuration);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(configuration.ifKeyword, isNotNull);
     expect(configuration.leftParenthesis, isNotNull);
     expectDottedName(configuration.name, ["a", "b"]);
@@ -13722,7 +13922,7 @@ class C {}
     createParser("if (a == 'b') 'c.dart'");
     Configuration configuration = parser.parseConfiguration();
     expectNotNullIfNoErrors(configuration);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(configuration.ifKeyword, isNotNull);
     expect(configuration.leftParenthesis, isNotNull);
     expectDottedName(configuration.name, ["a"]);
@@ -13735,7 +13935,7 @@ class C {}
   void test_parseConstructorName_named_noPrefix() {
     ConstructorName name = parseConstructorName('A.n');
     expectNotNullIfNoErrors(name);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(name.type, isNotNull);
     expect(name.period, isNull);
     expect(name.name, isNull);
@@ -13744,7 +13944,7 @@ class C {}
   void test_parseConstructorName_named_prefixed() {
     ConstructorName name = parseConstructorName('p.A.n');
     expectNotNullIfNoErrors(name);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(name.type, isNotNull);
     expect(name.period, isNotNull);
     expect(name.name, isNotNull);
@@ -13753,7 +13953,7 @@ class C {}
   void test_parseConstructorName_unnamed_noPrefix() {
     ConstructorName name = parseConstructorName('A');
     expectNotNullIfNoErrors(name);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(name.type, isNotNull);
     expect(name.period, isNull);
     expect(name.name, isNull);
@@ -13762,7 +13962,7 @@ class C {}
   void test_parseConstructorName_unnamed_prefixed() {
     ConstructorName name = parseConstructorName('p.A');
     expectNotNullIfNoErrors(name);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(name.type, isNotNull);
     expect(name.period, isNull);
     expect(name.name, isNull);
@@ -13773,7 +13973,7 @@ class C {}
     CompilationUnit unit = parser.parseCompilationUnit2();
     Comment comment = unit.declarations[0].documentationComment;
     expectNotNullIfNoErrors(comment);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(comment.isBlock, isFalse);
     expect(comment.isDocumentation, isTrue);
     expect(comment.isEndOfLine, isFalse);
@@ -13784,7 +13984,7 @@ class C {}
     CompilationUnit unit = parser.parseCompilationUnit2();
     Comment comment = unit.declarations[0].documentationComment;
     expectNotNullIfNoErrors(comment);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(comment.isBlock, isFalse);
     expect(comment.isDocumentation, isTrue);
     expect(comment.isEndOfLine, isFalse);
@@ -13800,7 +14000,7 @@ class C {}
     CompilationUnit unit = parser.parseCompilationUnit2();
     Comment comment = unit.declarations[0].documentationComment;
     expectNotNullIfNoErrors(comment);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(comment.isBlock, isFalse);
     expect(comment.isDocumentation, isTrue);
     expect(comment.isEndOfLine, isFalse);
@@ -13809,18 +14009,18 @@ class C {}
   void test_parseExtendsClause() {
     ExtendsClause clause = parseExtendsClause('extends B');
     expectNotNullIfNoErrors(clause);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(clause.extendsKeyword, isNotNull);
     expect(clause.superclass, isNotNull);
-    expect(clause.superclass, new isInstanceOf<TypeName>());
+    expect(clause.superclass, new TypeMatcher<TypeName>());
   }
 
   void test_parseFunctionBody_block() {
     createParser('{}');
     FunctionBody functionBody = parser.parseFunctionBody(false, null, false);
     expectNotNullIfNoErrors(functionBody);
-    listener.assertNoErrors();
-    expect(functionBody, new isInstanceOf<BlockFunctionBody>());
+    assertNoErrors();
+    expect(functionBody, new TypeMatcher<BlockFunctionBody>());
     BlockFunctionBody body = functionBody;
     expect(body.keyword, isNull);
     expect(body.star, isNull);
@@ -13834,8 +14034,8 @@ class C {}
     createParser('async {}');
     FunctionBody functionBody = parser.parseFunctionBody(false, null, false);
     expectNotNullIfNoErrors(functionBody);
-    listener.assertNoErrors();
-    expect(functionBody, new isInstanceOf<BlockFunctionBody>());
+    assertNoErrors();
+    expect(functionBody, new TypeMatcher<BlockFunctionBody>());
     BlockFunctionBody body = functionBody;
     expect(body.keyword, isNotNull);
     expect(body.keyword.lexeme, Parser.ASYNC);
@@ -13850,8 +14050,8 @@ class C {}
     createParser('async* {}');
     FunctionBody functionBody = parser.parseFunctionBody(false, null, false);
     expectNotNullIfNoErrors(functionBody);
-    listener.assertNoErrors();
-    expect(functionBody, new isInstanceOf<BlockFunctionBody>());
+    assertNoErrors();
+    expect(functionBody, new TypeMatcher<BlockFunctionBody>());
     BlockFunctionBody body = functionBody;
     expect(body.keyword, isNotNull);
     expect(body.keyword.lexeme, Parser.ASYNC);
@@ -13866,8 +14066,8 @@ class C {}
     createParser('sync* {}');
     FunctionBody functionBody = parser.parseFunctionBody(false, null, false);
     expectNotNullIfNoErrors(functionBody);
-    listener.assertNoErrors();
-    expect(functionBody, new isInstanceOf<BlockFunctionBody>());
+    assertNoErrors();
+    expect(functionBody, new TypeMatcher<BlockFunctionBody>());
     BlockFunctionBody body = functionBody;
     expect(body.keyword, isNotNull);
     expect(body.keyword.lexeme, Parser.SYNC);
@@ -13882,8 +14082,8 @@ class C {}
     createParser(';');
     FunctionBody functionBody = parser.parseFunctionBody(true, null, false);
     expectNotNullIfNoErrors(functionBody);
-    listener.assertNoErrors();
-    expect(functionBody, new isInstanceOf<EmptyFunctionBody>());
+    assertNoErrors();
+    expect(functionBody, new TypeMatcher<EmptyFunctionBody>());
     EmptyFunctionBody body = functionBody;
     expect(body.semicolon, isNotNull);
   }
@@ -13892,8 +14092,8 @@ class C {}
     createParser('=> y;');
     FunctionBody functionBody = parser.parseFunctionBody(false, null, false);
     expectNotNullIfNoErrors(functionBody);
-    listener.assertNoErrors();
-    expect(functionBody, new isInstanceOf<ExpressionFunctionBody>());
+    assertNoErrors();
+    expect(functionBody, new TypeMatcher<ExpressionFunctionBody>());
     ExpressionFunctionBody body = functionBody;
     expect(body.keyword, isNull);
     expect(body.functionDefinition, isNotNull);
@@ -13908,8 +14108,8 @@ class C {}
     createParser('async => y;');
     FunctionBody functionBody = parser.parseFunctionBody(false, null, false);
     expectNotNullIfNoErrors(functionBody);
-    listener.assertNoErrors();
-    expect(functionBody, new isInstanceOf<ExpressionFunctionBody>());
+    assertNoErrors();
+    expect(functionBody, new TypeMatcher<ExpressionFunctionBody>());
     ExpressionFunctionBody body = functionBody;
     expect(body.keyword, isNotNull);
     expect(body.keyword.lexeme, Parser.ASYNC);
@@ -13924,21 +14124,21 @@ class C {}
   void test_parseIdentifierList_multiple() {
     List<SimpleIdentifier> list = parseIdentifierList('a, b, c');
     expectNotNullIfNoErrors(list);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(list, hasLength(3));
   }
 
   void test_parseIdentifierList_single() {
     List<SimpleIdentifier> list = parseIdentifierList('a');
     expectNotNullIfNoErrors(list);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(list, hasLength(1));
   }
 
   void test_parseImplementsClause_multiple() {
     ImplementsClause clause = parseImplementsClause('implements A, B, C');
     expectNotNullIfNoErrors(clause);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(clause.interfaces, hasLength(3));
     expect(clause.implementsKeyword, isNotNull);
   }
@@ -13946,9 +14146,40 @@ class C {}
   void test_parseImplementsClause_single() {
     ImplementsClause clause = parseImplementsClause('implements A');
     expectNotNullIfNoErrors(clause);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(clause.interfaces, hasLength(1));
     expect(clause.implementsKeyword, isNotNull);
+  }
+
+  void test_parseInstanceCreation_keyword_33647() {
+    enableOptionalNewAndConst = true;
+    CompilationUnit unit = parseCompilationUnit('''
+var c = new Future<int>.sync(() => 3).then<int>((e) => e);
+''');
+    expect(unit, isNotNull);
+    TopLevelVariableDeclaration v = unit.declarations[0];
+    MethodInvocation init = v.variables.variables[0].initializer;
+    expect(init.methodName.name, 'then');
+    NodeList<TypeAnnotation> typeArg = init.typeArguments.arguments;
+    expect(typeArg, hasLength(1));
+    expect(typeArg[0].beginToken.lexeme, 'int');
+  }
+
+  void test_parseInstanceCreation_noKeyword_33647() {
+    enableOptionalNewAndConst = true;
+    // Old parser produces errors
+    if (usingFastaParser) {
+      CompilationUnit unit = parseCompilationUnit('''
+var c = Future<int>.sync(() => 3).then<int>((e) => e);
+''');
+      expect(unit, isNotNull);
+      TopLevelVariableDeclaration v = unit.declarations[0];
+      MethodInvocation init = v.variables.variables[0].initializer;
+      expect(init.methodName.name, 'then');
+      NodeList<TypeAnnotation> typeArg = init.typeArguments.arguments;
+      expect(typeArg, hasLength(1));
+      expect(typeArg[0].beginToken.lexeme, 'int');
+    }
   }
 
   void test_parseInstanceCreation_noKeyword_noPrefix() {
@@ -13958,7 +14189,7 @@ class C {}
     expect(unit, isNotNull);
     FunctionDeclaration f = unit.declarations[0];
     ExpressionFunctionBody body = f.functionExpression.body;
-    expect(body.expression, new isInstanceOf<InstanceCreationExpression>());
+    expect(body.expression, new TypeMatcher<InstanceCreationExpression>());
     InstanceCreationExpression creation = body.expression;
     expect(creation.keyword, isNull);
     ConstructorName constructorName = creation.constructorName;
@@ -13975,7 +14206,7 @@ class C {}
     expect(unit, isNotNull);
     FunctionDeclaration f = unit.declarations[0];
     ExpressionFunctionBody body = f.functionExpression.body;
-    expect(body.expression, new isInstanceOf<InstanceCreationExpression>());
+    expect(body.expression, new TypeMatcher<InstanceCreationExpression>());
     InstanceCreationExpression creation = body.expression;
     expect(creation.keyword, isNull);
     ConstructorName constructorName = creation.constructorName;
@@ -14006,7 +14237,7 @@ void main() {final c = C<int, int Function(String)>();}
     String name = "deferred";
     LibraryIdentifier identifier = parseLibraryIdentifier(name);
     expectNotNullIfNoErrors(identifier);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(identifier.name, name);
     expect(identifier.beginToken.type.isBuiltIn, isTrue);
   }
@@ -14026,7 +14257,7 @@ void main() {final c = C<int, int Function(String)>();}
     String name = "a.b.c";
     LibraryIdentifier identifier = parseLibraryIdentifier(name);
     expectNotNullIfNoErrors(identifier);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(identifier.name, name);
   }
 
@@ -14034,7 +14265,7 @@ void main() {final c = C<int, int Function(String)>();}
     String name = "await";
     LibraryIdentifier identifier = parseLibraryIdentifier(name);
     expectNotNullIfNoErrors(identifier);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(identifier.name, name);
     expect(identifier.beginToken.type.isPseudo, isTrue);
   }
@@ -14043,7 +14274,7 @@ void main() {final c = C<int, int Function(String)>();}
     String name = "a";
     LibraryIdentifier identifier = parseLibraryIdentifier(name);
     expectNotNullIfNoErrors(identifier);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(identifier.name, name);
   }
 
@@ -14054,7 +14285,7 @@ void main() {final c = C<int, int Function(String)>();}
   void test_parseReturnStatement_noValue() {
     ReturnStatement statement = parseStatement('return;');
     expectNotNullIfNoErrors(statement);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(statement.returnKeyword, isNotNull);
     expect(statement.expression, isNull);
     expect(statement.semicolon, isNotNull);
@@ -14063,7 +14294,7 @@ void main() {final c = C<int, int Function(String)>();}
   void test_parseReturnStatement_value() {
     ReturnStatement statement = parseStatement('return x;');
     expectNotNullIfNoErrors(statement);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(statement.returnKeyword, isNotNull);
     expect(statement.expression, isNotNull);
     expect(statement.semicolon, isNotNull);
@@ -14074,13 +14305,13 @@ void main() {final c = C<int, int Function(String)>();}
 Function<A>(core.List<core.int> x) m() => null;
 ''');
     Statement statement = parser.parseStatement2();
-    expect(statement, new isInstanceOf<FunctionDeclarationStatement>());
+    expect(statement, new TypeMatcher<FunctionDeclarationStatement>());
     expect(
         (statement as FunctionDeclarationStatement)
             .functionDeclaration
             .functionExpression
             .body,
-        new isInstanceOf<ExpressionFunctionBody>());
+        new TypeMatcher<ExpressionFunctionBody>());
   }
 
   void test_parseStatements_multiple() {
@@ -14095,7 +14326,7 @@ Function<A>(core.List<core.int> x) m() => null;
     createParser('Function()');
     GenericFunctionType functionType = parser.parseTypeAnnotation(false);
     expectNotNullIfNoErrors(functionType);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(functionType.returnType, isNull);
     expect(functionType.functionKeyword, isNotNull);
     expect(functionType.typeParameters, isNull);
@@ -14108,7 +14339,7 @@ Function<A>(core.List<core.int> x) m() => null;
     createParser('Function(int, int)');
     GenericFunctionType functionType = parser.parseTypeAnnotation(false);
     expectNotNullIfNoErrors(functionType);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(functionType.returnType, isNull);
     expect(functionType.functionKeyword, isNotNull);
     expect(functionType.typeParameters, isNull);
@@ -14117,16 +14348,16 @@ Function<A>(core.List<core.int> x) m() => null;
     NodeList<FormalParameter> parameters = parameterList.parameters;
     expect(parameters, hasLength(2));
 
-    expect(parameters[0], new isInstanceOf<SimpleFormalParameter>());
+    expect(parameters[0], new TypeMatcher<SimpleFormalParameter>());
     SimpleFormalParameter parameter = parameters[0];
     expect(parameter.identifier, isNull);
-    expect(parameter.type, new isInstanceOf<TypeName>());
+    expect(parameter.type, new TypeMatcher<TypeName>());
     expect((parameter.type as TypeName).name.name, 'int');
 
-    expect(parameters[1], new isInstanceOf<SimpleFormalParameter>());
+    expect(parameters[1], new TypeMatcher<SimpleFormalParameter>());
     parameter = parameters[1];
     expect(parameter.identifier, isNull);
-    expect(parameter.type, new isInstanceOf<TypeName>());
+    expect(parameter.type, new TypeMatcher<TypeName>());
     expect((parameter.type as TypeName).name.name, 'int');
   }
 
@@ -14134,7 +14365,7 @@ Function<A>(core.List<core.int> x) m() => null;
     createParser('Function<S, T>()');
     GenericFunctionType functionType = parser.parseTypeAnnotation(false);
     expectNotNullIfNoErrors(functionType);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(functionType.returnType, isNull);
     expect(functionType.functionKeyword, isNotNull);
     TypeParameterList typeParameters = functionType.typeParameters;
@@ -14150,7 +14381,7 @@ Function<A>(core.List<core.int> x) m() => null;
     createParser('Function<T>(String, {T t})');
     GenericFunctionType functionType = parser.parseTypeAnnotation(false);
     expectNotNullIfNoErrors(functionType);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(functionType.returnType, isNull);
     expect(functionType.functionKeyword, isNotNull);
     TypeParameterList typeParameters = functionType.typeParameters;
@@ -14165,7 +14396,7 @@ Function<A>(core.List<core.int> x) m() => null;
     createParser('Function');
     TypeName functionType = parser.parseTypeAnnotation(false);
     expectNotNullIfNoErrors(functionType);
-    listener.assertNoErrors();
+    assertNoErrors();
   }
 
   void test_parseTypeAnnotation_function_returnType_function() {
@@ -14173,14 +14404,14 @@ Function<A>(core.List<core.int> x) m() => null;
     // TODO(scheglov) improve the test to verify also the node properties
     var functionType = parser.parseTypeAnnotation(false) as GenericFunctionType;
     expectNotNullIfNoErrors(functionType);
-    listener.assertNoErrors();
+    assertNoErrors();
   }
 
   void test_parseTypeAnnotation_function_returnType_noParameters() {
     createParser('List<int> Function()');
     GenericFunctionType functionType = parser.parseTypeAnnotation(false);
     expectNotNullIfNoErrors(functionType);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(functionType.returnType, isNotNull);
     expect(functionType.functionKeyword, isNotNull);
     expect(functionType.typeParameters, isNull);
@@ -14193,7 +14424,7 @@ Function<A>(core.List<core.int> x) m() => null;
     createParser('List<int> Function(String s, int i)');
     GenericFunctionType functionType = parser.parseTypeAnnotation(false);
     expectNotNullIfNoErrors(functionType);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(functionType.returnType, isNotNull);
     expect(functionType.functionKeyword, isNotNull);
     expect(functionType.typeParameters, isNull);
@@ -14202,18 +14433,18 @@ Function<A>(core.List<core.int> x) m() => null;
     NodeList<FormalParameter> parameters = parameterList.parameters;
     expect(parameters, hasLength(2));
 
-    expect(parameters[0], new isInstanceOf<SimpleFormalParameter>());
+    expect(parameters[0], new TypeMatcher<SimpleFormalParameter>());
     SimpleFormalParameter parameter = parameters[0];
     expect(parameter.identifier, isNotNull);
     expect(parameter.identifier.name, 's');
-    expect(parameter.type, new isInstanceOf<TypeName>());
+    expect(parameter.type, new TypeMatcher<TypeName>());
     expect((parameter.type as TypeName).name.name, 'String');
 
-    expect(parameters[1], new isInstanceOf<SimpleFormalParameter>());
+    expect(parameters[1], new TypeMatcher<SimpleFormalParameter>());
     parameter = parameters[1];
     expect(parameter.identifier, isNotNull);
     expect(parameter.identifier.name, 'i');
-    expect(parameter.type, new isInstanceOf<TypeName>());
+    expect(parameter.type, new TypeMatcher<TypeName>());
     expect((parameter.type as TypeName).name.name, 'int');
   }
 
@@ -14222,14 +14453,14 @@ Function<A>(core.List<core.int> x) m() => null;
     // TODO(scheglov) improve the test to verify also the node properties
     var functionType = parser.parseTypeAnnotation(false) as GenericFunctionType;
     expectNotNullIfNoErrors(functionType);
-    listener.assertNoErrors();
+    assertNoErrors();
   }
 
   void test_parseTypeAnnotation_function_returnType_typeParameters() {
     createParser('List<T> Function<T>()');
     GenericFunctionType functionType = parser.parseTypeAnnotation(false);
     expectNotNullIfNoErrors(functionType);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(functionType.returnType, isNotNull);
     expect(functionType.functionKeyword, isNotNull);
     TypeParameterList typeParameters = functionType.typeParameters;
@@ -14245,7 +14476,7 @@ Function<A>(core.List<core.int> x) m() => null;
     createParser('List<T> Function<T>(String s, [T])');
     GenericFunctionType functionType = parser.parseTypeAnnotation(false);
     expectNotNullIfNoErrors(functionType);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(functionType.returnType, isNotNull);
     expect(functionType.functionKeyword, isNotNull);
     TypeParameterList typeParameters = functionType.typeParameters;
@@ -14261,14 +14492,14 @@ Function<A>(core.List<core.int> x) m() => null;
     // TODO(scheglov) improve this test to verify also the node properties
     var functionType = parser.parseTypeAnnotation(false) as GenericFunctionType;
     expectNotNullIfNoErrors(functionType);
-    listener.assertNoErrors();
+    assertNoErrors();
   }
 
   void test_parseTypeAnnotation_named() {
     createParser('A<B>');
     TypeName typeName = parser.parseTypeAnnotation(false);
     expectNotNullIfNoErrors(typeName);
-    listener.assertNoErrors();
+    assertNoErrors();
   }
 
   void test_parseTypeArgumentList_empty() {
@@ -14285,7 +14516,7 @@ Function<A>(core.List<core.int> x) m() => null;
     createParser('<int, int, int>');
     TypeArgumentList argumentList = parser.parseTypeArgumentList();
     expectNotNullIfNoErrors(argumentList);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(argumentList.leftBracket, isNotNull);
     expect(argumentList.arguments, hasLength(3));
     expect(argumentList.rightBracket, isNotNull);
@@ -14295,7 +14526,7 @@ Function<A>(core.List<core.int> x) m() => null;
     createParser('<A<B>>');
     TypeArgumentList argumentList = parser.parseTypeArgumentList();
     expectNotNullIfNoErrors(argumentList);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(argumentList.leftBracket, isNotNull);
     expect(argumentList.arguments, hasLength(1));
     TypeName argument = argumentList.arguments[0];
@@ -14310,7 +14541,7 @@ Function<A>(core.List<core.int> x) m() => null;
     createParser('<A<B /* 0 */ >>');
     TypeArgumentList argumentList = parser.parseTypeArgumentList();
     expectNotNullIfNoErrors(argumentList);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(argumentList.leftBracket, isNotNull);
     expect(argumentList.rightBracket, isNotNull);
     expect(argumentList.arguments, hasLength(1));
@@ -14330,7 +14561,7 @@ Function<A>(core.List<core.int> x) m() => null;
     createParser('<A<B<C /* 0 */ >>>');
     TypeArgumentList argumentList = parser.parseTypeArgumentList();
     expectNotNullIfNoErrors(argumentList);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(argumentList.leftBracket, isNotNull);
     expect(argumentList.rightBracket, isNotNull);
     expect(argumentList.arguments, hasLength(1));
@@ -14359,7 +14590,7 @@ Function<A>(core.List<core.int> x) m() => null;
     createParser('<int>');
     TypeArgumentList argumentList = parser.parseTypeArgumentList();
     expectNotNullIfNoErrors(argumentList);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(argumentList.leftBracket, isNotNull);
     expect(argumentList.arguments, hasLength(1));
     expect(argumentList.rightBracket, isNotNull);
@@ -14369,7 +14600,7 @@ Function<A>(core.List<core.int> x) m() => null;
     createParser('List<int>');
     TypeName typeName = parser.parseTypeName(false);
     expectNotNullIfNoErrors(typeName);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(typeName.name, isNotNull);
     expect(typeName.typeArguments, isNotNull);
     expect(typeName.question, isNull);
@@ -14379,7 +14610,7 @@ Function<A>(core.List<core.int> x) m() => null;
     createParser('int');
     TypeName typeName = parser.parseTypeName(false);
     expectNotNullIfNoErrors(typeName);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(typeName.name, isNotNull);
     expect(typeName.typeArguments, isNull);
     expect(typeName.question, isNull);
@@ -14389,8 +14620,8 @@ Function<A>(core.List<core.int> x) m() => null;
     createParser('A extends Function(int)');
     TypeParameter parameter = parser.parseTypeParameter();
     expectNotNullIfNoErrors(parameter);
-    listener.assertNoErrors();
-    expect(parameter.bound, new isInstanceOf<GenericFunctionType>());
+    assertNoErrors();
+    expect(parameter.bound, new TypeMatcher<GenericFunctionType>());
     expect(parameter.extendsKeyword, isNotNull);
     expect(parameter.name, isNotNull);
   }
@@ -14399,8 +14630,8 @@ Function<A>(core.List<core.int> x) m() => null;
     createParser('A extends String Function(int)');
     TypeParameter parameter = parser.parseTypeParameter();
     expectNotNullIfNoErrors(parameter);
-    listener.assertNoErrors();
-    expect(parameter.bound, new isInstanceOf<GenericFunctionType>());
+    assertNoErrors();
+    expect(parameter.bound, new TypeMatcher<GenericFunctionType>());
     expect(parameter.extendsKeyword, isNotNull);
     expect(parameter.name, isNotNull);
   }
@@ -14409,8 +14640,8 @@ Function<A>(core.List<core.int> x) m() => null;
     createParser('A extends B<C>');
     TypeParameter parameter = parser.parseTypeParameter();
     expectNotNullIfNoErrors(parameter);
-    listener.assertNoErrors();
-    expect(parameter.bound, new isInstanceOf<TypeName>());
+    assertNoErrors();
+    expect(parameter.bound, new TypeMatcher<TypeName>());
     expect(parameter.extendsKeyword, isNotNull);
     expect(parameter.name, isNotNull);
   }
@@ -14419,8 +14650,8 @@ Function<A>(core.List<core.int> x) m() => null;
     createParser('A extends B');
     TypeParameter parameter = parser.parseTypeParameter();
     expectNotNullIfNoErrors(parameter);
-    listener.assertNoErrors();
-    expect(parameter.bound, new isInstanceOf<TypeName>());
+    assertNoErrors();
+    expect(parameter.bound, new TypeMatcher<TypeName>());
     expect(parameter.extendsKeyword, isNotNull);
     expect(parameter.name, isNotNull);
   }
@@ -14429,7 +14660,7 @@ Function<A>(core.List<core.int> x) m() => null;
     createParser('A');
     TypeParameter parameter = parser.parseTypeParameter();
     expectNotNullIfNoErrors(parameter);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(parameter.bound, isNull);
     expect(parameter.extendsKeyword, isNull);
     expect(parameter.name, isNotNull);
@@ -14439,7 +14670,7 @@ Function<A>(core.List<core.int> x) m() => null;
     createParser('<A, B extends C, D>');
     TypeParameterList parameterList = parser.parseTypeParameterList();
     expectNotNullIfNoErrors(parameterList);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(parameterList.leftBracket, isNotNull);
     expect(parameterList.rightBracket, isNotNull);
     expect(parameterList.typeParameters, hasLength(3));
@@ -14449,7 +14680,7 @@ Function<A>(core.List<core.int> x) m() => null;
     createParser('<A extends B<E>>=', expectedEndOffset: 16);
     TypeParameterList parameterList = parser.parseTypeParameterList();
     expectNotNullIfNoErrors(parameterList);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(parameterList.leftBracket, isNotNull);
     expect(parameterList.rightBracket, isNotNull);
     expect(parameterList.typeParameters, hasLength(1));
@@ -14459,7 +14690,7 @@ Function<A>(core.List<core.int> x) m() => null;
     createParser('<A extends B<E /* foo */ >>=', expectedEndOffset: 27);
     TypeParameterList parameterList = parser.parseTypeParameterList();
     expectNotNullIfNoErrors(parameterList);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(parameterList.leftBracket, isNotNull);
     expect(parameterList.rightBracket, isNotNull);
     expect(parameterList.typeParameters, hasLength(1));
@@ -14476,20 +14707,27 @@ Function<A>(core.List<core.int> x) m() => null;
   }
 
   void test_parseTypeParameterList_single() {
-    createParser('<<A>');
+    createParser('<<A>', expectedEndOffset: 0);
     TypeParameterList parameterList = parser.parseTypeParameterList();
-    expectNotNullIfNoErrors(parameterList);
-    listener.assertNoErrors();
-    expect(parameterList.leftBracket, isNotNull);
-    expect(parameterList.rightBracket, isNotNull);
-    expect(parameterList.typeParameters, hasLength(1));
+    if (usingFastaParser) {
+      // TODO(danrubel): Consider splitting `<<` and marking the first `<`
+      // as an unexpected token.
+      expect(parameterList, isNull);
+      assertNoErrors();
+    } else {
+      expectNotNullIfNoErrors(parameterList);
+      assertNoErrors();
+      expect(parameterList.leftBracket, isNotNull);
+      expect(parameterList.rightBracket, isNotNull);
+      expect(parameterList.typeParameters, hasLength(1));
+    }
   }
 
   void test_parseTypeParameterList_withTrailingEquals() {
     createParser('<A>=', expectedEndOffset: 3);
     TypeParameterList parameterList = parser.parseTypeParameterList();
     expectNotNullIfNoErrors(parameterList);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(parameterList.leftBracket, isNotNull);
     expect(parameterList.rightBracket, isNotNull);
     expect(parameterList.typeParameters, hasLength(1));
@@ -14498,7 +14736,7 @@ Function<A>(core.List<core.int> x) m() => null;
   void test_parseVariableDeclaration_equals() {
     VariableDeclaration declaration = parseVariableDeclaration('var a = b;');
     expectNotNullIfNoErrors(declaration);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(declaration.name, isNotNull);
     expect(declaration.equals, isNotNull);
     expect(declaration.initializer, isNotNull);
@@ -14507,7 +14745,7 @@ Function<A>(core.List<core.int> x) m() => null;
   void test_parseVariableDeclaration_noEquals() {
     VariableDeclaration declaration = parseVariableDeclaration('var a;');
     expectNotNullIfNoErrors(declaration);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(declaration.name, isNotNull);
     expect(declaration.equals, isNull);
     expect(declaration.initializer, isNull);
@@ -14516,7 +14754,7 @@ Function<A>(core.List<core.int> x) m() => null;
   void test_parseWithClause_multiple() {
     WithClause clause = parseWithClause('with A, B, C');
     expectNotNullIfNoErrors(clause);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(clause.withKeyword, isNotNull);
     expect(clause.mixinTypes, hasLength(3));
   }
@@ -14524,7 +14762,7 @@ Function<A>(core.List<core.int> x) m() => null;
   void test_parseWithClause_single() {
     WithClause clause = parseWithClause('with M');
     expectNotNullIfNoErrors(clause);
-    listener.assertNoErrors();
+    assertNoErrors();
     expect(clause.withKeyword, isNotNull);
     expect(clause.mixinTypes, hasLength(1));
   }
@@ -14663,7 +14901,10 @@ main() {
   }
 
   void test_parseBreakStatement_label() {
-    var statement = parseStatement('break foo;') as BreakStatement;
+    LabeledStatement labeledStatement =
+        parseStatement('foo: while (true) { break foo; }');
+    WhileStatement whileStatement = labeledStatement.statement;
+    BreakStatement statement = (whileStatement.body as Block).statements[0];
     assertNoErrors();
     expect(statement.breakKeyword, isNotNull);
     expect(statement.label, isNotNull);
@@ -14671,24 +14912,30 @@ main() {
   }
 
   void test_parseBreakStatement_noLabel() {
-    var statement = parseStatement('break;') as BreakStatement;
-    assertErrorsWithCodes([ParserErrorCode.BREAK_OUTSIDE_OF_LOOP]);
+    WhileStatement whileStatement = parseStatement('while (true) { break; }');
+    BreakStatement statement = (whileStatement.body as Block).statements[0];
+    assertNoErrors();
     expect(statement.breakKeyword, isNotNull);
     expect(statement.label, isNull);
     expect(statement.semicolon, isNotNull);
   }
 
   void test_parseContinueStatement_label() {
-    var statement = parseStatement('continue foo;') as ContinueStatement;
-    assertErrorsWithCodes([ParserErrorCode.CONTINUE_OUTSIDE_OF_LOOP]);
+    LabeledStatement labeledStatement =
+        parseStatement('foo: while (true) { continue foo; }');
+    WhileStatement whileStatement = labeledStatement.statement;
+    ContinueStatement statement = (whileStatement.body as Block).statements[0];
+    assertNoErrors();
     expect(statement.continueKeyword, isNotNull);
     expect(statement.label, isNotNull);
     expect(statement.semicolon, isNotNull);
   }
 
   void test_parseContinueStatement_noLabel() {
-    var statement = parseStatement('continue;') as ContinueStatement;
-    assertErrorsWithCodes([ParserErrorCode.CONTINUE_OUTSIDE_OF_LOOP]);
+    WhileStatement whileStatement =
+        parseStatement('while (true) { continue; }');
+    ContinueStatement statement = (whileStatement.body as Block).statements[0];
+    assertNoErrors();
     expect(statement.continueKeyword, isNotNull);
     expect(statement.label, isNull);
     expect(statement.semicolon, isNotNull);
@@ -14704,6 +14951,20 @@ main() {
     expect(statement.condition, isNotNull);
     expect(statement.rightParenthesis, isNotNull);
     expect(statement.semicolon, isNotNull);
+  }
+
+  void test_parseElseAlone() {
+    parseCompilationUnit('main() { else return 0; } ',
+        errors: usingFastaParser
+            ? [
+                expectedError(ParserErrorCode.MISSING_IDENTIFIER, 9, 4),
+                expectedError(ParserErrorCode.EXPECTED_TOKEN, 9, 4),
+                expectedError(ParserErrorCode.UNEXPECTED_TOKEN, 9, 4),
+              ]
+            : [
+                expectedError(ParserErrorCode.MISSING_STATEMENT, 9, 4),
+                expectedError(ParserErrorCode.UNEXPECTED_TOKEN, 9, 4),
+              ]);
   }
 
   void test_parseEmptyStatement() {
@@ -15178,7 +15439,7 @@ main() {
         as FunctionDeclarationStatement;
     assertNoErrors();
     FunctionDeclaration function = statement.functionDeclaration;
-    expect(function.returnType, new isInstanceOf<GenericFunctionType>());
+    expect(function.returnType, new TypeMatcher<GenericFunctionType>());
   }
 
   void test_parseNonLabeledStatement_null() {
@@ -15222,7 +15483,7 @@ main() {
     List<VariableDeclaration> variables = variableList.variables;
     expect(variables, hasLength(1));
     expect(variables[0].name.name, 'v');
-    expect(variableList.type, new isInstanceOf<GenericFunctionType>());
+    expect(variableList.type, new TypeMatcher<GenericFunctionType>());
   }
 
   void
@@ -15235,7 +15496,7 @@ main() {
     List<VariableDeclaration> variables = variableList.variables;
     expect(variables, hasLength(1));
     expect(variables[0].name.name, 'v');
-    expect(variableList.type, new isInstanceOf<GenericFunctionType>());
+    expect(variableList.type, new TypeMatcher<GenericFunctionType>());
   }
 
   void
@@ -15247,7 +15508,7 @@ main() {
     List<VariableDeclaration> variables = variableList.variables;
     expect(variables, hasLength(1));
     expect(variables[0].name.name, 'v');
-    expect(variableList.type, new isInstanceOf<GenericFunctionType>());
+    expect(variableList.type, new TypeMatcher<GenericFunctionType>());
   }
 
   void
@@ -15259,7 +15520,7 @@ main() {
     List<VariableDeclaration> variables = variableList.variables;
     expect(variables, hasLength(1));
     expect(variables[0].name.name, 'v');
-    expect(variableList.type, new isInstanceOf<GenericFunctionType>());
+    expect(variableList.type, new TypeMatcher<GenericFunctionType>());
   }
 
   void
@@ -15271,7 +15532,7 @@ main() {
     List<VariableDeclaration> variables = variableList.variables;
     expect(variables, hasLength(1));
     expect(variables[0].name.name, 'v');
-    expect(variableList.type, new isInstanceOf<GenericFunctionType>());
+    expect(variableList.type, new TypeMatcher<GenericFunctionType>());
   }
 
   void test_parseNonLabeledStatement_variableDeclaration_gftType_returnType() {
@@ -15282,7 +15543,7 @@ main() {
     List<VariableDeclaration> variables = variableList.variables;
     expect(variables, hasLength(1));
     expect(variables[0].name.name, 'v');
-    expect(variableList.type, new isInstanceOf<GenericFunctionType>());
+    expect(variableList.type, new TypeMatcher<GenericFunctionType>());
   }
 
   void
@@ -15294,7 +15555,7 @@ main() {
     List<VariableDeclaration> variables = variableList.variables;
     expect(variables, hasLength(1));
     expect(variables[0].name.name, 'v');
-    expect(variableList.type, new isInstanceOf<GenericFunctionType>());
+    expect(variableList.type, new TypeMatcher<GenericFunctionType>());
   }
 
   void test_parseNonLabeledStatement_variableDeclaration_typeParam() {
@@ -15338,7 +15599,7 @@ main() {
     expect(typeName.name.name, 'C');
     expect(typeName.typeArguments.arguments, hasLength(1));
     expect(typeName.typeArguments.arguments[0],
-        new isInstanceOf<GenericFunctionType>());
+        new TypeMatcher<GenericFunctionType>());
   }
 
   void test_parseStatement_emptyTypeArgumentList() {
@@ -15358,7 +15619,7 @@ main() {
         parseStatement('void Function<A>(core.List<core.int> x) m() => null;')
             as FunctionDeclarationStatement;
     expect(statement.functionDeclaration.functionExpression.body,
-        new isInstanceOf<ExpressionFunctionBody>());
+        new TypeMatcher<ExpressionFunctionBody>());
   }
 
   void test_parseStatement_functionDeclaration_noReturnType() {
@@ -15573,7 +15834,7 @@ main() {
   void test_parseTryStatement_catch_error_missingCatchTrace() {
     var statement = parseStatement('try {} catch (e,) {}') as TryStatement;
     listener.assertErrors(usingFastaParser
-        ? [expectedError(ParserErrorCode.CATCH_SYNTAX, 14, 1)]
+        ? [expectedError(ParserErrorCode.CATCH_SYNTAX, 16, 1)]
         : [
             expectedError(ParserErrorCode.MISSING_IDENTIFIER, 14, 1),
           ]);
@@ -15948,7 +16209,7 @@ abstract class TopLevelParserTestMixin implements AbstractParserTestCase {
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<ClassDeclaration>());
+    expect(member, new TypeMatcher<ClassDeclaration>());
     ClassDeclaration declaration = member;
     expect(declaration.documentationComment, isNull);
     expect(declaration.abstractKeyword, isNotNull);
@@ -15967,7 +16228,7 @@ abstract class TopLevelParserTestMixin implements AbstractParserTestCase {
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<ClassDeclaration>());
+    expect(member, new TypeMatcher<ClassDeclaration>());
     ClassDeclaration declaration = member;
     expect(declaration.documentationComment, isNull);
     expect(declaration.abstractKeyword, isNull);
@@ -15987,7 +16248,7 @@ abstract class TopLevelParserTestMixin implements AbstractParserTestCase {
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<ClassDeclaration>());
+    expect(member, new TypeMatcher<ClassDeclaration>());
     ClassDeclaration declaration = member;
     expect(declaration.documentationComment, isNull);
     expect(declaration.abstractKeyword, isNull);
@@ -16006,7 +16267,7 @@ abstract class TopLevelParserTestMixin implements AbstractParserTestCase {
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<ClassDeclaration>());
+    expect(member, new TypeMatcher<ClassDeclaration>());
     ClassDeclaration declaration = member;
     expect(declaration.documentationComment, isNull);
     expect(declaration.abstractKeyword, isNull);
@@ -16025,7 +16286,7 @@ abstract class TopLevelParserTestMixin implements AbstractParserTestCase {
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<ClassDeclaration>());
+    expect(member, new TypeMatcher<ClassDeclaration>());
     ClassDeclaration declaration = member;
     expect(declaration.documentationComment, isNull);
     expect(declaration.abstractKeyword, isNull);
@@ -16045,7 +16306,7 @@ abstract class TopLevelParserTestMixin implements AbstractParserTestCase {
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<ClassDeclaration>());
+    expect(member, new TypeMatcher<ClassDeclaration>());
     ClassDeclaration declaration = member;
     expect(declaration.documentationComment, isNull);
     expect(declaration.abstractKeyword, isNull);
@@ -16065,7 +16326,7 @@ abstract class TopLevelParserTestMixin implements AbstractParserTestCase {
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<ClassDeclaration>());
+    expect(member, new TypeMatcher<ClassDeclaration>());
     ClassDeclaration declaration = member;
     expect(declaration.documentationComment, isNull);
     expect(declaration.abstractKeyword, isNull);
@@ -16087,7 +16348,7 @@ abstract class TopLevelParserTestMixin implements AbstractParserTestCase {
     {
       var annotation = declaration.metadata[0];
       expect(annotation.atSign, isNotNull);
-      expect(annotation.name, new isInstanceOf<SimpleIdentifier>());
+      expect(annotation.name, new TypeMatcher<SimpleIdentifier>());
       expect(annotation.name.name, 'A');
       expect(annotation.period, isNull);
       expect(annotation.constructorName, isNull);
@@ -16097,7 +16358,7 @@ abstract class TopLevelParserTestMixin implements AbstractParserTestCase {
     {
       var annotation = declaration.metadata[1];
       expect(annotation.atSign, isNotNull);
-      expect(annotation.name, new isInstanceOf<SimpleIdentifier>());
+      expect(annotation.name, new TypeMatcher<SimpleIdentifier>());
       expect(annotation.name.name, 'B');
       expect(annotation.period, isNull);
       expect(annotation.constructorName, isNull);
@@ -16108,7 +16369,7 @@ abstract class TopLevelParserTestMixin implements AbstractParserTestCase {
     {
       var annotation = declaration.metadata[2];
       expect(annotation.atSign, isNotNull);
-      expect(annotation.name, new isInstanceOf<PrefixedIdentifier>());
+      expect(annotation.name, new TypeMatcher<PrefixedIdentifier>());
       expect(annotation.name.name, 'C.foo');
       expect(annotation.period, isNull);
       expect(annotation.constructorName, isNull);
@@ -16119,7 +16380,7 @@ abstract class TopLevelParserTestMixin implements AbstractParserTestCase {
     {
       var annotation = declaration.metadata[3];
       expect(annotation.atSign, isNotNull);
-      expect(annotation.name, new isInstanceOf<PrefixedIdentifier>());
+      expect(annotation.name, new TypeMatcher<PrefixedIdentifier>());
       expect(annotation.name.name, 'd.E');
       expect(annotation.period, isNotNull);
       expect(annotation.constructorName, isNotNull);
@@ -16140,7 +16401,7 @@ abstract class TopLevelParserTestMixin implements AbstractParserTestCase {
     } else {
       assertNoErrors();
     }
-    expect(member, new isInstanceOf<ClassDeclaration>());
+    expect(member, new TypeMatcher<ClassDeclaration>());
     ClassDeclaration declaration = member;
     NativeClause nativeClause = declaration.nativeClause;
     expect(nativeClause, isNotNull);
@@ -16155,7 +16416,7 @@ abstract class TopLevelParserTestMixin implements AbstractParserTestCase {
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<ClassDeclaration>());
+    expect(member, new TypeMatcher<ClassDeclaration>());
     ClassDeclaration declaration = member;
     expect(declaration.documentationComment, isNull);
     expect(declaration.abstractKeyword, isNull);
@@ -16174,7 +16435,7 @@ abstract class TopLevelParserTestMixin implements AbstractParserTestCase {
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<ClassTypeAlias>());
+    expect(member, new TypeMatcher<ClassTypeAlias>());
     ClassTypeAlias typeAlias = member;
     expect(typeAlias.typedefKeyword, isNotNull);
     expect(typeAlias.name, isNotNull);
@@ -16192,7 +16453,7 @@ abstract class TopLevelParserTestMixin implements AbstractParserTestCase {
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<ClassTypeAlias>());
+    expect(member, new TypeMatcher<ClassTypeAlias>());
     ClassTypeAlias typeAlias = member;
     expect(typeAlias.typedefKeyword, isNotNull);
     expect(typeAlias.name, isNotNull);
@@ -16209,7 +16470,7 @@ abstract class TopLevelParserTestMixin implements AbstractParserTestCase {
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<ClassDeclaration>());
+    expect(member, new TypeMatcher<ClassDeclaration>());
     ClassDeclaration declaration = member;
     expect(declaration.documentationComment, isNull);
     expect(declaration.abstractKeyword, isNull);
@@ -16423,7 +16684,7 @@ abstract class TopLevelParserTestMixin implements AbstractParserTestCase {
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<TopLevelVariableDeclaration>());
+    expect(member, new TypeMatcher<TopLevelVariableDeclaration>());
     TopLevelVariableDeclaration declaration = member;
     expect(declaration.semicolon, isNotNull);
     expect(declaration.variables, isNotNull);
@@ -16434,7 +16695,7 @@ abstract class TopLevelParserTestMixin implements AbstractParserTestCase {
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<ClassDeclaration>());
+    expect(member, new TypeMatcher<ClassDeclaration>());
     ClassDeclaration declaration = member;
     expect(declaration.name.name, "A");
     expect(declaration.members, hasLength(0));
@@ -16445,7 +16706,7 @@ abstract class TopLevelParserTestMixin implements AbstractParserTestCase {
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<ClassTypeAlias>());
+    expect(member, new TypeMatcher<ClassTypeAlias>());
     ClassTypeAlias declaration = member;
     expect(declaration.name.name, "A");
     expect(declaration.abstractKeyword, isNotNull);
@@ -16456,7 +16717,7 @@ abstract class TopLevelParserTestMixin implements AbstractParserTestCase {
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<TopLevelVariableDeclaration>());
+    expect(member, new TypeMatcher<TopLevelVariableDeclaration>());
     TopLevelVariableDeclaration declaration = member;
     expect(declaration.semicolon, isNotNull);
     expect(declaration.variables, isNotNull);
@@ -16478,7 +16739,7 @@ abstract class TopLevelParserTestMixin implements AbstractParserTestCase {
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<TopLevelVariableDeclaration>());
+    expect(member, new TypeMatcher<TopLevelVariableDeclaration>());
     TopLevelVariableDeclaration declaration = member;
     expect(declaration.semicolon, isNotNull);
     expect(declaration.variables, isNotNull);
@@ -16490,7 +16751,7 @@ abstract class TopLevelParserTestMixin implements AbstractParserTestCase {
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<FunctionDeclaration>());
+    expect(member, new TypeMatcher<FunctionDeclaration>());
     FunctionDeclaration declaration = member;
     expect(declaration.externalKeyword, isNotNull);
     expect(declaration.functionExpression, isNotNull);
@@ -16502,7 +16763,7 @@ abstract class TopLevelParserTestMixin implements AbstractParserTestCase {
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<FunctionDeclaration>());
+    expect(member, new TypeMatcher<FunctionDeclaration>());
     FunctionDeclaration declaration = member;
     expect(declaration.externalKeyword, isNotNull);
     expect(declaration.functionExpression, isNotNull);
@@ -16514,7 +16775,7 @@ abstract class TopLevelParserTestMixin implements AbstractParserTestCase {
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<FunctionDeclaration>());
+    expect(member, new TypeMatcher<FunctionDeclaration>());
     FunctionDeclaration declaration = member;
     expect(declaration.returnType, isNull);
     expect(declaration.functionExpression.typeParameters, isNotNull);
@@ -16526,7 +16787,7 @@ abstract class TopLevelParserTestMixin implements AbstractParserTestCase {
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<FunctionDeclaration>());
+    expect(member, new TypeMatcher<FunctionDeclaration>());
     FunctionDeclaration declaration = member;
     expect(declaration.returnType, isNull);
     expect(declaration.functionExpression.typeParameters, isNotNull);
@@ -16537,7 +16798,7 @@ abstract class TopLevelParserTestMixin implements AbstractParserTestCase {
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<FunctionDeclaration>());
+    expect(member, new TypeMatcher<FunctionDeclaration>());
     FunctionDeclaration declaration = member;
     expect(declaration.returnType, isNotNull);
     expect(declaration.functionExpression.typeParameters, isNotNull);
@@ -16548,7 +16809,7 @@ abstract class TopLevelParserTestMixin implements AbstractParserTestCase {
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<FunctionDeclaration>());
+    expect(member, new TypeMatcher<FunctionDeclaration>());
     FunctionDeclaration declaration = member;
     expect(declaration.functionExpression, isNotNull);
     expect(declaration.propertyKeyword, isNull);
@@ -16579,7 +16840,7 @@ Function<A>(core.List<core.int> x) f() => null;
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<FunctionDeclaration>());
+    expect(member, new TypeMatcher<FunctionDeclaration>());
     FunctionDeclaration declaration = member;
     expect(declaration.functionExpression, isNotNull);
     expect(declaration.propertyKeyword, isNull);
@@ -16590,7 +16851,7 @@ Function<A>(core.List<core.int> x) f() => null;
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<FunctionDeclaration>());
+    expect(member, new TypeMatcher<FunctionDeclaration>());
     FunctionDeclaration declaration = member;
     expect(declaration.functionExpression, isNotNull);
     expect(declaration.propertyKeyword, isNull);
@@ -16601,7 +16862,7 @@ Function<A>(core.List<core.int> x) f() => null;
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<FunctionDeclaration>());
+    expect(member, new TypeMatcher<FunctionDeclaration>());
     FunctionDeclaration declaration = member;
     expect(declaration.returnType, isNotNull);
   }
@@ -16611,7 +16872,7 @@ Function<A>(core.List<core.int> x) f() => null;
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<FunctionDeclaration>());
+    expect(member, new TypeMatcher<FunctionDeclaration>());
     FunctionDeclaration declaration = member;
     expect(declaration.externalKeyword, isNotNull);
     expect(declaration.functionExpression, isNotNull);
@@ -16624,7 +16885,7 @@ Function<A>(core.List<core.int> x) f() => null;
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<FunctionDeclaration>());
+    expect(member, new TypeMatcher<FunctionDeclaration>());
     FunctionDeclaration declaration = member;
     expect(declaration.externalKeyword, isNotNull);
     expect(declaration.functionExpression, isNotNull);
@@ -16636,7 +16897,7 @@ Function<A>(core.List<core.int> x) f() => null;
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<FunctionDeclaration>());
+    expect(member, new TypeMatcher<FunctionDeclaration>());
     FunctionDeclaration declaration = member;
     expect(declaration.functionExpression, isNotNull);
     expect(declaration.propertyKeyword, isNotNull);
@@ -16647,7 +16908,7 @@ Function<A>(core.List<core.int> x) f() => null;
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<FunctionDeclaration>());
+    expect(member, new TypeMatcher<FunctionDeclaration>());
     FunctionDeclaration declaration = member;
     expect(declaration.functionExpression, isNotNull);
     expect(declaration.propertyKeyword, isNotNull);
@@ -16658,7 +16919,7 @@ Function<A>(core.List<core.int> x) f() => null;
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<FunctionDeclaration>());
+    expect(member, new TypeMatcher<FunctionDeclaration>());
     FunctionDeclaration declaration = member;
     expect(declaration.externalKeyword, isNotNull);
     expect(declaration.functionExpression, isNotNull);
@@ -16670,7 +16931,7 @@ Function<A>(core.List<core.int> x) f() => null;
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<FunctionDeclaration>());
+    expect(member, new TypeMatcher<FunctionDeclaration>());
     FunctionDeclaration declaration = member;
     expect(declaration.externalKeyword, isNotNull);
     expect(declaration.functionExpression, isNotNull);
@@ -16682,7 +16943,7 @@ Function<A>(core.List<core.int> x) f() => null;
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<FunctionDeclaration>());
+    expect(member, new TypeMatcher<FunctionDeclaration>());
     FunctionDeclaration declaration = member;
     expect(declaration.functionExpression, isNotNull);
     expect(declaration.propertyKeyword, isNotNull);
@@ -16694,7 +16955,7 @@ Function<A>(core.List<core.int> x) f() => null;
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<FunctionDeclaration>());
+    expect(member, new TypeMatcher<FunctionDeclaration>());
     FunctionDeclaration declaration = member;
     expect(declaration.functionExpression, isNotNull);
     expect(declaration.propertyKeyword, isNotNull);
@@ -16706,7 +16967,7 @@ Function<A>(core.List<core.int> x) f() => null;
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<ClassTypeAlias>());
+    expect(member, new TypeMatcher<ClassTypeAlias>());
     ClassTypeAlias typeAlias = member;
     expect(typeAlias.typedefKeyword, isNotNull);
     expect(typeAlias.name.name, "C");
@@ -16725,7 +16986,7 @@ Function<A>(core.List<core.int> x) f() => null;
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<ClassTypeAlias>());
+    expect(member, new TypeMatcher<ClassTypeAlias>());
     ClassTypeAlias typeAlias = member;
     expect(typeAlias.typedefKeyword, isNotNull);
     expect(typeAlias.name.name, "C");
@@ -16743,7 +17004,7 @@ Function<A>(core.List<core.int> x) f() => null;
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<ClassTypeAlias>());
+    expect(member, new TypeMatcher<ClassTypeAlias>());
     ClassTypeAlias typeAlias = member;
     expect(typeAlias.typedefKeyword, isNotNull);
     expect(typeAlias.name.name, "C");
@@ -16761,7 +17022,7 @@ Function<A>(core.List<core.int> x) f() => null;
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<ClassTypeAlias>());
+    expect(member, new TypeMatcher<ClassTypeAlias>());
     ClassTypeAlias typeAlias = member;
     expect(typeAlias.typedefKeyword, isNotNull);
     expect(typeAlias.name.name, "C");
@@ -16779,7 +17040,7 @@ Function<A>(core.List<core.int> x) f() => null;
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<FunctionTypeAlias>());
+    expect(member, new TypeMatcher<FunctionTypeAlias>());
     FunctionTypeAlias typeAlias = member;
     expect(typeAlias.name.name, "F");
     expect(typeAlias.parameters.parameters, hasLength(0));
@@ -16797,7 +17058,7 @@ Function<A>(core.List<core.int> x) f() => null;
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<TopLevelVariableDeclaration>());
+    expect(member, new TypeMatcher<TopLevelVariableDeclaration>());
     TopLevelVariableDeclaration declaration = member;
     expect(declaration.semicolon, isNotNull);
     expect(declaration.variables, isNotNull);
@@ -16811,7 +17072,7 @@ Function<A>(core.List<core.int> x) f() => null;
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<TopLevelVariableDeclaration>());
+    expect(member, new TypeMatcher<TopLevelVariableDeclaration>());
     TopLevelVariableDeclaration declaration = member;
     expect(declaration.semicolon, isNotNull);
     expect(declaration.variables, isNotNull);
@@ -16828,7 +17089,7 @@ Function(int) Function(String) v;
     expect(unit.declarations, hasLength(1));
     TopLevelVariableDeclaration declaration =
         unit.declarations[0] as TopLevelVariableDeclaration;
-    expect(declaration.variables.type, new isInstanceOf<GenericFunctionType>());
+    expect(declaration.variables.type, new TypeMatcher<GenericFunctionType>());
   }
 
   void test_parseCompilationUnitMember_variable_gftType_noReturnType() {
@@ -16853,7 +17114,7 @@ Function(int, String) v;
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<TopLevelVariableDeclaration>());
+    expect(member, new TypeMatcher<TopLevelVariableDeclaration>());
     TopLevelVariableDeclaration declaration = member;
     expect(declaration.semicolon, isNotNull);
     expect(declaration.variables, isNotNull);
@@ -16864,7 +17125,7 @@ Function(int, String) v;
     CompilationUnitMember member = parseFullCompilationUnitMember();
     expect(member, isNotNull);
     assertNoErrors();
-    expect(member, new isInstanceOf<TopLevelVariableDeclaration>());
+    expect(member, new TypeMatcher<TopLevelVariableDeclaration>());
     TopLevelVariableDeclaration declaration = member;
     expect(declaration.semicolon, isNotNull);
     expect(declaration.variables, isNotNull);
@@ -16875,7 +17136,7 @@ Function(int, String) v;
     Directive directive = parseFullDirective();
     expect(directive, isNotNull);
     assertNoErrors();
-    expect(directive, new isInstanceOf<ExportDirective>());
+    expect(directive, new TypeMatcher<ExportDirective>());
     ExportDirective exportDirective = directive;
     expect(exportDirective.keyword, isNotNull);
     expect(exportDirective.uri, isNotNull);
@@ -16894,7 +17155,7 @@ Function(int, String) v;
     Directive directive = parseFullDirective();
     expect(directive, isNotNull);
     assertNoErrors();
-    expect(directive, new isInstanceOf<ImportDirective>());
+    expect(directive, new TypeMatcher<ImportDirective>());
     ImportDirective importDirective = directive;
     expect(importDirective.keyword, isNotNull);
     expect(importDirective.uri, isNotNull);
@@ -16909,7 +17170,7 @@ Function(int, String) v;
     Directive directive = parseFullDirective();
     expect(directive, isNotNull);
     assertNoErrors();
-    expect(directive, new isInstanceOf<LibraryDirective>());
+    expect(directive, new TypeMatcher<LibraryDirective>());
     LibraryDirective libraryDirective = directive;
     expect(libraryDirective.libraryKeyword, isNotNull);
     expect(libraryDirective.name, isNotNull);
@@ -16951,7 +17212,7 @@ Function(int, String) v;
     Directive directive = parseFullDirective();
     expect(directive, isNotNull);
     assertNoErrors();
-    expect(directive, new isInstanceOf<PartDirective>());
+    expect(directive, new TypeMatcher<PartDirective>());
     PartDirective partDirective = directive;
     expect(partDirective.partKeyword, isNotNull);
     expect(partDirective.uri, isNotNull);
@@ -16999,7 +17260,7 @@ Function(int, String) v;
     Directive directive = parseFullDirective();
     expect(directive, isNotNull);
     assertNoErrors();
-    expect(directive, new isInstanceOf<PartOfDirective>());
+    expect(directive, new TypeMatcher<PartOfDirective>());
     PartOfDirective partOfDirective = directive;
     expect(partOfDirective.partKeyword, isNotNull);
     expect(partOfDirective.ofKeyword, isNotNull);
@@ -17313,7 +17574,7 @@ enum E {
     {
       var annotation = parameters[0].metadata[0];
       expect(annotation.atSign, isNotNull);
-      expect(annotation.name, new isInstanceOf<SimpleIdentifier>());
+      expect(annotation.name, new TypeMatcher<SimpleIdentifier>());
       expect(annotation.name.name, 'A');
       expect(annotation.period, isNull);
       expect(annotation.constructorName, isNull);
@@ -17323,7 +17584,7 @@ enum E {
     {
       var annotation = parameters[1].metadata[0];
       expect(annotation.atSign, isNotNull);
-      expect(annotation.name, new isInstanceOf<SimpleIdentifier>());
+      expect(annotation.name, new TypeMatcher<SimpleIdentifier>());
       expect(annotation.name.name, 'B');
       expect(annotation.period, isNull);
       expect(annotation.constructorName, isNull);
@@ -17334,7 +17595,7 @@ enum E {
     {
       var annotation = parameters[2].metadata[0];
       expect(annotation.atSign, isNotNull);
-      expect(annotation.name, new isInstanceOf<PrefixedIdentifier>());
+      expect(annotation.name, new TypeMatcher<PrefixedIdentifier>());
       expect(annotation.name.name, 'C.foo');
       expect(annotation.period, isNull);
       expect(annotation.constructorName, isNull);
@@ -17345,7 +17606,7 @@ enum E {
     {
       var annotation = parameters[3].metadata[0];
       expect(annotation.atSign, isNotNull);
-      expect(annotation.name, new isInstanceOf<PrefixedIdentifier>());
+      expect(annotation.name, new TypeMatcher<PrefixedIdentifier>());
       expect(annotation.name.name, 'd.E');
       expect(annotation.period, isNotNull);
       expect(annotation.constructorName, isNotNull);

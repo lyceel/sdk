@@ -187,7 +187,7 @@ static bool IsSnapshottingForPrecompilation() {
 }
 
 static bool SnapshotKindAllowedFromKernel() {
-  return IsSnapshottingForPrecompilation() || (snapshot_kind == kCore);
+  return snapshot_kind != kScript;
 }
 
 // clang-format off
@@ -735,8 +735,7 @@ static void CreateAndWriteDependenciesFile() {
   for (intptr_t i = 0; i < dependencies->length(); i++) {
     free(dependencies->At(i));
   }
-  delete dependencies;
-  isolate_data->set_dependencies(NULL);
+  dependencies->Clear();
 }
 
 static Dart_Handle CreateSnapshotLibraryTagHandler(Dart_LibraryTag tag,
@@ -1454,30 +1453,50 @@ static int GenerateSnapshotFromKernel(const uint8_t* kernel_buffer,
   Dart_Handle result = Dart_SetEnvironmentCallback(EnvironmentCallback);
   CHECK_RESULT(result);
 
-  if (IsSnapshottingForPrecompilation()) {
-    // The root library has to be set to generate AOT snapshots.
-    // If the input dill file has a root library, then Dart_LoadScript will
-    // ignore this dummy uri and set the root library to the one reported in
-    // the dill file. Since dill files are not dart script files,
-    // trying to resolve the root library URI based on the dill file name
-    // would not help.
-    //
-    // If the input dill file does not have a root library, then
-    // Dart_LoadScript will error.
-    Dart_Handle library =
-        Dart_LoadScriptFromKernel(kernel_buffer, kernel_buffer_size);
-    if (Dart_IsError(library)) {
-      Log::PrintErr("Unable to load root library from the input dill file.\n");
-      return kErrorExitCode;
+  // The root library has to be set to generate AOT snapshots, and sometimes we
+  // set one for the core snapshot too.
+  // If the input dill file has a root library, then Dart_LoadScript will
+  // ignore this dummy uri and set the root library to the one reported in
+  // the dill file. Since dill files are not dart script files,
+  // trying to resolve the root library URI based on the dill file name
+  // would not help.
+  //
+  // If the input dill file does not have a root library, then
+  // Dart_LoadScript will error.
+  //
+  // TODO(kernel): Dart_CreateIsolateFromKernel should respect the root library
+  // in the kernel file, though this requires auditing the other loading paths
+  // in the embedders that had to work around this.
+  result = Dart_SetRootLibrary(
+      Dart_LoadLibraryFromKernel(kernel_buffer, kernel_buffer_size));
+  CHECK_RESULT(result);
+
+  switch (snapshot_kind) {
+    case kAppAOTBlobs:
+    case kAppAOTAssembly: {
+      if (Dart_IsNull(Dart_RootLibrary())) {
+        Log::PrintErr(
+            "Unable to load root library from the input dill file.\n");
+        return kErrorExitCode;
+      }
+
+      CreateAndWritePrecompiledSnapshot(entry_points);
+
+      CreateAndWriteDependenciesFile();
+
+      CleanupEntryPointsCollection(entry_points);
+
+      break;
     }
-
-    CreateAndWritePrecompiledSnapshot(entry_points);
-
-    CreateAndWriteDependenciesFile();
-
-    CleanupEntryPointsCollection(entry_points);
-  } else {
-    CreateAndWriteCoreSnapshot();
+    case kCore:
+      CreateAndWriteCoreSnapshot();
+      break;
+    case kCoreJIT:
+      LoadCompilationTrace();
+      CreateAndWriteCoreJITSnapshot();
+      break;
+    default:
+      UNREACHABLE();
   }
 
   Dart_ExitScope();
@@ -1492,7 +1511,7 @@ static int GenerateSnapshotFromKernel(const uint8_t* kernel_buffer,
 }
 
 int main(int argc, char** argv) {
-  const int EXTRA_VM_ARGUMENTS = 2;
+  const int EXTRA_VM_ARGUMENTS = 4;
   CommandLineOptions vm_options(argc + EXTRA_VM_ARGUMENTS);
 
   // Initialize the URL mapping array.
@@ -1502,6 +1521,16 @@ int main(int argc, char** argv) {
   // Initialize the entrypoints array.
   CommandLineOptions entry_points_files_array(argc);
   entry_points_files = &entry_points_files_array;
+
+  // When running from the command line we assume that we are optimizing for
+  // throughput, and therefore use a larger new gen semi space size and a faster
+  // new gen growth factor unless others have been specified.
+  if (kWordSize <= 4) {
+    vm_options.AddArgument("--new_gen_semi_max_size=16");
+  } else {
+    vm_options.AddArgument("--new_gen_semi_max_size=32");
+  }
+  vm_options.AddArgument("--new_gen_growth_factor=4");
 
   // Parse command line arguments.
   if (ParseArguments(argc, argv, &vm_options, &app_script_name) < 0) {
@@ -1515,12 +1544,19 @@ int main(int argc, char** argv) {
   if (app_script_name != NULL) {
     dfe.ReadScript(app_script_name, &kernel_buffer, &kernel_buffer_size);
   }
-  if (kernel_buffer != NULL && !SnapshotKindAllowedFromKernel()) {
-    // TODO(sivachandra): Add check for the kernel program format (incremental
-    // vs batch).
-    Log::PrintErr(
-        "Can only generate core or aot snapshots from a kernel file.\n");
-    return kErrorExitCode;
+  if (kernel_buffer != NULL) {
+    if (!SnapshotKindAllowedFromKernel()) {
+      // TODO(sivachandra): Add check for the kernel program format (incremental
+      // vs batch).
+      Log::PrintErr(
+          "Can only generate core or aot snapshots from a kernel file.\n");
+      return kErrorExitCode;
+    }
+    if ((dependencies_filename != NULL) || print_dependencies ||
+        dependencies_only) {
+      Log::PrintErr("Depfiles are not supported in Dart 2.\n");
+      return kErrorExitCode;
+    }
   }
 
   if (!Platform::Initialize()) {
@@ -1671,8 +1707,7 @@ int main(int argc, char** argv) {
     CHECK_RESULT(result);
 
     // Setup package root if specified.
-    result = DartUtils::SetupPackageRoot(commandline_package_root,
-                                         commandline_packages_file);
+    result = DartUtils::SetupPackageRoot(NULL, commandline_packages_file);
     CHECK_RESULT(result);
 
     UriResolverIsolateScope::isolate = isolate;

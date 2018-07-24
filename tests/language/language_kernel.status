@@ -3,11 +3,15 @@
 # BSD-style license that can be found in the LICENSE file.
 
 [ $compiler == fasta ]
+bad_constructor_test/04: MissingCompileTimeError
+bad_constructor_test/06: MissingCompileTimeError
 function_type_parameter2_negative_test: Fail
 function_type_parameter_negative_test: Fail
 prefix5_negative_test: Fail
 
 [ $fasta ]
+bad_constructor_test/04: MissingCompileTimeError
+bad_constructor_test/06: MissingCompileTimeError
 bad_override_test/03: MissingCompileTimeError
 bad_override_test/04: MissingCompileTimeError
 bad_override_test/05: MissingCompileTimeError
@@ -24,11 +28,7 @@ const_instance_field_test/01: MissingCompileTimeError
 const_map2_test/00: MissingCompileTimeError
 const_map3_test/00: MissingCompileTimeError
 const_switch2_test/01: MissingCompileTimeError
-constants_test/05: MissingCompileTimeError
-constructor_redirect1_negative_test: Fail
-constructor_redirect2_negative_test: Fail
 constructor_redirect_test/01: MissingCompileTimeError
-cyclic_constructor_test/01: MissingCompileTimeError
 deferred_inheritance_constraints_test/extends: MissingCompileTimeError
 deferred_inheritance_constraints_test/implements: MissingCompileTimeError
 deferred_inheritance_constraints_test/mixin: MissingCompileTimeError
@@ -105,12 +105,6 @@ mixin_super_bound2_test/01: CompileTimeError
 mixin_super_bound2_test/none: CompileTimeError
 mixin_super_constructor_named_test/01: MissingCompileTimeError
 mixin_super_constructor_positionals_test/01: MissingCompileTimeError
-multiline_newline_test/04: MissingCompileTimeError
-multiline_newline_test/04r: MissingCompileTimeError
-multiline_newline_test/05: MissingCompileTimeError
-multiline_newline_test/05r: MissingCompileTimeError
-multiline_newline_test/06: MissingCompileTimeError
-multiline_newline_test/06r: MissingCompileTimeError
 named_parameters_default_eq_test/02: MissingCompileTimeError
 override_field_method1_negative_test: Fail
 override_field_method2_negative_test: Fail
@@ -138,7 +132,6 @@ switch_case_test/00: MissingCompileTimeError
 switch_case_test/01: MissingCompileTimeError
 switch_case_test/02: MissingCompileTimeError
 syntax_test/none: CompileTimeError
-try_catch_test/01: MissingCompileTimeError
 type_variable_conflict2_test/02: MissingCompileTimeError
 vm/debug_break_enabled_vm_test/01: CompileTimeError
 vm/debug_break_enabled_vm_test/none: CompileTimeError
@@ -153,11 +146,11 @@ closure_call_wrong_argument_count_negative_test: Fail
 compile_time_constant_c_test/02: MissingCompileTimeError
 const_conditional_test/08: MissingCompileTimeError
 const_constructor_nonconst_field_test/01: MissingCompileTimeError
-const_native_factory_test/01: MissingCompileTimeError
 const_optional_args_negative_test: Fail
 const_syntax_test/05: MissingCompileTimeError
 const_syntax_test/08: MissingCompileTimeError
 const_syntax_test/10: MissingCompileTimeError
+constants_test/05: MissingCompileTimeError
 constructor3_negative_test: Fail
 constructor_call_wrong_argument_count_negative_test: Fail
 deopt_inlined_function_lazy_test: CompileTimeError
@@ -173,6 +166,12 @@ instance_method_negative_test: Fail
 int2_test: CompileTimeError
 interface_static_non_final_fields_negative_test: Fail
 mint_compares_test: CompileTimeError
+multiline_newline_test/04: MissingCompileTimeError
+multiline_newline_test/04r: MissingCompileTimeError
+multiline_newline_test/05: MissingCompileTimeError
+multiline_newline_test/05r: MissingCompileTimeError
+multiline_newline_test/06: MissingCompileTimeError
+multiline_newline_test/06r: MissingCompileTimeError
 no_such_method_negative_test: Fail
 number_identity_test: CompileTimeError
 prefix10_negative_test: Fail
@@ -188,6 +187,7 @@ private_member1_negative_test: Fail
 private_member2_negative_test: Fail
 private_member3_negative_test: Fail
 static_call_wrong_argument_count_negative_test: Fail
+try_catch_test/01: MissingCompileTimeError
 type_variable_static_context_negative_test: Fail
 unresolved_in_factory_negative_test: Fail
 unresolved_top_level_method_negative_test: Fail
@@ -195,5 +195,5 @@ unresolved_top_level_var_negative_test: Fail
 
 # We skip all the Dart 1.0 tests in dartk and dartkp mode as these
 # modes are intended only for Dart 2.0 with strong mode enabled.
-[ $compiler == dartk || $compiler == dartkp ]
-*: Skip
+[ $compiler == app_jitk || $compiler == dartk || $compiler == dartkb || $compiler == dartkp ]
+*: SkipByDesign

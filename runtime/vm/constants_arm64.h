@@ -112,7 +112,6 @@ const Register CODE_REG = R24;
 const Register FPREG = FP;          // Frame pointer register.
 const Register SPREG = R15;         // Stack pointer register.
 const Register LRREG = LR;          // Link register.
-const Register ICREG = R5;          // IC data register.
 const Register ARGS_DESC_REG = R4;  // Arguments descriptor register.
 const Register THR = R26;           // Caches current thread in generated code.
 const Register CALLEE_SAVED_TEMP = R19;
@@ -522,8 +521,10 @@ enum MiscDP2SourceOp {
 enum MiscDP3SourceOp {
   MiscDP3SourceMask = 0x1f000000,
   MiscDP3SourceFixed = DPRegisterFixed | B28 | B24,
-  MADD = MiscDP3SourceFixed,
-  MSUB = MiscDP3SourceFixed | B15,
+  MADDW = MiscDP3SourceFixed,
+  MADD = MiscDP3SourceFixed | B31,
+  MSUBW = MiscDP3SourceFixed | B15,
+  MSUB = MiscDP3SourceFixed | B31 | B15,
   SMULH = MiscDP3SourceFixed | B31 | B22,
   UMULH = MiscDP3SourceFixed | B31 | B23 | B22,
   SMADDL = MiscDP3SourceFixed | B31 | B21,

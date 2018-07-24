@@ -693,6 +693,10 @@ class FunctionTypeAliasElementHandle extends ElementHandle
 
   @override
   FunctionTypeAlias computeNode() => actualElement.computeNode();
+
+  @override
+  FunctionType instantiate(List<DartType> argumentTypes) =>
+      actualElement.instantiate(argumentTypes);
 }
 
 /**
@@ -732,6 +736,10 @@ class GenericTypeAliasElementHandle extends ElementHandle
 
   @override
   FunctionTypeAlias computeNode() => actualElement.computeNode();
+
+  @override
+  FunctionType instantiate(List<DartType> argumentTypes) =>
+      actualElement.instantiate(argumentTypes);
 }
 
 /**
@@ -1093,8 +1101,9 @@ abstract class PropertyInducingElementHandle extends VariableElementHandle
   @override
   PropertyAccessorElement get getter => actualElement.getter;
 
+  @deprecated
   @override
-  DartType get propagatedType => actualElement.propagatedType;
+  DartType get propagatedType => null;
 
   @override
   PropertyAccessorElement get setter => actualElement.setter;

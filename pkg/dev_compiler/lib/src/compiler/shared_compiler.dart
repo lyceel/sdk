@@ -2,6 +2,7 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+import 'dart:collection';
 import '../compiler/js_metalet.dart' as JS;
 import '../compiler/js_names.dart' as JS;
 import '../compiler/js_utils.dart' as JS;
@@ -12,7 +13,7 @@ import '../js_ast/js_ast.dart' show js;
 ///
 /// This class should only implement functionality that depends purely on JS
 /// classes, rather than on Analyzer/Kernel types.
-abstract class SharedCompiler {
+abstract class SharedCompiler<Library> {
   /// When inside a `[]=` operator, this will be a non-null value that should be
   /// returned by any `return;` statement.
   ///
@@ -20,7 +21,12 @@ abstract class SharedCompiler {
   final List<JS.Identifier> _operatorSetResultStack = [];
 
   JS.Identifier runtimeModule;
-  final namedArgumentTemp = new JS.TemporaryId('opts');
+  final namedArgumentTemp = JS.TemporaryId('opts');
+
+  final _privateNames = HashMap<Library, HashMap<String, JS.TemporaryId>>();
+
+  /// The list of output module items, in the order they need to be emitted in.
+  final moduleItems = <JS.ModuleItem>[];
 
   /// When compiling the body of a `operator []=` method, this will be non-null
   /// and will indicate the the value that should be returned from any `return;`
@@ -37,7 +43,7 @@ abstract class SharedCompiler {
       bool Function() isLastParamMutated) {
     if (name == '[]=') {
       _operatorSetResultStack.add(isLastParamMutated()
-          ? new JS.TemporaryId((formals.last as JS.Identifier).name)
+          ? JS.TemporaryId((formals.last as JS.Identifier).name)
           : formals.last);
     } else {
       _operatorSetResultStack.add(null);
@@ -66,7 +72,7 @@ abstract class SharedCompiler {
       var valueParam = formals.last;
       var statements = code.statements;
       if (statements.isEmpty || !statements.last.alwaysReturns) {
-        statements.add(new JS.Return(setOperatorResult));
+        statements.add(JS.Return(setOperatorResult));
       }
       if (!identical(setOperatorResult, valueParam)) {
         // If the value parameter was mutated, then we use a temporary
@@ -83,12 +89,10 @@ abstract class SharedCompiler {
   /// the `operator []=` method.
   JS.Statement emitReturnStatement(JS.Expression value) {
     if (_operatorSetResult != null) {
-      var result = new JS.Return(_operatorSetResult);
-      return value != null
-          ? new JS.Block([value.toStatement(), result])
-          : result;
+      var result = JS.Return(_operatorSetResult);
+      return value != null ? JS.Block([value.toStatement(), result]) : result;
     }
-    return value != null ? value.toReturn() : new JS.Return();
+    return value != null ? value.toReturn() : JS.Return();
   }
 
   /// Prepends the `dart.` and then uses [js.call] to parse the specified JS
@@ -121,5 +125,19 @@ abstract class SharedCompiler {
   /// expression into a statement.
   JS.Statement runtimeStatement(String code, [args]) {
     return runtimeCall(code, args).toStatement();
+  }
+
+  JS.TemporaryId emitPrivateNameSymbol(Library library, String name) {
+    return _privateNames.putIfAbsent(library, () => HashMap()).putIfAbsent(name,
+        () {
+      var idName = name;
+      if (idName.endsWith('=')) {
+        idName = idName.replaceAll('=', '_');
+      }
+      var id = JS.TemporaryId(idName);
+      moduleItems.add(
+          js.statement('const # = Symbol(#);', [id, js.string(name, "'")]));
+      return id;
+    });
   }
 }

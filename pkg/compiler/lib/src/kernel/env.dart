@@ -297,7 +297,7 @@ class ClassEnvImpl implements ClassEnv {
   ClassEnvImpl.internal(this.cls, this._constructorMap, this._memberMap,
       this._setterMap, this._members);
 
-  bool get isUnnamedMixinApplication => cls.isSyntheticMixinImplementation;
+  bool get isUnnamedMixinApplication => cls.isAnonymousMixin;
 
   /// Copied from 'package:kernel/transformations/mixin_full_resolution.dart'.
   ir.Constructor _buildForwardingConstructor(
@@ -373,7 +373,8 @@ class ClassEnvImpl implements ClassEnv {
       }
     }
 
-    void addProcedures(ir.Class c, {bool includeStatic}) {
+    void addProcedures(ir.Class c,
+        {bool includeStatic, bool includeNoSuchMethodForwarders}) {
       for (ir.Procedure member in c.procedures) {
         if (member.isForwardingStub && member.isAbstract) {
           // Skip abstract forwarding stubs. These are never emitted but they
@@ -391,6 +392,15 @@ class ClassEnvImpl implements ClassEnv {
           continue;
         }
         if (!includeStatic && member.isStatic) continue;
+        if (member.isNoSuchMethodForwarder) {
+          // TODO(sigmund): remove once #33665 is fixed.
+          if (!includeNoSuchMethodForwarders ||
+              member.name.isPrivate &&
+                  member.name.libraryName !=
+                      member.enclosingLibrary.reference) {
+            continue;
+          }
+        }
         var name = member.name.name;
         assert(!name.contains('#'));
         if (member.kind == ir.ProcedureKind.Factory) {
@@ -424,13 +434,15 @@ class ClassEnvImpl implements ClassEnv {
     if (cls.mixedInClass != null) {
       elementMap.ensureClassMembers(cls.mixedInClass);
       addFields(cls.mixedInClass.mixin, includeStatic: false);
-      addProcedures(cls.mixedInClass.mixin, includeStatic: false);
+      addProcedures(cls.mixedInClass.mixin,
+          includeStatic: false, includeNoSuchMethodForwarders: false);
       mergeSort(members, compare: orderByFileOffset);
       mixinMemberCount = members.length;
     }
     addFields(cls, includeStatic: true);
     addConstructors(cls);
-    addProcedures(cls, includeStatic: true);
+    addProcedures(cls,
+        includeStatic: true, includeNoSuchMethodForwarders: true);
 
     if (isUnnamedMixinApplication && _constructorMap.isEmpty) {
       // Ensure that constructors are created for the superclass in case it
@@ -1014,11 +1026,16 @@ class TypedefData {
 class TypeVariableData {
   final ir.TypeParameter node;
   DartType _bound;
+  DartType _defaultType;
 
   TypeVariableData(this.node);
 
   DartType getBound(KernelToElementMap elementMap) {
     return _bound ??= elementMap.getDartType(node.bound);
+  }
+
+  DartType getDefaultType(KernelToElementMap elementMap) {
+    return _defaultType ??= elementMap.getDartType(node.defaultType);
   }
 
   TypeVariableData copy() {

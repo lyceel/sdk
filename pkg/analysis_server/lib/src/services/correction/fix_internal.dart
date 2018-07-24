@@ -81,13 +81,103 @@ class DartFixContextImpl extends FixContextImpl implements DartFixContext {
 class DefaultFixContributor extends DartFixContributor {
   @override
   Future<List<Fix>> internalComputeFixes(DartFixContext context) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     try {
       FixProcessor processor = new FixProcessor(context);
       List<Fix> fixes = await processor.compute();
-      return fixes;
+      List<Fix> fixAllFixes = await _computeFixAllFixes(context, fixes);
+      return new List.from(fixes)..addAll(fixAllFixes);
     } on CancelCorrectionException {
       return Fix.EMPTY_LIST;
     }
+  }
+
+  Future<List<Fix>> _computeFixAllFixes(
+      DartFixContext context, List<Fix> fixes) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
+    final AnalysisError analysisError = context.error;
+    final List<AnalysisError> allAnalysisErrors = context.errors;
+
+    // Validate inputs:
+    // - return if no fixes
+    // - return if no other analysis errors
+    if (fixes.isEmpty || allAnalysisErrors.length < 2) {
+      return Fix.EMPTY_LIST;
+    }
+
+    // Remove any analysis errors that don't have the expected error code name
+    allAnalysisErrors
+        .removeWhere((e) => analysisError.errorCode.name != e.errorCode.name);
+    if (allAnalysisErrors.length < 2) {
+      return Fix.EMPTY_LIST;
+    }
+
+    // A map between each FixKind and the List of associated fixes
+    final HashMap<FixKind, List<Fix>> map = new HashMap();
+
+    // Populate the HashMap by looping through all AnalysisErrors, creating a
+    // new FixProcessor to compute the other fixes that can be applied with this
+    // one.
+    // For each fix, put the fix into the HashMap.
+    for (int i = 0; i < allAnalysisErrors.length; i++) {
+      final FixContext fixContextI = new FixContextImpl(
+          context.resourceProvider,
+          context.analysisDriver,
+          allAnalysisErrors[i],
+          allAnalysisErrors);
+      final DartFixContextImpl dartFixContextI = new DartFixContextImpl(
+          fixContextI, context.astProvider, context.unit);
+      final FixProcessor processorI = new FixProcessor(dartFixContextI);
+      final List<Fix> fixesListI = await processorI.compute();
+      for (Fix f in fixesListI) {
+        if (!map.containsKey(f.kind)) {
+          map[f.kind] = new List<Fix>()..add(f);
+        } else {
+          map[f.kind].add(f);
+        }
+      }
+    }
+
+    // For each FixKind in the HashMap, union each list together, then return
+    // the set of unioned Fixes.
+    final List<Fix> result = new List<Fix>();
+    map.forEach((FixKind kind, List<Fix> fixesListJ) {
+      if (fixesListJ.first.kind.canBeAppliedTogether()) {
+        Fix unionFix = _unionFixList(fixesListJ);
+        if (unionFix != null) {
+          result.add(unionFix);
+        }
+      }
+    });
+    return result;
+  }
+
+  Fix _unionFixList(List<Fix> fixList) {
+    if (fixList == null || fixList.isEmpty) {
+      return null;
+    } else if (fixList.length == 1) {
+      return fixList[0];
+    }
+    final SourceChange sourceChange =
+        new SourceChange(fixList[0].kind.appliedTogetherMessage);
+    sourceChange.edits = new List.from(fixList[0].change.edits);
+    final List<SourceEdit> edits = new List<SourceEdit>();
+    edits.addAll(fixList[0].change.edits[0].edits);
+    sourceChange.linkedEditGroups =
+        new List.from(fixList[0].change.linkedEditGroups);
+    for (int i = 1; i < fixList.length; i++) {
+      edits.addAll(fixList[i].change.edits[0].edits);
+      sourceChange.linkedEditGroups..addAll(fixList[i].change.linkedEditGroups);
+    }
+    // Sort the list of SourceEdits so that when the edits are applied, they
+    // are applied from the end of the file to the top of the file.
+    edits.sort((s1, s2) => s2.offset - s1.offset);
+
+    sourceChange.edits[0].edits = edits;
+
+    return new Fix(fixList[0].kind, sourceChange);
   }
 }
 
@@ -178,16 +268,14 @@ class FixProcessor {
 
   TypeSystem get typeSystem {
     if (_typeSystem == null) {
-      if (driver.analysisOptions.strongMode) {
-        _typeSystem = new StrongTypeSystemImpl(typeProvider);
-      } else {
-        _typeSystem = new TypeSystemImpl(typeProvider);
-      }
+      _typeSystem = new StrongTypeSystemImpl(typeProvider);
     }
     return _typeSystem;
   }
 
   Future<List<Fix>> compute() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     try {
       utils = new CorrectionUtils(unit);
     } catch (e) {
@@ -389,6 +477,7 @@ class FixProcessor {
       await _addFix_createClass();
     }
     if (errorCode == StaticTypeWarningCode.UNDEFINED_FUNCTION) {
+      await _addFix_createClass();
       await _addFix_importLibrary_withFunction();
       await _addFix_importLibrary_withType();
       await _addFix_undefinedFunction_useSimilar();
@@ -402,6 +491,7 @@ class FixProcessor {
     }
     if (errorCode == HintCode.UNDEFINED_METHOD ||
         errorCode == StaticTypeWarningCode.UNDEFINED_METHOD) {
+      await _addFix_createClass();
       await _addFix_importLibrary_withFunction();
       await _addFix_importLibrary_withType();
       await _addFix_undefinedMethod_useSimilar();
@@ -502,6 +592,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_addAsync() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     FunctionBody body = node.getAncestor((n) => n is FunctionBody);
     if (body != null && body.keyword == null) {
       TypeProvider typeProvider = await this.typeProvider;
@@ -514,6 +606,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_addExplicitCast() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (coveredNode is! Expression) {
       return;
     }
@@ -613,6 +707,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_addMissingNamedArgument() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     // Prepare the name of the missing parameter.
     if (this.node is! SimpleIdentifier) {
       return;
@@ -644,6 +740,8 @@ class FixProcessor {
     }
 
     Future<void> addParameter(int offset, String prefix, String suffix) async {
+      // TODO(brianwilkerson) Determine whether this await is necessary.
+      await null;
       if (offset != null) {
         var changeBuilder = new DartChangeBuilder(session);
         await changeBuilder.addFileEdit(context.file, (builder) {
@@ -673,6 +771,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_addMissingParameter() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     // The error is reported on ArgumentList.
     if (node is! ArgumentList) {
       return;
@@ -695,6 +795,8 @@ class FixProcessor {
 
     Future<void> addParameter(
         FixKind kind, int offset, String prefix, String suffix) async {
+      // TODO(brianwilkerson) Determine whether this await is necessary.
+      await null;
       if (offset != null) {
         var changeBuilder = new DartChangeBuilder(session);
         await changeBuilder.addFileEdit(context.file, (builder) {
@@ -739,6 +841,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_addMissingRequiredArgument() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     InstanceCreationExpression creation;
     Element targetElement;
     ArgumentList argumentList;
@@ -746,7 +850,7 @@ class FixProcessor {
     if (node is SimpleIdentifier) {
       AstNode invocation = node.parent;
       if (invocation is MethodInvocation) {
-        targetElement = invocation.methodName.bestElement;
+        targetElement = invocation.methodName.staticElement;
         argumentList = invocation.argumentList;
       } else {
         creation =
@@ -806,6 +910,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_addOverrideAnnotation() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     ClassMember member = node.getAncestor((n) => n is ClassMember);
     if (member == null) {
       return;
@@ -831,6 +937,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_addRequiredAnnotation() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     DartChangeBuilder changeBuilder = new DartChangeBuilder(session);
     await changeBuilder.addFileEdit(file, (DartFileEditBuilder builder) {
       builder.addSimpleInsertion(node.parent.offset, '@required ');
@@ -839,6 +947,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_addStatic() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     FieldDeclaration declaration =
         node.getAncestor((n) => n is FieldDeclaration);
     DartChangeBuilder changeBuilder = new DartChangeBuilder(session);
@@ -849,6 +959,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_boolInsteadOfBoolean() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     DartChangeBuilder changeBuilder = new DartChangeBuilder(session);
     await changeBuilder.addFileEdit(file, (DartFileEditBuilder builder) {
       builder.addSimpleReplacement(range.error(error), 'bool');
@@ -857,6 +969,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_canBeNullAfterNullAware() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     AstNode node = coveredNode;
     if (node is Expression) {
       DartChangeBuilder changeBuilder = new DartChangeBuilder(session);
@@ -879,6 +993,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_changeTypeAnnotation() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     AstNode declaration = coveredNode.parent;
     if (declaration is VariableDeclaration &&
         declaration.initializer == coveredNode) {
@@ -888,7 +1004,7 @@ class FixProcessor {
         TypeAnnotation typeNode = variableList.type;
         if (typeNode != null) {
           Expression initializer = coveredNode;
-          DartType newType = initializer.bestType;
+          DartType newType = initializer.staticType;
           if (newType is InterfaceType || newType is FunctionType) {
             DartChangeBuilder changeBuilder = new DartChangeBuilder(session);
             await changeBuilder.addFileEdit(file,
@@ -910,6 +1026,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_convertFlutterChild() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     NamedExpression named = flutter.findNamedExpression(node, 'child');
     if (named == null) {
       return;
@@ -950,6 +1068,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_convertFlutterChildren() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     AstNode node = this.node;
     if (node is SimpleIdentifier &&
         node.name == 'children' &&
@@ -978,6 +1098,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_convertToNamedArgument() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     var argumentList = this.node;
     if (argumentList is ArgumentList) {
       // Prepare ExecutableElement.
@@ -1046,6 +1168,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_createClass() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     Element prefixElement = null;
     String name = null;
     SimpleIdentifier nameNode;
@@ -1078,8 +1202,8 @@ class FixProcessor {
     String filePath;
     if (prefixElement == null) {
       targetUnit = unitElement;
-      CompilationUnitMember enclosingMember =
-          node.getAncestor((node) => node.parent is CompilationUnit);
+      CompilationUnitMember enclosingMember = node.getAncestor((node) =>
+          node is CompilationUnitMember && node.parent is CompilationUnit);
       if (enclosingMember == null) {
         return;
       }
@@ -1129,6 +1253,8 @@ class FixProcessor {
    * class has uninitialized final fields.
    */
   Future<Null> _addFix_createConstructor_forUninitializedFinalFields() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (node is! SimpleIdentifier || node.parent is! VariableDeclaration) {
       return;
     }
@@ -1205,6 +1331,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_createConstructor_insteadOfSyntheticDefault() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (node is! ArgumentList) {
       return;
     }
@@ -1248,6 +1376,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_createConstructor_named() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     SimpleIdentifier name = null;
     ConstructorName constructorName = null;
     InstanceCreationExpression instanceCreation = null;
@@ -1306,6 +1436,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_createConstructorSuperExplicit() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (node.parent is! ConstructorDeclaration ||
         node.parent.parent is! ClassDeclaration) {
       return;
@@ -1375,6 +1507,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_createConstructorSuperImplicit() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     ClassDeclaration targetClassNode = node.parent as ClassDeclaration;
     ClassElement targetClassElement = targetClassNode.element;
     InterfaceType superType = targetClassElement.supertype;
@@ -1442,6 +1576,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_createField() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (node is! SimpleIdentifier) {
       return;
     }
@@ -1462,7 +1598,7 @@ class FixProcessor {
     ClassElement targetClassElement;
     if (target != null) {
       // prepare target interface type
-      DartType targetType = target.bestType;
+      DartType targetType = target.staticType;
       if (targetType is! InterfaceType) {
         return;
       }
@@ -1470,7 +1606,7 @@ class FixProcessor {
       // maybe static
       if (target is Identifier) {
         Identifier targetIdentifier = target;
-        Element targetElement = targetIdentifier.bestElement;
+        Element targetElement = targetIdentifier.staticElement;
         if (targetElement == null) {
           return;
         }
@@ -1517,6 +1653,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_createField_initializingFormal() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     //
     // Ensure that we are in an initializing formal parameter.
     //
@@ -1551,6 +1689,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_createFunction_forFunctionType() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (node is SimpleIdentifier) {
       SimpleIdentifier nameNode = node as SimpleIdentifier;
       // prepare argument expression (to get parameter)
@@ -1559,7 +1699,7 @@ class FixProcessor {
       {
         Expression target = getQualifiedPropertyTarget(node);
         if (target != null) {
-          DartType targetType = target.bestType;
+          DartType targetType = target.staticType;
           if (targetType != null && targetType.element is ClassElement) {
             targetElement = targetType.element as ClassElement;
             argument = target.parent as Expression;
@@ -1575,7 +1715,7 @@ class FixProcessor {
       }
       argument = stepUpNamedExpression(argument);
       // should be argument of some invocation
-      ParameterElement parameterElement = argument.bestParameterElement;
+      ParameterElement parameterElement = argument.staticParameterElement;
       if (parameterElement == null) {
         return;
       }
@@ -1599,6 +1739,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_createGetter() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (node is! SimpleIdentifier) {
       return;
     }
@@ -1622,7 +1764,7 @@ class FixProcessor {
     ClassElement targetClassElement;
     if (target != null) {
       // prepare target interface type
-      DartType targetType = target.bestType;
+      DartType targetType = target.staticType;
       if (targetType is! InterfaceType) {
         return;
       }
@@ -1630,7 +1772,7 @@ class FixProcessor {
       // maybe static
       if (target is Identifier) {
         Identifier targetIdentifier = target;
-        Element targetElement = targetIdentifier.bestElement;
+        Element targetElement = targetIdentifier.staticElement;
         staticModifier = targetElement.kind == ElementKind.CLASS;
       }
     } else {
@@ -1674,6 +1816,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_createImportUri() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     // TODO(brianwilkerson) Generalize this to allow other valid string literals.
     // TODO(brianwilkerson) Support the case where the node's parent is a Configuration.
     if (node is SimpleStringLiteral && node.parent is ImportDirective) {
@@ -1700,6 +1844,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_createLocalVariable() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (node is! SimpleIdentifier) {
       return;
     }
@@ -1751,15 +1897,15 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_createMissingOverrides() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (node.parent is! ClassDeclaration) {
       return;
     }
     ClassDeclaration targetClass = node.parent as ClassDeclaration;
     ClassElement targetClassElement = targetClass.element;
     utils.targetClassElement = targetClassElement;
-    List<ExecutableElement> elements = ErrorVerifier
-        .computeMissingOverrides(
-            driver.analysisOptions.strongMode,
+    List<ExecutableElement> elements = ErrorVerifier.computeMissingOverrides(
             typeProvider,
             typeSystem,
             new InheritanceManager(unitLibraryElement),
@@ -1900,6 +2046,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_createNoSuchMethod() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (node.parent is! ClassDeclaration) {
       return;
     }
@@ -1926,6 +2074,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_createPartUri() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     // TODO(brianwilkerson) Generalize this to allow other valid string literals.
     if (node is SimpleStringLiteral && node.parent is PartDirective) {
       PartDirective partDirective = node.parent;
@@ -1945,6 +2095,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_illegalAsyncReturnType() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     // prepare the existing type
     TypeAnnotation typeName = node.getAncestor((n) => n is TypeAnnotation);
     TypeProvider typeProvider = this.typeProvider;
@@ -1956,6 +2108,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_importLibrary(FixKind kind, Uri library) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     String uriText;
     DartChangeBuilder changeBuilder = new DartChangeBuilder(session);
     await changeBuilder.addFileEdit(file, (DartFileEditBuilder builder) {
@@ -1966,6 +2120,8 @@ class FixProcessor {
 
   Future<Null> _addFix_importLibrary_withElement(String name,
       List<ElementKind> elementKinds, TopLevelDeclarationKind kind2) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     // ignore if private
     if (name.startsWith('_')) {
       return;
@@ -2067,6 +2223,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_importLibrary_withFunction() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (node is SimpleIdentifier && node.parent is MethodInvocation) {
       MethodInvocation invocation = node.parent as MethodInvocation;
       if (invocation.realTarget == null && invocation.methodName == node) {
@@ -2078,6 +2236,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_importLibrary_withTopLevelVariable() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (node is SimpleIdentifier) {
       String name = (node as SimpleIdentifier).name;
       await _addFix_importLibrary_withElement(
@@ -2088,6 +2248,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_importLibrary_withType() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (_mayBeTypeIdentifier(node)) {
       String typeName = (node as SimpleIdentifier).name;
       await _addFix_importLibrary_withElement(
@@ -2102,6 +2264,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_insertSemicolon() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (error.message.contains("';'")) {
       if (_isAwaitNode()) {
         return;
@@ -2116,6 +2280,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_isNotEmpty() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (node is! PrefixExpression) {
       return;
     }
@@ -2142,6 +2308,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_isNotNull() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (coveredNode is IsExpression) {
       IsExpression isExpression = coveredNode as IsExpression;
       DartChangeBuilder changeBuilder = new DartChangeBuilder(session);
@@ -2157,6 +2325,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_isNull() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (coveredNode is IsExpression) {
       IsExpression isExpression = coveredNode as IsExpression;
       DartChangeBuilder changeBuilder = new DartChangeBuilder(session);
@@ -2172,6 +2342,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_makeEnclosingClassAbstract() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     ClassDeclaration enclosingClass =
         node.getAncestor((node) => node is ClassDeclaration);
     if (enclosingClass == null) {
@@ -2188,10 +2360,12 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_makeFieldNotFinal() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     AstNode node = this.node;
     if (node is SimpleIdentifier &&
-        node.bestElement is PropertyAccessorElement) {
-      PropertyAccessorElement getter = node.bestElement;
+        node.staticElement is PropertyAccessorElement) {
+      PropertyAccessorElement getter = node.staticElement;
       if (getter.isGetter &&
           getter.isSynthetic &&
           !getter.variable.isSynthetic &&
@@ -2231,6 +2405,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_makeVariableFinal() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     AstNode node = this.node;
     if (node is SimpleIdentifier && node.parent is VariableDeclaration) {
       VariableDeclaration declaration = node.parent;
@@ -2250,6 +2426,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_nonBoolCondition_addNotNull() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     DartChangeBuilder changeBuilder = new DartChangeBuilder(session);
     await changeBuilder.addFileEdit(file, (DartFileEditBuilder builder) {
       builder.addSimpleInsertion(error.offset + error.length, ' != null');
@@ -2258,6 +2436,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_removeAwait() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     final awaitExpression = node;
     if (awaitExpression is AwaitExpression) {
       final awaitToken = awaitExpression.awaitKeyword;
@@ -2270,6 +2450,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_removeDeadCode() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     AstNode coveringNode = this.coveredNode;
     if (coveringNode is Expression) {
       AstNode parent = coveredNode.parent;
@@ -2311,6 +2493,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_removeEmptyCatch() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     DartChangeBuilder changeBuilder = new DartChangeBuilder(session);
     await changeBuilder.addFileEdit(file, (DartFileEditBuilder builder) {
       builder.addDeletion(utils.getLinesRange(range.node(node.parent)));
@@ -2319,6 +2503,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_removeEmptyConstructorBody() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     DartChangeBuilder changeBuilder = new DartChangeBuilder(session);
     await changeBuilder.addFileEdit(file, (DartFileEditBuilder builder) {
       builder.addSimpleReplacement(
@@ -2329,6 +2515,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_removeEmptyElse() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     IfStatement ifStatement = node.parent;
     DartChangeBuilder changeBuilder = new DartChangeBuilder(session);
     await changeBuilder.addFileEdit(file, (DartFileEditBuilder builder) {
@@ -2339,6 +2527,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_removeEmptyStatement() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     EmptyStatement emptyStatement = node;
     if (emptyStatement.parent is Block) {
       DartChangeBuilder changeBuilder = new DartChangeBuilder(session);
@@ -2349,15 +2539,19 @@ class FixProcessor {
     } else {
       DartChangeBuilder changeBuilder = new DartChangeBuilder(session);
       await changeBuilder.addFileEdit(file, (DartFileEditBuilder builder) {
-        builder.addSimpleReplacement(
-            range.endEnd(emptyStatement.beginToken.previous, emptyStatement),
-            ' {}');
+        Token previous = emptyStatement.findPrevious(emptyStatement.beginToken);
+        if (previous != null) {
+          builder.addSimpleReplacement(
+              range.endEnd(previous, emptyStatement), ' {}');
+        }
       });
       _addFixFromBuilder(changeBuilder, DartFixKind.REPLACE_WITH_BRACKETS);
     }
   }
 
   Future<Null> _addFix_removeInitializer() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     // Retrieve the linted node.
     VariableDeclaration ancestor =
         node.getAncestor((a) => a is VariableDeclaration);
@@ -2372,6 +2566,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_removeInterpolationBraces() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     AstNode node = this.node;
     if (node is InterpolationExpression) {
       Token right = node.rightBracket;
@@ -2389,6 +2585,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_removeMethodDeclaration() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     MethodDeclaration declaration =
         node.getAncestor((node) => node is MethodDeclaration);
     if (declaration != null) {
@@ -2401,6 +2599,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_removeParameters_inGetterDeclaration() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (node is MethodDeclaration) {
       MethodDeclaration method = node as MethodDeclaration;
       SimpleIdentifier name = method.name;
@@ -2417,6 +2617,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_removeParentheses_inGetterInvocation() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (node is SimpleIdentifier && node.parent is MethodInvocation) {
       MethodInvocation invocation = node.parent as MethodInvocation;
       if (invocation.methodName == node && invocation.target != null) {
@@ -2431,6 +2633,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_removeThisExpression() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     final thisExpression = node is ThisExpression
         ? node
         : node.getAncestor((node) => node is ThisExpression);
@@ -2451,6 +2655,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_removeTypeAnnotation() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     final TypeAnnotation type =
         node.getAncestor((node) => node is TypeAnnotation);
     if (type != null) {
@@ -2463,6 +2669,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_removeUnnecessaryCast() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (coveredNode is! AsExpression) {
       return;
     }
@@ -2479,6 +2687,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_removeUnusedCatchClause() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (node is SimpleIdentifier) {
       AstNode catchClause = node.parent;
       if (catchClause is CatchClause &&
@@ -2495,6 +2705,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_removeUnusedCatchStack() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (node is SimpleIdentifier) {
       AstNode catchClause = node.parent;
       if (catchClause is CatchClause &&
@@ -2512,6 +2724,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_removeUnusedImport() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     // prepare ImportDirective
     ImportDirective importDirective =
         node.getAncestor((node) => node is ImportDirective);
@@ -2527,6 +2741,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_renameToCamelCase() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (node is! SimpleIdentifier) {
       return;
     }
@@ -2568,6 +2784,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_replaceFinalWithConst() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (node is VariableDeclarationList) {
       DartChangeBuilder changeBuilder = new DartChangeBuilder(session);
       await changeBuilder.addFileEdit(file, (DartFileEditBuilder builder) {
@@ -2579,6 +2797,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_replaceVarWithDynamic() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     DartChangeBuilder changeBuilder = new DartChangeBuilder(session);
     await changeBuilder.addFileEdit(file, (DartFileEditBuilder builder) {
       builder.addSimpleReplacement(range.error(error), 'dynamic');
@@ -2587,9 +2807,14 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_replaceWithConditionalAssignment() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     IfStatement ifStatement = node is IfStatement
         ? node
         : node.getAncestor((node) => node is IfStatement);
+    if (ifStatement == null) {
+      return;
+    }
     var thenStatement = ifStatement.thenStatement;
     Statement uniqueStatement(Statement statement) {
       if (statement is Block) {
@@ -2619,6 +2844,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_replaceWithConstInstanceCreation() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (coveredNode is InstanceCreationExpression) {
       var instanceCreation = coveredNode as InstanceCreationExpression;
       DartChangeBuilder changeBuilder = new DartChangeBuilder(session);
@@ -2636,6 +2863,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_replaceWithIdentifier() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     final FunctionTypedFormalParameter functionTyped =
         node.getAncestor((node) => node is FunctionTypedFormalParameter);
     if (functionTyped != null) {
@@ -2651,6 +2880,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_replaceWithLiteral() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     final InstanceCreationExpression instanceCreation =
         node.getAncestor((node) => node is InstanceCreationExpression);
     final InterfaceType type = instanceCreation.staticType;
@@ -2673,12 +2904,16 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_replaceWithTearOff() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     FunctionExpression ancestor =
         node.getAncestor((a) => a is FunctionExpression);
     if (ancestor == null) {
       return;
     }
     Future<Null> addFixOfExpression(InvocationExpression expression) async {
+      // TODO(brianwilkerson) Determine whether this await is necessary.
+      await null;
       DartChangeBuilder changeBuilder = new DartChangeBuilder(session);
       await changeBuilder.addFileEdit(file, (DartFileEditBuilder builder) {
         builder.addReplacement(range.node(ancestor), (DartEditBuilder builder) {
@@ -2709,6 +2944,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_undefinedClass_useSimilar() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     AstNode node = this.node;
     // Prepare the optional import prefix name.
     String prefixName = null;
@@ -2758,6 +2995,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_undefinedClassAccessor_useSimilar() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     AstNode node = this.node;
     if (node is SimpleIdentifier) {
       // prepare target
@@ -2787,6 +3026,8 @@ class FixProcessor {
 
   Future<Null> _addFix_undefinedClassMember_useSimilar(
       Expression target, ElementPredicate predicate) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (node is SimpleIdentifier) {
       String name = (node as SimpleIdentifier).name;
       _ClosestElementFinder finder =
@@ -2800,7 +3041,7 @@ class FixProcessor {
           _updateFinderWithClassMembers(finder, classElement);
         }
       } else {
-        DartType type = target.bestType;
+        DartType type = target.staticType;
         if (type is InterfaceType) {
           ClassElement classElement = type.element;
           _updateFinderWithClassMembers(finder, classElement);
@@ -2820,6 +3061,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_undefinedFunction_create() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     // should be the name of the invocation
     if (node is SimpleIdentifier && node.parent is MethodInvocation) {
     } else {
@@ -2867,6 +3110,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_undefinedFunction_useSimilar() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     AstNode node = this.node;
     if (node is SimpleIdentifier) {
       // Prepare the optional import prefix name.
@@ -2913,6 +3158,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_undefinedMethod_create() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (node is SimpleIdentifier && node.parent is MethodInvocation) {
       String name = (node as SimpleIdentifier).name;
       MethodInvocation invocation = node.parent as MethodInvocation;
@@ -2931,7 +3178,7 @@ class FixProcessor {
         staticModifier = _inStaticContext();
       } else {
         // prepare target interface type
-        DartType targetType = target.bestType;
+        DartType targetType = target.staticType;
         if (targetType is! InterfaceType) {
           return;
         }
@@ -2997,6 +3244,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_undefinedMethod_useSimilar() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (node.parent is MethodInvocation) {
       MethodInvocation invocation = node.parent as MethodInvocation;
       await _addFix_undefinedClassMember_useSimilar(invocation.realTarget,
@@ -3005,6 +3254,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_undefinedMethodWithContructor() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (node is SimpleIdentifier && node.parent is MethodInvocation) {
       DartChangeBuilder changeBuilder = new DartChangeBuilder(session);
       await changeBuilder.addFileEdit(file, (DartFileEditBuilder builder) {
@@ -3023,6 +3274,8 @@ class FixProcessor {
    * final fields.
    */
   Future<Null> _addFix_updateConstructor_forUninitializedFinalFields() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (node is! SimpleIdentifier || node.parent is! ConstructorDeclaration) {
       return;
     }
@@ -3083,6 +3336,8 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_useEffectiveIntegerDivision() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     for (AstNode n = node; n != null; n = n.parent) {
       if (n is MethodInvocation &&
           n.offset == errorOffset &&
@@ -3110,6 +3365,8 @@ class FixProcessor {
    * the given [element].
    */
   Future<Null> _addFix_useStaticAccess(AstNode target, Element element) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     Element declaringElement = element.enclosingElement;
     if (declaringElement is ClassElement) {
       DartType declaringType = declaringElement.type;
@@ -3126,22 +3383,26 @@ class FixProcessor {
   }
 
   Future<Null> _addFix_useStaticAccess_method() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (node is SimpleIdentifier && node.parent is MethodInvocation) {
       MethodInvocation invocation = node.parent as MethodInvocation;
       if (invocation.methodName == node) {
         Expression target = invocation.target;
-        Element invokedElement = invocation.methodName.bestElement;
+        Element invokedElement = invocation.methodName.staticElement;
         await _addFix_useStaticAccess(target, invokedElement);
       }
     }
   }
 
   Future<Null> _addFix_useStaticAccess_property() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (node is SimpleIdentifier && node.parent is PrefixedIdentifier) {
       PrefixedIdentifier prefixed = node.parent as PrefixedIdentifier;
       if (prefixed.identifier == node) {
         Expression target = prefixed.prefix;
-        Element invokedElement = prefixed.identifier.bestElement;
+        Element invokedElement = prefixed.identifier.staticElement;
         await _addFix_useStaticAccess(target, invokedElement);
       }
     }
@@ -3171,6 +3432,8 @@ class FixProcessor {
       String sourcePrefix,
       String sourceSuffix,
       Element target) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     // build method source
     String targetFile = targetSource.fullName;
     DartChangeBuilder changeBuilder = new DartChangeBuilder(session);
@@ -3233,6 +3496,8 @@ class FixProcessor {
    */
   Future<Null> _addProposal_createFunction_function(
       FunctionType functionType) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     String name = (node as SimpleIdentifier).name;
     // prepare environment
     int insertOffset = unit.end;
@@ -3260,6 +3525,8 @@ class FixProcessor {
    */
   Future<Null> _addProposal_createFunction_method(
       ClassElement targetClassElement, FunctionType functionType) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     String name = (node as SimpleIdentifier).name;
     // prepare environment
     Source targetSource = targetClassElement.source;
@@ -3420,7 +3687,7 @@ class FixProcessor {
       if (assignment.leftHandSide == expression) {
         Expression rhs = assignment.rightHandSide;
         if (rhs != null) {
-          return rhs.bestType;
+          return rhs.staticType;
         }
       }
     }
@@ -3432,11 +3699,11 @@ class FixProcessor {
           // v = myFunction();
           Expression lhs = assignment.leftHandSide;
           if (lhs != null) {
-            return lhs.bestType;
+            return lhs.staticType;
           }
         } else {
           // v += myFunction();
-          MethodElement method = assignment.bestElement;
+          MethodElement method = assignment.staticElement;
           if (method != null) {
             List<ParameterElement> parameters = method.parameters;
             if (parameters.length == 1) {
@@ -3449,7 +3716,7 @@ class FixProcessor {
     // v + myFunction();
     if (parent is BinaryExpression) {
       BinaryExpression binary = parent;
-      MethodElement method = binary.bestElement;
+      MethodElement method = binary.staticElement;
       if (method != null) {
         if (binary.rightOperand == expression) {
           List<ParameterElement> parameters = method.parameters;
@@ -3459,7 +3726,7 @@ class FixProcessor {
     }
     // foo( myFunction() );
     if (parent is ArgumentList) {
-      ParameterElement parameter = expression.bestParameterElement;
+      ParameterElement parameter = expression.staticParameterElement;
       return parameter?.type;
     }
     // bool
@@ -3816,6 +4083,8 @@ class _ExecutableParameters {
    * be found.
    */
   Future<FormalParameterList> getParameterList() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     var name = await astProvider.getParsedNameForElement(executable);
     AstNode targetDeclaration = name?.parent;
     if (targetDeclaration is ConstructorDeclaration) {
@@ -3834,6 +4103,8 @@ class _ExecutableParameters {
    * or `null` is cannot be found.
    */
   Future<FormalParameter> getParameterNode(ParameterElement element) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     var name = await astProvider.getParsedNameForElement(element);
     for (AstNode node = name; node != null; node = node.parent) {
       if (node is FormalParameter && node.parent is FormalParameterList) {

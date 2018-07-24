@@ -32,7 +32,6 @@ import 'summary_common.dart';
 
 main() {
   defineReflectiveSuite(() {
-    defineReflectiveTests(ResynthesizeAstSpecTest);
     defineReflectiveTests(ResynthesizeAstStrongTest);
     defineReflectiveTests(ApplyCheckElementTextReplacements);
   });
@@ -94,12 +93,8 @@ abstract class AstSerializeTestMixin
         .map((Source source) => source.uri.toString())
         .toSet();
 
-    Map<String, LinkedLibrary> linkedSummaries = link(
-        nonSdkLibraryUris,
-        getDependency,
-        getUnit,
-        context.declaredVariables.get,
-        context.analysisOptions.strongMode);
+    Map<String, LinkedLibrary> linkedSummaries = link(nonSdkLibraryUris,
+        getDependency, getUnit, context.declaredVariables.get, true);
 
     return new TestSummaryResynthesizer(
         context,
@@ -171,19 +166,16 @@ abstract class AstSerializeTestMixin
 }
 
 @reflectiveTest
-class ResynthesizeAstSpecTest extends _ResynthesizeAstTest {
-  @override
-  bool get isStrongMode => false;
-}
-
-@reflectiveTest
 class ResynthesizeAstStrongTest extends _ResynthesizeAstTest {
-  @override
-  bool get isStrongMode => true;
-
   @failingTest // See dartbug.com/32290
   test_const_constructor_inferred_args() =>
-      test_const_constructor_inferred_args();
+      super.test_const_constructor_inferred_args();
+
+  @failingTest // See dartbug.com/33441
+  test_const_list_inferredType() => super.test_const_list_inferredType();
+
+  @failingTest // See dartbug.com/33441
+  test_const_map_inferredType() => super.test_const_map_inferredType();
 
   @override
   @failingTest
@@ -267,13 +259,9 @@ abstract class _ResynthesizeAstTest extends ResynthesizeTest
   @override
   AnalysisOptionsImpl createOptions() {
     if (isStrongMode) {
-      return super.createOptions()
-        ..previewDart2 = true
-        ..strongMode = true;
+      return super.createOptions()..previewDart2 = true;
     } else {
-      return super.createOptions()
-        ..previewDart2 = false
-        ..strongMode = false;
+      return super.createOptions()..previewDart2 = false;
     }
   }
 

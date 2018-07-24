@@ -9,6 +9,7 @@ import '../elements/entities.dart';
 import '../elements/names.dart';
 import '../elements/types.dart';
 import '../kernel/indexed.dart';
+import '../universe/class_set.dart' show ClassHierarchyNodesMapKey;
 
 /// Map from 'frontend' to 'backend' elements.
 ///
@@ -92,7 +93,7 @@ Map<K, V> convertMap<K, V>(
 
 abstract class JsToFrontendMapBase extends JsToFrontendMap {
   DartType toBackendType(DartType type) =>
-      const TypeConverter().visit(type, _toBackendEntity);
+      type == null ? null : const TypeConverter().visit(type, _toBackendEntity);
 
   Entity _toBackendEntity(Entity entity) {
     if (entity is ClassEntity) return toBackendClass(entity);
@@ -143,8 +144,9 @@ class JsElementCreatorMixin {
     return new JConstructorBody(constructor);
   }
 
-  JGeneratorBody createGeneratorBody(FunctionEntity function) {
-    return new JGeneratorBody(function);
+  JGeneratorBody createGeneratorBody(
+      FunctionEntity function, DartType elementType) {
+    return new JGeneratorBody(function, elementType);
   }
 
   IndexedFunction createGetter(LibraryEntity library,
@@ -274,7 +276,9 @@ class TypeConverter implements DartTypeVisitor<DartType, EntityConverter> {
   @override
   DartType visitTypedefType(TypedefType type, EntityConverter converter) {
     return new TypedefType(
-        converter(type.element), visitList(type.typeArguments, converter));
+        converter(type.element),
+        visitList(type.typeArguments, converter),
+        visit(type.unaliased, converter));
   }
 
   @override
@@ -285,8 +289,7 @@ class TypeConverter implements DartTypeVisitor<DartType, EntityConverter> {
         visitList(type.optionalParameterTypes, converter),
         type.namedParameters,
         visitList(type.namedParameterTypes, converter),
-        type.typeVariables,
-        visitTypedefType(type.typedefType, converter));
+        type.typeVariables);
   }
 
   @override
@@ -323,7 +326,7 @@ class JLibrary extends IndexedLibrary {
   String toString() => '${jsElementPrefix}library($name)';
 }
 
-class JClass extends IndexedClass {
+class JClass extends IndexedClass with ClassHierarchyNodesMapKey {
   final JLibrary library;
 
   final String name;
@@ -504,9 +507,10 @@ class JMethod extends JFunction {
 
 class JGeneratorBody extends JFunction {
   final FunctionEntity function;
+  final DartType elementType;
   final int hashCode;
 
-  JGeneratorBody(this.function)
+  JGeneratorBody(this.function, this.elementType)
       : hashCode = function.hashCode + 1, // Hack stabilize sort order.
         super(function.library, function.enclosingClass, function.memberName,
             function.parameterStructure, function.asyncMarker,

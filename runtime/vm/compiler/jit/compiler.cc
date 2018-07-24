@@ -32,6 +32,7 @@
 #include "vm/exceptions.h"
 #include "vm/flags.h"
 #include "vm/kernel.h"
+#include "vm/kernel_loader.h"  // For kernel::ParseStaticFieldInitializer.
 #include "vm/longjump.h"
 #include "vm/object.h"
 #include "vm/object_store.h"
@@ -132,6 +133,18 @@ DEFINE_FLAG_HANDLER(PrecompilationModeHandler,
                     precompilation,
                     "Precompilation mode");
 
+static void UnsafeModeHandler(bool value) {
+  if (value) {
+    FLAG_omit_strong_type_checks = true;
+    FLAG_use_strong_mode_types = false;
+  }
+}
+
+DEFINE_FLAG_HANDLER(UnsafeModeHandler,
+                    experimental_unsafe_mode_use_at_your_own_risk,
+                    "Omit runtime strong mode type checks and disable "
+                    "optimizations based on types.");
+
 #ifndef DART_PRECOMPILED_RUNTIME
 
 bool UseKernelFrontEndFor(ParsedFunction* parsed_function) {
@@ -155,11 +168,10 @@ FlowGraph* DartCompilationPipeline::BuildFlowGraph(
     intptr_t osr_id,
     bool optimized) {
   if (UseKernelFrontEndFor(parsed_function)) {
-    kernel::FlowGraphBuilder builder(
-        parsed_function->function().kernel_offset(), parsed_function,
-        ic_data_array,
-        /* not building var desc */ NULL,
-        /* not inlining */ NULL, optimized, osr_id);
+    kernel::FlowGraphBuilder builder(parsed_function, ic_data_array,
+                                     /* not building var desc */ NULL,
+                                     /* not inlining */ NULL, optimized,
+                                     osr_id);
     FlowGraph* graph = builder.BuildGraph();
 #if defined(DART_USE_INTERPRETER)
     ASSERT((graph != NULL) || parsed_function->function().HasBytecode());
@@ -1004,6 +1016,7 @@ static RawObject* CompileFunctionHelper(CompilationPipeline* pipeline,
     CompileParsedFunctionHelper helper(parsed_function, optimized, osr_id);
 
     if (Compiler::IsBackgroundCompilation()) {
+      ASSERT(optimized && function.is_background_optimizable());
       if (isolate->IsTopLevelParsing() ||
           (loading_invalidation_gen_at_start !=
            isolate->loading_invalidation_gen())) {
@@ -1365,8 +1378,7 @@ void Compiler::ComputeLocalVarDescriptors(const Code& code) {
     } else {
       parsed_function->EnsureKernelScopes();
       kernel::FlowGraphBuilder builder(
-          parsed_function->function().kernel_offset(), parsed_function,
-          *ic_data_array, context_level_array,
+          parsed_function, *ic_data_array, context_level_array,
           /* not inlining */ NULL, false, Compiler::kNoOSRDeoptId);
       builder.BuildGraph();
     }
@@ -1495,9 +1507,15 @@ RawObject* Compiler::EvaluateStaticInitializer(const Field& field) {
       DartCompilationPipeline pipeline;
       CompileParsedFunctionHelper helper(parsed_function, false, kNoOSRDeoptId);
       const Code& code = Code::Handle(helper.Compile(&pipeline));
+      const Function& initializer = parsed_function->function();
       if (!code.IsNull()) {
-        const Function& initializer = parsed_function->function();
         code.set_var_descriptors(Object::empty_var_descriptors());
+#if defined(DART_USE_INTERPRETER)
+      }
+      // In case the initializer has bytecode, the compilation step above only
+      // loaded the bytecode without generating code.
+      if (!code.IsNull() || initializer.HasBytecode()) {
+#endif
         // Invoke the function to evaluate the expression.
         return DartEntry::InvokeFunction(initializer, Object::empty_array());
       }
@@ -1764,9 +1782,12 @@ void BackgroundCompiler::Run() {
           } else {
             qelem = function_queue()->Remove();
             const Function& old = Function::Handle(qelem->Function());
+            // If an optimizable method is not optimized, put it back on
+            // the background queue (unless it was passed to foreground).
             if ((!old.HasOptimizedCode() && old.IsOptimizable()) ||
                 FLAG_stress_test_background_compilation) {
-              if (Compiler::CanOptimizeFunction(thread, old)) {
+              if (old.is_background_optimizable() &&
+                  Compiler::CanOptimizeFunction(thread, old)) {
                 QueueElement* repeat_qelem = new QueueElement(old);
                 function_queue()->Add(repeat_qelem);
               }

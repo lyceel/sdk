@@ -23,6 +23,7 @@ import 'package:analyzer/src/file_system/file_system.dart';
 import 'package:analyzer/src/generated/bazel.dart';
 import 'package:analyzer/src/generated/engine.dart';
 import 'package:analyzer/src/generated/gn.dart';
+import 'package:analyzer/src/generated/package_build.dart';
 import 'package:analyzer/src/generated/sdk.dart';
 import 'package:analyzer/src/generated/source.dart';
 import 'package:analyzer/src/generated/workspace.dart';
@@ -281,11 +282,13 @@ class ContextBuilder {
   Workspace createWorkspace(String rootPath) {
     if (_hasPackageFileInPath(rootPath)) {
       // Bazel workspaces that include package files are treated like normal
-      // (non-Bazel) directories.
-      return _BasicWorkspace.find(resourceProvider, rootPath, this);
+      // (non-Bazel) directories. But may still use package:build.
+      return PackageBuildWorkspace.find(resourceProvider, rootPath, this) ??
+          _BasicWorkspace.find(resourceProvider, rootPath, this);
     }
     Workspace workspace = BazelWorkspace.find(resourceProvider, rootPath);
     workspace ??= GnWorkspace.find(resourceProvider, rootPath);
+    workspace ??= PackageBuildWorkspace.find(resourceProvider, rootPath, this);
     return workspace ?? _BasicWorkspace.find(resourceProvider, rootPath, this);
   }
 
@@ -350,7 +353,7 @@ class ContextBuilder {
       Map<String, List<Folder>> packageMap, AnalysisOptions analysisOptions) {
     String summaryPath = builderOptions.dartSdkSummaryPath;
     if (summaryPath != null) {
-      return new SummaryBasedDartSdk(summaryPath, analysisOptions.strongMode,
+      return new SummaryBasedDartSdk(summaryPath, true,
           resourceProvider: resourceProvider);
     } else if (packageMap != null) {
       SdkExtensionFinder extFinder = new SdkExtensionFinder(packageMap);
@@ -405,8 +408,8 @@ class ContextBuilder {
     SdkDescription description =
         new SdkDescription(<String>[sdkPath], analysisOptions);
     return sdkManager.getSdk(description, () {
-      FolderBasedDartSdk sdk = new FolderBasedDartSdk(resourceProvider,
-          resourceProvider.getFolder(sdkPath), analysisOptions.strongMode);
+      FolderBasedDartSdk sdk = new FolderBasedDartSdk(
+          resourceProvider, resourceProvider.getFolder(sdkPath), true);
       sdk.analysisOptions = analysisOptions;
       sdk.useSummary = sdkManager.canUseSummaries;
       return sdk;
@@ -449,28 +452,26 @@ class ContextBuilder {
         verbose('Exception: $e\n  when loading ${optionsFile.path}');
       }
     } else {
-      // Search for the default analysis options
-      // unless explicitly directed not to do so.
+      // Search for the default analysis options.
+      // TODO(danrubel) determine if bazel or gn project depends upon flutter
       Source source;
-      if (builderOptions.packageDefaultAnalysisOptions) {
-        // TODO(danrubel) determine if bazel or gn project depends upon flutter
-        if (workspace.hasFlutterDependency) {
-          source = sourceFactory.forUri(flutterAnalysisOptionsPath);
-        }
-        if (source == null || !source.exists()) {
-          source = sourceFactory.forUri(bazelAnalysisOptionsPath);
-        }
-        if (source != null && source.exists()) {
-          try {
-            optionMap = optionsProvider.getOptionsFromSource(source);
-            if (contextRoot != null) {
-              contextRoot.optionsFilePath = source.fullName;
-            }
-            verbose('Loaded analysis options from ${source.fullName}');
-          } catch (e) {
-            // Ignore exceptions thrown while trying to load the options file.
-            verbose('Exception: $e\n  when loading ${source.fullName}');
+      if (workspace.hasFlutterDependency) {
+        source = sourceFactory.forUri(flutterAnalysisOptionsPath);
+      }
+      if (source == null || !source.exists()) {
+        source = sourceFactory.forUri(bazelAnalysisOptionsPath);
+      }
+
+      if (source != null && source.exists()) {
+        try {
+          optionMap = optionsProvider.getOptionsFromSource(source);
+          if (contextRoot != null) {
+            contextRoot.optionsFilePath = source.fullName;
           }
+          verbose('Loaded analysis options from ${source.fullName}');
+        } catch (e) {
+          // Ignore exceptions thrown while trying to load the options file.
+          verbose('Exception: $e\n  when loading ${source.fullName}');
         }
       }
     }
@@ -688,11 +689,6 @@ class ContextBuilderOptions {
    * or `null` if the normal lookup mechanism should be used.
    */
   String defaultPackagesDirectoryPath;
-
-  /**
-   * Allow Flutter and bazel default analysis options to be used.
-   */
-  bool packageDefaultAnalysisOptions = true;
 
   /**
    * Initialize a newly created set of options

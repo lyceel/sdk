@@ -33,7 +33,6 @@ class Configuration {
       this.hotReload,
       this.hotReloadRollback,
       this.isChecked,
-      bool isStrong,
       this.isHostChecked,
       this.isCsp,
       this.isMinified,
@@ -41,18 +40,20 @@ class Configuration {
       this.listTests,
       this.listStatusFiles,
       this.noPreviewDart2,
-      this.previewDart2,
       this.printTiming,
       this.printReport,
       this.reportInJson,
       this.resetBrowser,
       this.skipCompilation,
+      this.useAnalyzerCfe,
+      this.useAnalyzerFastaParser,
       this.useBlobs,
       this.useSdk,
       this.useFastStartup,
       this.useEnableAsserts,
       this.useDart2JSWithKernel,
       this.useDart2JSOldFrontend,
+      this.useKernelBytecode,
       this.writeDebugLog,
       this.writeTestOutcomeLog,
       this.writeResultLog,
@@ -83,11 +84,7 @@ class Configuration {
       this.fastTestsOnly,
       this.printPassingStdout})
       : _packages = packages,
-        _timeout = timeout,
-        isStrong = isStrong ||
-            // DDC always runs in strong mode.
-            compiler == Compiler.dartdevc ||
-            compiler == Compiler.dartdevk;
+        _timeout = timeout;
 
   final Architecture architecture;
   final Compiler compiler;
@@ -108,7 +105,6 @@ class Configuration {
   final bool hotReload;
   final bool hotReloadRollback;
   final bool isChecked;
-  final bool isStrong;
   final bool isHostChecked;
   final bool isCsp;
   final bool isMinified;
@@ -116,18 +112,20 @@ class Configuration {
   final bool listTests;
   final bool listStatusFiles;
   final bool noPreviewDart2;
-  final bool previewDart2;
   final bool printTiming;
   final bool printReport;
   final bool reportInJson;
   final bool resetBrowser;
   final bool skipCompilation;
+  final bool useAnalyzerCfe;
+  final bool useAnalyzerFastaParser;
   final bool useBlobs;
   final bool useSdk;
   final bool useFastStartup;
   final bool useEnableAsserts;
   final bool useDart2JSWithKernel;
   final bool useDart2JSOldFrontend;
+  final bool useKernelBytecode;
   final bool writeDebugLog;
   final bool writeTestOutcomeLog;
   final bool writeResultLog;
@@ -187,21 +185,18 @@ class Configuration {
   /// as the first stage of compilation.
   bool get usesFasta {
     var fastaCompilers = const [
+      Compiler.appJitk,
       Compiler.dartdevk,
       Compiler.dartk,
+      Compiler.dartkb,
       Compiler.dartkp,
       Compiler.fasta,
     ];
     return fastaCompilers.contains(compiler) ||
-        compiler == Compiler.dart2js && !useDart2JSOldFrontend;
+        (compiler == Compiler.dart2js && !useDart2JSOldFrontend) ||
+        (compiler == Compiler.dart2analyzer &&
+            (builderTag == 'analyzer_use_fasta' || useAnalyzerCfe));
   }
-
-  /// Returns true if this configuration is considered Dart 2.0 configuration
-  /// by VM (which is identified by using common front-end and strong mode).
-  /// In this case instead of invoking VM binary directly we use
-  /// pkg/vm/tool/dart2 wrapper script, which takes care of passing
-  /// correct arguments to VM binary.
-  bool get usingDart2VMWrapper => isStrong && compiler == Compiler.dartk;
 
   /// The base directory named for this configuration, like:
   ///
@@ -258,7 +253,6 @@ class Configuration {
     if (useEnableAsserts) args.add("--enable-asserts");
     if (useDart2JSWithKernel) args.add("--use-kernel");
     if (useDart2JSOldFrontend) args.add("--use-old-frontend");
-    if (isStrong) args.add("--strong");
     return args;
   }
 
@@ -435,9 +429,10 @@ class Configuration {
     var os = '';
     if (system == System.android) os = "Android";
 
+    var kbc = useKernelBytecode ? 'KBC' : '';
     var arch = architecture.name.toUpperCase();
-    var normal = '$modeName$os$arch';
-    var cross = '$modeName${os}X$arch';
+    var normal = '$modeName$os$arch$kbc';
+    var cross = '$modeName${os}X$arch$kbc';
     var outDir = system.outputDirectory;
     var normalDir = new Directory(new Path('$outDir$normal').toNativePath());
     var crossDir = new Directory(new Path('$outDir$cross').toNativePath());
@@ -465,7 +460,6 @@ class Configuration {
         'compiler': compiler.name,
         'runtime': runtime.name,
         'checked': isChecked,
-        'strong': isStrong,
         'host_checked': isHostChecked,
         'minified': isMinified,
         'csp': isCsp,
@@ -477,7 +471,8 @@ class Configuration {
         'fast_startup': useFastStartup,
         'timeout': timeout,
         'no_preview_dart_2': noPreviewDart2,
-        'preview_dart_2': previewDart2,
+        'use_cfe': useAnalyzerCfe,
+        'analyzer_use_fasta_parser': useAnalyzerFastaParser,
         'dart2js_with_kernel': useDart2JSWithKernel,
         'dart2js_old_frontend': useDart2JSOldFrontend,
         'enable_asserts': useEnableAsserts,
@@ -486,7 +481,8 @@ class Configuration {
         'batch': batch,
         'batch_dart2js': batchDart2JS,
         'reset_browser_configuration': resetBrowser,
-        'selectors': selectors.keys.toList()
+        'selectors': selectors.keys.toList(),
+        'use_kernel_bytecode': useKernelBytecode,
       };
     }
     return _summaryMap;
@@ -521,7 +517,7 @@ class Architecture {
     simarmv5te,
     simarm64,
     simdbc,
-    simdbc64
+    simdbc64,
   ], key: (architecture) => (architecture as Architecture).name);
 
   static Architecture find(String name) {
@@ -546,7 +542,9 @@ class Compiler {
   static const dartdevc = const Compiler._('dartdevc');
   static const dartdevk = const Compiler._('dartdevk');
   static const appJit = const Compiler._('app_jit');
+  static const appJitk = const Compiler._('app_jitk');
   static const dartk = const Compiler._('dartk');
+  static const dartkb = const Compiler._('dartkb');
   static const dartkp = const Compiler._('dartkp');
   static const specParser = const Compiler._('spec_parser');
   static const fasta = const Compiler._('fasta');
@@ -561,7 +559,9 @@ class Compiler {
     dartdevc,
     dartdevk,
     appJit,
+    appJitk,
     dartk,
+    dartkb,
     dartkp,
     specParser,
     fasta,
@@ -614,7 +614,10 @@ class Compiler {
       case Compiler.dart2analyzer:
         return const [Runtime.none];
       case Compiler.appJit:
+      case Compiler.appJitk:
       case Compiler.dartk:
+        return const [Runtime.vm, Runtime.selfCheck];
+      case Compiler.dartkb:
         return const [Runtime.vm, Runtime.selfCheck];
       case Compiler.precompiler:
       case Compiler.dartkp:
@@ -647,7 +650,9 @@ class Compiler {
       case Compiler.dart2analyzer:
         return Runtime.none;
       case Compiler.appJit:
+      case Compiler.appJitk:
       case Compiler.dartk:
+      case Compiler.dartkb:
         return Runtime.vm;
       case Compiler.precompiler:
       case Compiler.dartkp:
@@ -805,6 +810,7 @@ class Runtime {
       ].contains(this);
 
   bool get isIE => name.startsWith("ie");
+
   bool get isSafari => name.startsWith("safari");
 
   /// Whether this runtime is a command-line JavaScript environment.

@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:analyzer/file_system/file_system.dart';
 import 'package:analyzer/src/dart/analysis/file_state.dart';
 import 'package:analyzer/src/dart/analysis/kernel_metadata.dart';
+import 'package:analyzer/src/fasta/resolution_storer.dart';
 import 'package:analyzer/src/generated/engine.dart';
 import 'package:analyzer/src/generated/sdk.dart';
 import 'package:analyzer/src/generated/source.dart';
@@ -15,7 +16,6 @@ import 'package:front_end/src/base/libraries_specification.dart';
 import 'package:front_end/src/base/performance_logger.dart';
 import 'package:front_end/src/base/processed_options.dart';
 import 'package:front_end/src/fasta/builder/builder.dart';
-import 'package:front_end/src/fasta/builder/library_builder.dart';
 import 'package:front_end/src/fasta/compiler_context.dart';
 import 'package:front_end/src/fasta/dill/dill_target.dart';
 import 'package:front_end/src/fasta/kernel/kernel_target.dart';
@@ -26,6 +26,7 @@ import 'package:front_end/src/fasta/source/source_loader.dart';
 import 'package:front_end/src/fasta/source/stack_listener.dart';
 import 'package:front_end/src/fasta/target_implementation.dart';
 import 'package:front_end/src/fasta/type_inference/type_inference_engine.dart';
+import 'package:front_end/src/fasta/type_inference/type_inference_listener.dart';
 import 'package:front_end/src/fasta/uri_translator.dart';
 import 'package:front_end/src/fasta/uri_translator_impl.dart';
 import 'package:kernel/class_hierarchy.dart';
@@ -39,31 +40,10 @@ import 'package:path/path.dart' as pathos;
 
 /// Resolution information in a single function body.
 class CollectedResolution {
-  /// The list of local declarations stored by body builders while
-  /// compiling the library.
-  final List<TreeNode> kernelDeclarations = [];
+  final Map<int, ResolutionData> kernelData = {};
 
-  /// The list of references to local or external stored by body builders
-  /// while compiling the library.
-  final List<Node> kernelReferences = [];
-
-  /// The list of types stored by body builders while compiling the library.
-  final List<DartType> kernelTypes = [];
-
-  /// File offsets corresponding to the declarations in [kernelDeclarations].
-  ///
-  /// These are used strictly for validation purposes.
-  final List<int> declarationOffsets = [];
-
-  /// File offsets corresponding to the objects in [kernelReferences].
-  ///
-  /// These are used strictly for validation purposes.
-  final List<int> referenceOffsets = [];
-
-  /// File offsets corresponding to the types in [kernelTypes].
-  ///
-  /// These are used strictly for validation purposes.
-  final List<int> typeOffsets = [];
+  final Map<TypeParameter, int> typeVariableDeclarations =
+      new Map<TypeParameter, int>.identity();
 }
 
 /// The compilation result for a single file.
@@ -71,13 +51,13 @@ class FileCompilationResult {
   /// The file system URI of the file.
   final Uri fileUri;
 
-  /// The list of resolution for each code block, e.g function body.
-  final List<CollectedResolution> resolutions;
+  /// The collected resolution for the file.
+  final CollectedResolution resolution;
 
   /// The list of all FrontEnd errors in the file.
   final List<CompilationMessage> errors;
 
-  FileCompilationResult(this.fileUri, this.resolutions, this.errors);
+  FileCompilationResult(this.fileUri, this.resolution, this.errors);
 }
 
 /// The wrapper around FrontEnd compiler that can be used incrementally.
@@ -96,7 +76,7 @@ class FrontEndCompiler {
       'A compile() invocation is still executing.';
 
   /// Options used by the kernel compiler.
-  final ProcessedOptions _options;
+  final CompilerOptions _compilerOptions;
 
   /// The logger to report compilation progress.
   final PerformanceLog _logger;
@@ -114,9 +94,16 @@ class FrontEndCompiler {
   /// Each value is the compilation result of the key library.
   final Map<Uri, LibraryCompilationResult> _results = {};
 
+  /// Index of metadata in [_component].
+  final AnalyzerMetadataIndex _metadataIndex = new AnalyzerMetadataIndex();
+
   /// The [Component] with currently valid libraries. When a file is invalidated,
   /// we remove the file, its library, and everything affected from [_component].
   Component _component = new Component();
+
+  /// The [DillTarget] that is filled with [_component] libraries before
+  /// compilation of a new library.
+  DillTarget _dillTarget;
 
   /// Each key is the file system URI of a library.
   /// Each value is the libraries that directly depend on the key library.
@@ -183,23 +170,23 @@ class FrontEndCompiler {
     var uriTranslator = new UriTranslatorImpl(
         new TargetLibrariesSpecification('none', dartLibraries), packages);
     var errorListener = new _ErrorListener();
-    var options = new CompilerOptions()
-      ..target = new _AnalyzerTarget(
-          new TargetFlags(strongMode: analysisOptions.strongMode))
+    var compilerOptions = new CompilerOptions()
+      ..target = new _AnalyzerTarget(new TargetFlags(strongMode: true),
+          enableSuperMixins: analysisOptions.enableSuperMixins)
       ..reportMessages = false
       ..logger = logger
       ..fileSystem = new _FileSystemAdaptor(fsState, pathContext)
       ..byteStore = byteStore
       ..onError = errorListener.onError;
-    var processedOptions = new ProcessedOptions(options);
 
     return new FrontEndCompiler._(
-        processedOptions, uriTranslator, errorListener);
+        compilerOptions, uriTranslator, errorListener);
   }
 
-  FrontEndCompiler._(this._options, this.uriTranslator, this._errorListener)
-      : _logger = _options.logger,
-        _fileSystem = _options.fileSystem;
+  FrontEndCompiler._(
+      this._compilerOptions, this.uriTranslator, this._errorListener)
+      : _logger = _compilerOptions.logger,
+        _fileSystem = _compilerOptions.fileSystem;
 
   /// Compile the library with the given absolute [uri], and everything it
   /// depends on. Return the result of the requested library compilation.
@@ -222,26 +209,39 @@ class FrontEndCompiler {
       }
     }
 
-    return _runWithFrontEndContext('Compile', () async {
+    return _runWithFrontEndContext('Compile', uri, (processedOptions) async {
       try {
-        var dillTarget =
-            new DillTarget(_options.ticker, uriTranslator, _options.target);
+        // Initialize the dill target once.
+        if (_dillTarget == null) {
+          _dillTarget = new DillTarget(
+            processedOptions.ticker,
+            uriTranslator,
+            processedOptions.target,
+          );
+        }
 
-        // Append all libraries what we still have in the current component.
+        // Append new libraries from the current component.
         await _logger.runAsync('Load dill libraries', () async {
-          dillTarget.loader.appendLibraries(_component);
-          await dillTarget.buildOutlines();
+          _dillTarget.loader.appendLibraries(_component,
+              filter: (uri) => !_dillTarget.loader.builders.containsKey(uri));
+          await _dillTarget.buildOutlines();
         });
 
         // Create the target to compile the library.
-        var kernelTarget = new _AnalyzerKernelTarget(_fileSystem, dillTarget,
+        var kernelTarget = new _AnalyzerKernelTarget(_fileSystem, _dillTarget,
             uriTranslator, new AnalyzerMetadataCollector());
         kernelTarget.read(uri);
 
         // Compile the entry point into the new component.
         _component = await _logger.runAsync('Compile', () async {
           await kernelTarget.buildOutlines(nameRoot: _component.root);
-          return await kernelTarget.buildComponent() ?? _component;
+          Component newComponent = await kernelTarget.buildComponent();
+          if (newComponent != null) {
+            _metadataIndex.replaceComponent(newComponent);
+            return newComponent;
+          } else {
+            return _component;
+          }
         });
 
         // TODO(scheglov) Only for new libraries?
@@ -249,14 +249,14 @@ class FrontEndCompiler {
 
         _logger.run('Compute dependencies', _computeDependencies);
 
-        // TODO(scheglov) Can we keep the same instance?
+        // Reuse CoreTypes and ClassHierarchy.
         var types = new TypeEnvironment(
-            new CoreTypes(_component), new ClassHierarchy(_component));
+            kernelTarget.loader.coreTypes, kernelTarget.loader.hierarchy);
 
         // Add results for new libraries.
         for (var library in _component.libraries) {
           if (!_results.containsKey(library.importUri)) {
-            Map<Uri, List<CollectedResolution>> libraryResolutions =
+            Map<Uri, CollectedResolution> libraryResolutions =
                 kernelTarget.resolutions[library.fileUri];
 
             var files = <Uri, FileCompilationResult>{};
@@ -265,7 +265,7 @@ class FrontEndCompiler {
               if (libraryResolutions != null) {
                 files[fileUri] = new FileCompilationResult(
                     fileUri,
-                    libraryResolutions[fileUri] ?? [],
+                    libraryResolutions[fileUri] ?? new CollectedResolution(),
                     _errorListener.fileUriToErrors[fileUri] ?? []);
               }
             }
@@ -299,9 +299,13 @@ class FrontEndCompiler {
       if (library == null) return;
 
       // Invalidate the library.
+      _metadataIndex.invalidate(library);
       _component.libraries.remove(library);
       _component.root.removeChild('${library.importUri}');
       _component.uriToSource.remove(libraryUri);
+      _dillTarget.loader.builders.remove(library.importUri);
+      _dillTarget.loader.libraries.remove(library);
+      _dillTarget.loader.uriToSource.remove(libraryUri);
       _results.remove(library.importUri);
 
       // Recursively invalidate dependencies.
@@ -345,10 +349,12 @@ class FrontEndCompiler {
     _component.libraries.forEach(processLibrary);
   }
 
-  Future<T> _runWithFrontEndContext<T>(String msg, Future<T> f()) async {
-    return await CompilerContext.runWithOptions(_options, (context) {
+  Future<T> _runWithFrontEndContext<T>(
+      String msg, Uri input, Future<T> Function(ProcessedOptions) f) async {
+    var processedOptions = new ProcessedOptions(_compilerOptions, [input]);
+    return await CompilerContext.runWithOptions(processedOptions, (context) {
       context.disableColors();
-      return _logger.runAsync(msg, f);
+      return _logger.runAsync(msg, () => f(processedOptions));
     });
   }
 }
@@ -379,34 +385,35 @@ class LibraryCompilationResult {
 
 /// The [DietListener] that record resolution information.
 class _AnalyzerDietListener extends DietListener {
-  final Map<Uri, List<CollectedResolution>> _resolutions;
+  final Map<Uri, ResolutionStorer> _storerMap = {};
 
   _AnalyzerDietListener(
       SourceLibraryBuilder library,
       ClassHierarchy hierarchy,
       CoreTypes coreTypes,
       TypeInferenceEngine typeInferenceEngine,
-      this._resolutions)
-      : super(library, hierarchy, coreTypes, typeInferenceEngine);
+      Map<Uri, CollectedResolution> resolutions)
+      : super(library, hierarchy, coreTypes, typeInferenceEngine) {
+    for (var fileUri in resolutions.keys) {
+      var resolution = resolutions[fileUri];
+      _storerMap[fileUri] = new ResolutionStorer(
+          resolution.kernelData, resolution.typeVariableDeclarations);
+    }
+  }
 
   StackListener createListener(
       ModifierBuilder builder, Scope memberScope, bool isInstanceMember,
-      [Scope formalParameterScope]) {
-    var fileResolutions = _resolutions[builder.fileUri];
-    if (fileResolutions == null) {
-      fileResolutions = <CollectedResolution>[];
-      _resolutions[builder.fileUri] = fileResolutions;
-    }
-    var resolution = new CollectedResolution();
-    fileResolutions.add(resolution);
+      [Scope formalParameterScope,
+      TypeInferenceListener<int, Node, int> listener]) {
+    ResolutionStorer storer = _storerMap[builder.fileUri];
     return super.createListener(
-        builder, memberScope, isInstanceMember, formalParameterScope);
+        builder, memberScope, isInstanceMember, formalParameterScope, storer);
   }
 }
 
 /// The [KernelTarget] that records resolution information.
 class _AnalyzerKernelTarget extends KernelTarget {
-  final Map<Uri, Map<Uri, List<CollectedResolution>>> resolutions = {};
+  final Map<Uri, Map<Uri, CollectedResolution>> resolutions = {};
 
   _AnalyzerKernelTarget(front_end.FileSystem fileSystem, DillTarget dillTarget,
       UriTranslator uriTranslator, MetadataCollector metadataCollector)
@@ -417,20 +424,30 @@ class _AnalyzerKernelTarget extends KernelTarget {
   _AnalyzerSourceLoader<Library> createLoader() {
     return new _AnalyzerSourceLoader<Library>(fileSystem, this, resolutions);
   }
+
+  @override
+  Declaration getDuplicatedFieldInitializerError(loader) {
+    return loader.coreLibrary.getConstructor('Exception');
+  }
 }
 
 /// The [SourceLoader] that record resolution information.
 class _AnalyzerSourceLoader<L> extends SourceLoader<L> {
-  final Map<Uri, Map<Uri, List<CollectedResolution>>> _resolutions;
+  final Map<Uri, Map<Uri, CollectedResolution>> _resolutions;
 
   _AnalyzerSourceLoader(front_end.FileSystem fileSystem,
       TargetImplementation target, this._resolutions)
       : super(fileSystem, true, target);
 
   @override
-  _AnalyzerDietListener createDietListener(LibraryBuilder library) {
-    var libraryResolutions = <Uri, List<CollectedResolution>>{};
+  _AnalyzerDietListener createDietListener(SourceLibraryBuilder library) {
+    var libraryResolutions = <Uri, CollectedResolution>{};
+    libraryResolutions[library.fileUri] = new CollectedResolution();
+    for (var part in library.parts) {
+      libraryResolutions[part.fileUri] = new CollectedResolution();
+    }
     _resolutions[library.fileUri] = libraryResolutions;
+
     return new _AnalyzerDietListener(
         library, hierarchy, coreTypes, typeInferenceEngine, libraryResolutions);
   }
@@ -440,13 +457,17 @@ class _AnalyzerSourceLoader<L> extends SourceLoader<L> {
  * [Target] for static analysis, with all features enabled.
  */
 class _AnalyzerTarget extends NoneTarget {
-  _AnalyzerTarget(TargetFlags flags) : super(flags);
+  _AnalyzerTarget(TargetFlags flags, {this.enableSuperMixins = false})
+      : super(flags);
 
   @override
   List<String> get extraRequiredLibraries => const <String>['dart:_internal'];
 
   @override
   bool enableNative(Uri uri) => true;
+
+  @override
+  bool enableSuperMixins;
 }
 
 /// The listener for [CompilationMessage]s from FrontEnd.
@@ -493,12 +514,20 @@ class _FileSystemEntityAdaptor implements front_end.FileSystemEntity {
 
   @override
   Future<List<int>> readAsBytes() async {
+    _throwIfDoesNotExist();
     // TODO(scheglov) Optimize.
     return utf8.encode(file.content);
   }
 
   @override
   Future<String> readAsString() async {
+    _throwIfDoesNotExist();
     return file.content;
+  }
+
+  void _throwIfDoesNotExist() {
+    if (!file.exists) {
+      throw new front_end.FileSystemException(uri, 'File not found');
+    }
   }
 }

@@ -31,12 +31,16 @@ abstract class Page {
   String get path => '/$id';
 
   Future<Null> asyncDiv(void gen(), {String classes}) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (classes != null) {
       buf.writeln('<div class="$classes">');
     } else {
       buf.writeln('<div>');
     }
-    await gen();
+    // TODO(brianwilkerson) Determine if await is necessary, if so, change the
+    // return type of [gen] to `Future<void>`.
+    await (gen() as dynamic);
     buf.writeln('</div>');
   }
 
@@ -55,8 +59,12 @@ abstract class Page {
   }
 
   Future<String> generate(Map<String, String> params) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     buf.clear();
-    await generatePage(params);
+    // TODO(brianwilkerson) Determine if await is necessary, if so, change the
+    // return type of [generatePage] to `Future<void>`.
+    await (generatePage(params) as dynamic);
     return buf.toString();
   }
 
@@ -139,6 +147,8 @@ abstract class Site {
   Page createUnknownPage(String unknownPath);
 
   Future<Null> handleGetRequest(HttpRequest request) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     try {
       String path = request.uri.path;
 
@@ -150,22 +160,22 @@ abstract class Site {
       for (Page page in pages) {
         if (page.path == path) {
           HttpResponse response = request.response;
-          response.headers.contentType = ContentType.HTML;
+          response.headers.contentType = ContentType.html;
           response.write(await page.generate(request.uri.queryParameters));
           response.close();
           return;
         }
       }
 
-      await respond(request, createUnknownPage(path), HttpStatus.NOT_FOUND);
+      await respond(request, createUnknownPage(path), HttpStatus.notFound);
     } catch (e, st) {
       try {
         await respond(request, createExceptionPage('$e', st),
-            HttpStatus.INTERNAL_SERVER_ERROR);
+            HttpStatus.internalServerError);
       } catch (e, st) {
         HttpResponse response = request.response;
-        response.statusCode = HttpStatus.INTERNAL_SERVER_ERROR;
-        response.headers.contentType = ContentType.TEXT;
+        response.statusCode = HttpStatus.internalServerError;
+        response.headers.contentType = ContentType.text;
         response.write('$e\n\n$st');
         response.close();
       }
@@ -173,17 +183,19 @@ abstract class Site {
   }
 
   Future<Null> respond(HttpRequest request, Page page,
-      [int code = HttpStatus.OK]) async {
+      [int code = HttpStatus.ok]) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     HttpResponse response = request.response;
     response.statusCode = code;
-    response.headers.contentType = ContentType.HTML;
+    response.headers.contentType = ContentType.html;
     response.write(await page.generate(request.uri.queryParameters));
     response.close();
   }
 
   void respondRedirect(HttpRequest request, String pathFragment) {
     HttpResponse response = request.response;
-    response.statusCode = HttpStatus.MOVED_TEMPORARILY;
+    response.statusCode = HttpStatus.movedTemporarily;
     response.redirect(request.uri.resolve(pathFragment));
   }
 }

@@ -22,6 +22,7 @@ namespace dart {
 // Forward declarations.
 class RuntimeEntry;
 class StubEntry;
+class RegisterSet;
 
 // Instruction encoding bits.
 enum {
@@ -698,6 +699,8 @@ class Assembler : public ValueObject {
   void BranchLink(const Code& code, Patchability patchable);
   void BranchLinkToRuntime();
 
+  void CallNullErrorShared(bool save_fpu_registers);
+
   // Branch and link to an entry address. Call sequence can be patched.
   void BranchLinkPatchable(const StubEntry& stub_entry);
   void BranchLinkPatchable(const Code& code);
@@ -766,6 +769,13 @@ class Assembler : public ValueObject {
   void LoadPoolPointer(Register reg = PP);
 
   void LoadIsolate(Register rd);
+
+  // Load word from pool from the given offset using encoding that
+  // InstructionPattern::DecodeLoadWordFromPool can decode.
+  void LoadWordFromPoolOffset(Register rd,
+                              int32_t offset,
+                              Register pp,
+                              Condition cond);
 
   void LoadObject(Register rd, const Object& object, Condition cond = AL);
   void LoadUniqueObject(Register rd, const Object& object, Condition cond = AL);
@@ -900,6 +910,9 @@ class Assembler : public ValueObject {
 
   void PushList(RegList regs, Condition cond = AL);
   void PopList(RegList regs, Condition cond = AL);
+
+  void PushRegisters(const RegisterSet& regs);
+  void PopRegisters(const RegisterSet& regs);
 
   void CompareRegisters(Register rn, Register rm) { cmp(rn, Operand(rm)); }
   void BranchIf(Condition condition, Label* label) { b(label, condition); }
@@ -1109,11 +1122,6 @@ class Assembler : public ValueObject {
 
   void BindARMv6(Label* label);
   void BindARMv7(Label* label);
-
-  void LoadWordFromPoolOffset(Register rd,
-                              int32_t offset,
-                              Register pp,
-                              Condition cond);
 
   void BranchLink(const ExternalLabel* label);
 

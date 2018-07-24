@@ -2,8 +2,6 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-library analyzer.src.generated.type_system;
-
 import 'dart:collection';
 import 'dart:math' as math;
 
@@ -35,9 +33,9 @@ int _getTopiness(DartType t) {
   assert(_isTop(t), 'only Top types have a topiness');
 
   // Highest top
-  if (t.isDynamic) return 3;
-  if (t.isObject) return 2;
-  if (t.isVoid) return 1;
+  if (t.isVoid) return 3;
+  if (t.isDynamic) return 2;
+  if (t.isObject) return 1;
   if (t.isDartAsyncFutureOr)
     return -3 + _getTopiness((t as InterfaceType).typeArguments[0]);
   // Lowest top
@@ -215,6 +213,22 @@ class GenericInferrer {
         // It should satisfy at least some of the constraints (e.g. the return
         // context). If we fall back to instantiateToBounds, we'll typically get
         // more errors (e.g. because `dynamic` is the most common bound).
+      }
+
+      if (inferred is FunctionType && inferred.typeFormals.isNotEmpty) {
+        errorReporter
+            ?.reportErrorForNode(StrongModeCode.COULD_NOT_INFER, errorNode, [
+          typeParam,
+          ' Inferred candidate type $inferred has type parameters'
+              ' ${(inferred as FunctionType).typeFormals}, but a function with'
+              ' type parameters cannot be used as a type argument.'
+        ]);
+
+        // Heuristic: Using a generic function type as a bound makes subtyping
+        // undecidable. Therefore, we cannot keep [inferred] unless we wish to
+        // generate bogus subtyping errors. Instead generate plain [Function],
+        // which is the most general function type.
+        inferred = typeProvider.functionType;
       }
 
       if (UnknownInferredType.isKnown(inferred)) {
@@ -646,18 +660,14 @@ class GenericInferrer {
 
     if (t1 is FunctionType && t2 is FunctionType) {
       return FunctionTypeImpl.relate(
-          t1,
-          t2,
-          (t1, t2) {
-            // TODO(jmesserly): should we flip covariance when we're relating
-            // type formal bounds? They're more like parameters.
-            return matchSubtype(t1, t2);
-          },
-          _typeSystem.instantiateToBounds,
+          t1, t2, matchSubtype, _typeSystem.instantiateToBounds,
           parameterRelation: (p1, p2) {
             return _matchSubtypeOf(p2.type, p1.type, null, origin,
                 covariant: !covariant);
-          });
+          },
+          // Type parameter bounds are invariant.
+          boundsRelation: (t1, t2, p1, p2) =>
+              matchSubtype(t1, t2) && matchSubtype(t2, t1));
     }
 
     if (t1 is FunctionType && t2 == typeProvider.functionType) {
@@ -834,10 +844,10 @@ class StrongTypeSystemImpl extends TypeSystem {
    */
   DartType getLeastNullableSupertype(InterfaceType type) {
     // compute set of supertypes
-    List<InterfaceType> s = InterfaceTypeImpl
-        .computeSuperinterfaceSet(type, strong: true)
-        .where(isNullableType)
-        .toList();
+    List<InterfaceType> s =
+        InterfaceTypeImpl.computeSuperinterfaceSet(type, strong: true)
+            .where(isNullableType)
+            .toList();
     return InterfaceTypeImpl.computeTypeAtMaxUniqueDepth(s);
   }
 
@@ -1181,7 +1191,10 @@ class StrongTypeSystemImpl extends TypeSystem {
   /// - it allows opt-in covariant parameters.
   bool isOverrideSubtypeOf(FunctionType f1, FunctionType f2) {
     return FunctionTypeImpl.relate(f1, f2, isSubtypeOf, instantiateToBounds,
-        parameterRelation: isOverrideSubtypeOfParameter);
+        parameterRelation: isOverrideSubtypeOfParameter,
+        // Type parameter bounds are invariant.
+        boundsRelation: (t1, t2, p1, p2) =>
+            isSubtypeOf(t1, t2) && isSubtypeOf(t2, t1));
   }
 
   /// Check that parameter [p2] is a subtype of [p1], given that we are
@@ -1522,7 +1535,10 @@ class StrongTypeSystemImpl extends TypeSystem {
   /// Check that [f1] is a subtype of [f2].
   bool _isFunctionSubtypeOf(FunctionType f1, FunctionType f2) {
     return FunctionTypeImpl.relate(f1, f2, isSubtypeOf, instantiateToBounds,
-        parameterRelation: (p1, p2) => isSubtypeOf(p2.type, p1.type));
+        parameterRelation: (p1, p2) => isSubtypeOf(p2.type, p1.type),
+        // Type parameter bounds are invariant.
+        boundsRelation: (t1, t2, p1, p2) =>
+            isSubtypeOf(t1, t2) && isSubtypeOf(t2, t1));
   }
 
   bool _isInterfaceSubtypeOf(
@@ -1626,12 +1642,8 @@ class StrongTypeSystemImpl extends TypeSystem {
         return type;
       }
 
-      var function = new FunctionElementImpl(type.name, -1)
-        ..isSynthetic = true
-        ..returnType = newReturnType
-        ..shareTypeParameters(type.typeFormals)
-        ..parameters = newParameters;
-      return function.type = new FunctionTypeImpl(function);
+      return new FunctionTypeImpl.synthetic(
+          newReturnType, type.typeFormals, newParameters);
     }
     return type;
   }
@@ -2136,6 +2148,8 @@ abstract class TypeSystem {
  * Implementation of [TypeSystem] using the rules in the Dart specification.
  */
 class TypeSystemImpl extends TypeSystem {
+  // TODO(brianwilkerson) Remove this class and update references to it to use
+  // StrongTypeSystemImpl.
   final TypeProvider typeProvider;
 
   TypeSystemImpl(this.typeProvider);

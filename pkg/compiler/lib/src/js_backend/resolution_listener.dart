@@ -17,6 +17,7 @@ import '../universe/call_structure.dart' show CallStructure;
 import '../universe/use.dart' show StaticUse, TypeUse;
 import '../universe/world_impact.dart'
     show WorldImpact, WorldImpactBuilder, WorldImpactBuilderImpl;
+import 'allocator_analysis.dart';
 import 'backend.dart';
 import 'backend_impact.dart';
 import 'backend_usage.dart';
@@ -43,6 +44,7 @@ class ResolutionEnqueuerListener extends EnqueuerListener {
   final CustomElementsResolutionAnalysis _customElementsAnalysis;
 
   final NativeResolutionEnqueuer _nativeEnqueuer;
+  final KAllocatorAnalysis _allocatorAnalysis;
 
   /// True when we enqueue the loadLibrary code.
   bool _isLoadLibraryFunctionResolved = false;
@@ -58,6 +60,7 @@ class ResolutionEnqueuerListener extends EnqueuerListener {
       this._noSuchMethodRegistry,
       this._customElementsAnalysis,
       this._nativeEnqueuer,
+      this._allocatorAnalysis,
       this._deferredLoadTask);
 
   void _registerBackendImpact(
@@ -131,8 +134,8 @@ class ResolutionEnqueuerListener extends EnqueuerListener {
   }
 
   @override
-  void onQueueOpen(Enqueuer enqueuer, FunctionEntity mainMethod,
-      Iterable<LibraryEntity> libraries) {
+  void onQueueOpen(
+      Enqueuer enqueuer, FunctionEntity mainMethod, Iterable<Uri> libraries) {
     if (_deferredLoadTask.isProgramSplit) {
       enqueuer.applyImpact(_computeDeferredLoadingImpact(),
           impactSource: 'deferred load');
@@ -282,6 +285,10 @@ class ResolutionEnqueuerListener extends EnqueuerListener {
     }
     _backendUsage.registerUsedMember(member);
 
+    if (_commonElements.isCreateInvocationMirrorHelper(member)) {
+      _registerBackendImpact(worldImpact, _impacts.noSuchMethodSupport);
+    }
+
     if (_elementEnvironment.isDeferredLoadLibraryGetter(member)) {
       // TODO(sigurdm): Create a function registerLoadLibraryAccess.
       if (!_isLoadLibraryFunctionResolved) {
@@ -295,7 +302,6 @@ class ResolutionEnqueuerListener extends EnqueuerListener {
       // runtimeType. We have to enable runtime type before hitting the
       // codegen, so that constructors know whether they need to generate code
       // for runtime type.
-      _backendUsage.isRuntimeTypeUsed = true;
       // TODO(ahe): Record precise dependency here.
       worldImpact.addImpact(_registerRuntimeType());
     }
@@ -403,6 +409,7 @@ class ResolutionEnqueuerListener extends EnqueuerListener {
 
   @override
   WorldImpact registerInstantiatedClass(ClassEntity cls) {
+    _allocatorAnalysis.registerInstantiatedClass(cls);
     return _processClass(cls);
   }
 

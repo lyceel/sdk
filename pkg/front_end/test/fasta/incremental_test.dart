@@ -70,7 +70,7 @@ class Context extends ChainContext {
 
   MemoryFileSystem get fileSystem => options.fileSystem;
 
-  T runInContext<T>(T action(CompilerContext c)) {
+  Future<T> runInContext<T>(Future<T> action(CompilerContext c)) {
     return compilerContext.runInContext<T>(action);
   }
 
@@ -220,14 +220,13 @@ Future<Context> createContext(
     ..fileSystem = fs
     ..sdkSummary = sdkSummary
     ..onError = (CompilationMessage message) {
-      if (message.severity != Severity.nit &&
-          message.severity != Severity.warning) {
+      if (message.severity != Severity.warning) {
         errors.add(message);
       }
     };
 
   final ProcessedOptions options =
-      new ProcessedOptions(optionBuilder, false, [entryPoint]);
+      new ProcessedOptions(optionBuilder, [entryPoint]);
 
   final ExternalStateSnapshot snapshot =
       new ExternalStateSnapshot(await options.loadSdkSummary(null));

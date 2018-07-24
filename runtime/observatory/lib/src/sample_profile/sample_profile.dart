@@ -134,7 +134,8 @@ class FunctionCallTreeNodeCode {
   FunctionCallTreeNodeCode(this.code, this.ticks);
 }
 
-class FunctionCallTreeNode extends CallTreeNode<FunctionCallTreeNode> {
+class FunctionCallTreeNode extends CallTreeNode<FunctionCallTreeNode>
+    implements M.FunctionCallTreeNode {
   final ProfileFunction profileFunction;
   final codes = new List<FunctionCallTreeNodeCode>();
   int _totalCodeTicks = 0;
@@ -235,8 +236,7 @@ abstract class _FilteredCallTreeBuilder<NodeT extends CallTreeNode> {
 
   CallTreeNode _findInChildren(CallTreeNode current, CallTreeNode needle) {
     for (var child in current.children) {
-      if ((child as CallTreeNode).profileData ==
-          (needle as CallTreeNode).profileData) {
+      if ((child as CallTreeNode).profileData == needle.profileData) {
         return child;
       }
     }
@@ -331,8 +331,8 @@ class _FilteredFunctionCallTreeBuilder
             new FunctionCallTree(
                 tree.inclusive,
                 new FunctionCallTreeNode(
-                    (tree.root as CallTreeNode).profileData,
-                    (tree.root as CallTreeNode).count,
+                    tree.root.profileData,
+                    tree.root.count,
                     tree.root.inclusiveNativeAllocations,
                     tree.root.exclusiveNativeAllocations)));
 
@@ -443,7 +443,7 @@ class FunctionCallTree extends CallTree<FunctionCallTreeNode>
 
   _markFunctionCalls() {
     for (var child in root.children) {
-      _markFunctionCallsInner(null, child as FunctionCallTreeNode);
+      _markFunctionCallsInner(null, child);
     }
   }
 }
@@ -889,13 +889,13 @@ class SampleProfile extends M.SampleProfile {
         }
 
         tries['exclusiveCodeTrie'] =
-            new Uint32List.fromList(profile['exclusiveCodeTrie']);
+            new Uint32List.fromList(profile['exclusiveCodeTrie'].cast<int>());
         tries['inclusiveCodeTrie'] =
-            new Uint32List.fromList(profile['inclusiveCodeTrie']);
-        tries['exclusiveFunctionTrie'] =
-            new Uint32List.fromList(profile['exclusiveFunctionTrie']);
-        tries['inclusiveFunctionTrie'] =
-            new Uint32List.fromList(profile['inclusiveFunctionTrie']);
+            new Uint32List.fromList(profile['inclusiveCodeTrie'].cast<int>());
+        tries['exclusiveFunctionTrie'] = new Uint32List.fromList(
+            profile['exclusiveFunctionTrie'].cast<int>());
+        tries['inclusiveFunctionTrie'] = new Uint32List.fromList(
+            profile['inclusiveFunctionTrie'].cast<int>());
       } finally {
         progress.close();
       }

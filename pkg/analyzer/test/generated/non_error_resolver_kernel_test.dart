@@ -8,9 +8,7 @@ import 'non_error_resolver_driver_test.dart';
 
 main() {
   defineReflectiveSuite(() {
-    // TODO(scheglov): Restore similar test coverage when the front-end API
-    // allows it.  See https://github.com/dart-lang/sdk/issues/32258.
-    // defineReflectiveTests(NonErrorResolverTest_Kernel);
+    defineReflectiveTests(NonErrorResolverTest_Kernel);
   });
 }
 
@@ -22,6 +20,11 @@ const notForDart2 = const Object();
 /// Tests marked with this annotations fail because we either have not triaged
 /// them, or know that this is an analyzer problem.
 const potentialAnalyzerProblem = const Object();
+
+/// Tests marked with this annotation fail because of an Analyzer problem.
+class AnalyzerProblem {
+  const AnalyzerProblem(String issueUri);
+}
 
 /// Tests marked with this annotation fail because of a Fasta problem.
 class FastaProblem {
@@ -37,18 +40,20 @@ class NonErrorResolverTest_Kernel extends NonErrorResolverTest_Driver {
   bool get useCFE => true;
 
   @override
+  bool get usingFastaParser => true;
+
+  @override
   @failingTest
-  @FastaProblem('https://github.com/dart-lang/sdk/issues/31625')
+  @AnalyzerProblem('https://github.com/dart-lang/sdk/issues/33636')
   test_ambiguousImport_showCombinator() async {
     return super.test_ambiguousImport_showCombinator();
   }
 
   @override
   @failingTest
-  @notForDart2
-  test_async_return_flattens_futures() async {
-    // Only FutureOr is flattened.
-    return super.test_async_return_flattens_futures();
+  @FastaProblem('https://github.com/dart-lang/sdk/issues/33795')
+  test_annotated_partOfDeclaration() async {
+    return super.test_annotated_partOfDeclaration();
   }
 
   @override
@@ -124,29 +129,39 @@ class NonErrorResolverTest_Kernel extends NonErrorResolverTest_Driver {
   @override
   @failingTest
   @potentialAnalyzerProblem
+  test_conflictingStaticSetterAndInstanceMember_thisClass_method() async {
+    // Bad state: Unable to convert (null, @39, Conflicts with member 'x'.)
+    return super
+        .test_conflictingStaticSetterAndInstanceMember_thisClass_method();
+  }
+
+  @override
+  @failingTest
+  @FastaProblem('https://github.com/dart-lang/sdk/issues/33676')
+  test_constConstructorWithMixinWithField() {
+    // Bad state: Unable to convert (Unspecified, null, @52, Can't extend a mixin application and be 'const'.)
+    return super.test_constConstructorWithMixinWithField();
+  }
+
+  @override
+  @failingTest
+  @potentialAnalyzerProblem
   test_constConstructorWithNonConstSuper_unresolved() async {
     return super.test_constConstructorWithNonConstSuper_unresolved();
   }
 
   @override
   @failingTest
-  @potentialAnalyzerProblem
-  test_constConstructorWithNonFinalField_mixin() async {
-    return super.test_constConstructorWithNonFinalField_mixin();
+  test_fieldFormalParameter_genericFunctionTyped() {
+    // Expected 0 errors of type ParserErrorCode.EXPECTED_TOKEN, found 1 (88)
+    return super.test_fieldFormalParameter_genericFunctionTyped();
   }
 
   @override
   @failingTest
-  @potentialAnalyzerProblem
-  test_constDeferredClass_new() async {
-    return super.test_constDeferredClass_new();
-  }
-
-  @override
-  @failingTest
-  @FastaProblem('https://github.com/dart-lang/sdk/issues/28434')
-  test_constructorDeclaration_scope_signature() async {
-    return super.test_constructorDeclaration_scope_signature();
+  test_fieldFormalParameter_genericFunctionTyped_named() {
+    // Expected 0 errors of type ParserErrorCode.EXPECTED_TOKEN, found 1 (89)
+    return super.test_fieldFormalParameter_genericFunctionTyped_named();
   }
 
   @override
@@ -165,30 +180,10 @@ class NonErrorResolverTest_Kernel extends NonErrorResolverTest_Driver {
 
   @override
   @failingTest
-  @potentialAnalyzerProblem
-  test_forEach_genericFunctionType() async {
-    return super.test_forEach_genericFunctionType();
-  }
-
-  @override
-  @failingTest
-  @FastaProblem('https://github.com/dart-lang/sdk/issues/28434')
-  test_functionDeclaration_scope_signature() async {
-    return super.test_functionDeclaration_scope_signature();
-  }
-
-  @override
-  @failingTest
-  @FastaProblem('https://github.com/dart-lang/sdk/issues/28434')
+  @FastaProblem('https://github.com/dart-lang/sdk/issues/33799')
   test_functionTypeAlias_scope_signature() async {
+    // Caused by Bad state: Found 1 annotation nodes and 0 element annotations
     return super.test_functionTypeAlias_scope_signature();
-  }
-
-  @override
-  @failingTest
-  @potentialAnalyzerProblem
-  test_genericTypeAlias_invalidGenericFunctionType() async {
-    return super.test_genericTypeAlias_invalidGenericFunctionType();
   }
 
   @override // passes with kernel
@@ -200,30 +195,6 @@ class NonErrorResolverTest_Kernel extends NonErrorResolverTest_Driver {
 
   @override
   @failingTest
-  test_infer_mixin_with_substitution() =>
-      super.test_infer_mixin_with_substitution();
-
-  @override
-  @failingTest
-  test_infer_mixin_with_substitution_functionType() =>
-      super.test_infer_mixin_with_substitution_functionType();
-
-  @override
-  @failingTest
-  @potentialAnalyzerProblem
-  test_integerLiteralOutOfRange_negative_valid() async {
-    return super.test_integerLiteralOutOfRange_negative_valid();
-  }
-
-  @override
-  @failingTest
-  @FastaProblem('https://github.com/dart-lang/sdk/issues/31641')
-  test_invalidAnnotation_constantVariable_field() async {
-    return super.test_invalidAnnotation_constantVariable_field();
-  }
-
-  @override
-  @failingTest
   @FastaProblem('https://github.com/dart-lang/sdk/issues/31758')
   test_invocationOfNonFunction_Object() async {
     return super.test_invocationOfNonFunction_Object();
@@ -231,16 +202,17 @@ class NonErrorResolverTest_Kernel extends NonErrorResolverTest_Driver {
 
   @override
   @failingTest
-  @potentialAnalyzerProblem
-  test_loadLibraryDefined() async {
-    return super.test_loadLibraryDefined();
+  @FastaProblem('https://github.com/dart-lang/sdk/issues/30609')
+  test_metadata_enumConstantDeclaration() {
+    // Failed to resolve 2 nodes
+    return super.test_metadata_enumConstantDeclaration();
   }
 
   @override
   @failingTest
-  @FastaProblem('https://github.com/dart-lang/sdk/issues/28434')
-  test_methodDeclaration_scope_signature() async {
-    return super.test_methodDeclaration_scope_signature();
+  test_nativeConstConstructor() {
+    // Expected 0 errors of type ParserErrorCode.CONST_CONSTRUCTOR_WITH_BODY, found 1 (35)
+    return super.test_nativeConstConstructor();
   }
 
   @override
@@ -273,36 +245,16 @@ class NonErrorResolverTest_Kernel extends NonErrorResolverTest_Driver {
 
   @override
   @failingTest
-  @potentialAnalyzerProblem
-  test_returnOfInvalidType_typeParameter_18468() async {
-    return super.test_returnOfInvalidType_typeParameter_18468();
+  test_optionalNew_rewrite_instantiatesToBounds() {
+    // Bad state: No data for named1 at 21
+    return super.test_optionalNew_rewrite_instantiatesToBounds();
   }
 
   @override
   @failingTest
-  @potentialAnalyzerProblem
-  test_sharedDeferredPrefix() async {
-    return super.test_sharedDeferredPrefix();
-  }
-
-  @override
-  @failingTest
-  @potentialAnalyzerProblem
-  test_staticAccessToInstanceMember_annotation() async {
-    return super.test_staticAccessToInstanceMember_annotation();
-  }
-
-  @override
-  @failingTest
-  @potentialAnalyzerProblem
-  test_typeArgument_boundToFunctionType() async {
-    return super.test_typeArgument_boundToFunctionType();
-  }
-
-  @override
-  @failingTest
-  @potentialAnalyzerProblem
-  test_undefinedIdentifier_synthetic_whenExpression() async {
+  @FastaProblem('https://github.com/dart-lang/sdk/issues/33677')
+  test_undefinedIdentifier_synthetic_whenExpression() {
+    // Expected 0 errors of type StaticTypeWarningCode.UNDEFINED_GETTER, found 1 (29)
     return super.test_undefinedIdentifier_synthetic_whenExpression();
   }
 

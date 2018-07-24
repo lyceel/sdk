@@ -9,11 +9,11 @@
 #include "vm/compiler/backend/flow_graph_compiler.h"
 #include "vm/compiler/jit/compiler.h"
 #include "vm/dart_entry.h"
-#include "vm/heap.h"
+#include "vm/heap/heap.h"
+#include "vm/heap/scavenger.h"
 #include "vm/instructions.h"
 #include "vm/object_store.h"
 #include "vm/resolver.h"
-#include "vm/scavenger.h"
 #include "vm/stack_frame.h"
 #include "vm/stub_code.h"
 #include "vm/tags.h"
@@ -89,7 +89,34 @@ void StubCode::GenerateCallToRuntimeStub(Assembler* assembler) {
   __ movl(Address(THR, Thread::top_exit_frame_info_offset()), Immediate(0));
 
   __ LeaveFrame();
+
+  // The following return can jump to a lazy-deopt stub, which assumes EAX
+  // contains a return value and will save it in a GC-visible way.  We therefore
+  // have to ensure EAX does not contain any garbage value left from the C
+  // function we called (which has return type "void").
+  // (See GenerateDeoptimizationSequence::saved_result_slot_from_fp.)
+  __ xorl(EAX, EAX);
   __ ret();
+}
+
+void StubCode::GenerateNullErrorSharedWithoutFPURegsStub(Assembler* assembler) {
+  __ Breakpoint();
+}
+
+void StubCode::GenerateNullErrorSharedWithFPURegsStub(Assembler* assembler) {
+  __ Breakpoint();
+}
+
+void StubCode::GenerateStackOverflowSharedWithoutFPURegsStub(
+    Assembler* assembler) {
+  // TODO(sjindel): implement.
+  __ Breakpoint();
+}
+
+void StubCode::GenerateStackOverflowSharedWithFPURegsStub(
+    Assembler* assembler) {
+  // TODO(sjindel): implement.
+  __ Breakpoint();
 }
 
 // Input parameters:
@@ -946,8 +973,6 @@ void StubCode::GenerateUpdateStoreBufferStub(Assembler* assembler) {
   // store buffer if the object is in the store buffer already.
   // Spilled: EAX, ECX
   // EDX: Address being stored
-  Label reload;
-  __ Bind(&reload);
   __ movl(EAX, FieldAddress(EDX, Object::tags_offset()));
   __ testl(EAX, Immediate(1 << RawObject::kRememberedBit));
   __ j(EQUAL, &add_to_buffer, Assembler::kNearJump);
@@ -959,11 +984,10 @@ void StubCode::GenerateUpdateStoreBufferStub(Assembler* assembler) {
   // EDX: Address being stored
   // EAX: Current tag value
   __ Bind(&add_to_buffer);
-  __ movl(ECX, EAX);
-  __ orl(ECX, Immediate(1 << RawObject::kRememberedBit));
-  // Compare the tag word with EAX, update to ECX if unchanged.
-  __ LockCmpxchgl(FieldAddress(EDX, Object::tags_offset()), ECX);
-  __ j(NOT_EQUAL, &reload);
+  // lock+orl is an atomic read-modify-write.
+  __ lock();
+  __ orl(FieldAddress(EDX, Object::tags_offset()),
+         Immediate(1 << RawObject::kRememberedBit));
 
   // Load the StoreBuffer block out of the thread. Then load top_ out of the
   // StoreBufferBlock and add the address to the pointers_.
@@ -977,7 +1001,7 @@ void StubCode::GenerateUpdateStoreBufferStub(Assembler* assembler) {
   // Spilled: EAX, ECX
   // ECX: top_
   // EAX: StoreBufferBlock
-  Label L;
+  Label overflow;
   __ incl(ECX);
   __ movl(Address(EAX, StoreBufferBlock::top_offset()), ECX);
   __ cmpl(ECX, Immediate(StoreBufferBlock::kSize));
@@ -985,11 +1009,11 @@ void StubCode::GenerateUpdateStoreBufferStub(Assembler* assembler) {
   // Spilled: EAX, ECX
   __ popl(ECX);
   __ popl(EAX);
-  __ j(EQUAL, &L, Assembler::kNearJump);
+  __ j(EQUAL, &overflow, Assembler::kNearJump);
   __ ret();
 
   // Handle overflow: Call the runtime leaf function.
-  __ Bind(&L);
+  __ Bind(&overflow);
   // Setup frame, push callee-saved registers.
 
   __ EnterCallRuntimeFrame(1 * kWordSize);
@@ -1592,22 +1616,21 @@ void StubCode::GenerateTwoArgsUnoptimizedStaticCallStub(Assembler* assembler) {
 }
 
 // Stub for compiling a function and jumping to the compiled code.
-// ECX: IC-Data (for methods).
 // EDX: Arguments descriptor.
 // EAX: Function.
 void StubCode::GenerateLazyCompileStub(Assembler* assembler) {
   __ EnterStubFrame();
   __ pushl(EDX);  // Preserve arguments descriptor array.
-  __ pushl(ECX);  // Preserve IC data object.
   __ pushl(EAX);  // Pass function.
   __ CallRuntime(kCompileFunctionRuntimeEntry, 1);
   __ popl(EAX);  // Restore function.
-  __ popl(ECX);  // Restore IC data array.
   __ popl(EDX);  // Restore arguments descriptor array.
   __ LeaveFrame();
 
-  __ movl(EAX, FieldAddress(EAX, Function::entry_point_offset()));
-  __ jmp(EAX);
+  // When using the interpreter, the function's code may now point to the
+  // InterpretCall stub. Make sure EAX, ECX, and EDX are preserved.
+  __ movl(EBX, FieldAddress(EAX, Function::entry_point_offset()));
+  __ jmp(EBX);
 }
 
 void StubCode::GenerateInterpretCallStub(Assembler* assembler) {
@@ -1788,27 +1811,32 @@ void StubCode::GenerateSubtype4TestCacheStub(Assembler* assembler) {
 }
 
 void StubCode::GenerateDefaultTypeTestStub(Assembler* assembler) {
-  // Only used in AOT and therefore not on ia32.
+  // Not implemented on ia32.
   __ Breakpoint();
 }
 
 void StubCode::GenerateTopTypeTypeTestStub(Assembler* assembler) {
-  // Only used in AOT and therefore not on ia32.
+  // Not implemented on ia32.
   __ Breakpoint();
 }
 
 void StubCode::GenerateTypeRefTypeTestStub(Assembler* assembler) {
-  // Only used in AOT and therefore not on ia32.
+  // Not implemented on ia32.
   __ Breakpoint();
 }
 
 void StubCode::GenerateUnreachableTypeTestStub(Assembler* assembler) {
-  // Only used in AOT and therefore not on ia32.
+  // Not implemented on ia32.
+  __ Breakpoint();
+}
+
+void StubCode::GenerateLazySpecializeTypeTestStub(Assembler* assembler) {
+  // Not implemented on ia32.
   __ Breakpoint();
 }
 
 void StubCode::GenerateSlowTypeTestStub(Assembler* assembler) {
-  // Only used in AOT and therefore not on ia32.
+  // Not implemented on ia32.
   __ Breakpoint();
 }
 
@@ -1848,15 +1876,18 @@ void StubCode::GenerateRunExceptionHandlerStub(Assembler* assembler) {
   ASSERT(kStackTraceObjectReg == EDX);
   __ movl(EBX, Address(THR, Thread::resume_pc_offset()));
 
+  ASSERT(Thread::CanLoadFromThread(Object::null_object()));
+  __ movl(ECX, Address(THR, Thread::OffsetFromThread(Object::null_object())));
+
   // Load the exception from the current thread.
   Address exception_addr(THR, Thread::active_exception_offset());
   __ movl(kExceptionObjectReg, exception_addr);
-  __ movl(exception_addr, Immediate(0));
+  __ movl(exception_addr, ECX);
 
   // Load the stacktrace from the current thread.
   Address stacktrace_addr(THR, Thread::active_stacktrace_offset());
   __ movl(kStackTraceObjectReg, stacktrace_addr);
-  __ movl(stacktrace_addr, Immediate(0));
+  __ movl(stacktrace_addr, ECX);
 
   __ jmp(EBX);  // Jump to continuation point.
 }
@@ -1898,13 +1929,12 @@ void StubCode::GenerateOptimizeFunctionStub(Assembler* assembler) {
 // Does identical check (object references are equal or not equal) with special
 // checks for boxed numbers.
 // Return ZF set.
-// Note: A Mint cannot contain a value that would fit in Smi, a Bigint
-// cannot contain a value that fits in Mint or Smi.
+// Note: A Mint cannot contain a value that would fit in Smi.
 static void GenerateIdenticalWithNumberCheckStub(Assembler* assembler,
                                                  const Register left,
                                                  const Register right,
                                                  const Register temp) {
-  Label reference_compare, done, check_mint, check_bigint;
+  Label reference_compare, done, check_mint;
   // If any of the arguments is Smi do reference compare.
   __ testl(left, Immediate(kSmiTagMask));
   __ j(ZERO, &reference_compare, Assembler::kNearJump);
@@ -1927,7 +1957,7 @@ static void GenerateIdenticalWithNumberCheckStub(Assembler* assembler,
 
   __ Bind(&check_mint);
   __ CompareClassId(left, kMintCid, temp);
-  __ j(NOT_EQUAL, &check_bigint, Assembler::kNearJump);
+  __ j(NOT_EQUAL, &reference_compare, Assembler::kNearJump);
   __ CompareClassId(right, kMintCid, temp);
   __ j(NOT_EQUAL, &done, Assembler::kNearJump);
   __ movl(temp, FieldAddress(left, Mint::value_offset() + 0 * kWordSize));
@@ -1936,21 +1966,6 @@ static void GenerateIdenticalWithNumberCheckStub(Assembler* assembler,
   __ movl(temp, FieldAddress(left, Mint::value_offset() + 1 * kWordSize));
   __ cmpl(temp, FieldAddress(right, Mint::value_offset() + 1 * kWordSize));
   __ jmp(&done, Assembler::kNearJump);
-
-  __ Bind(&check_bigint);
-  __ CompareClassId(left, kBigintCid, temp);
-  __ j(NOT_EQUAL, &reference_compare, Assembler::kNearJump);
-  __ CompareClassId(right, kBigintCid, temp);
-  __ j(NOT_EQUAL, &done, Assembler::kNearJump);
-  __ EnterFrame(0);
-  __ ReserveAlignedFrameSpace(2 * kWordSize);
-  __ movl(Address(ESP, 1 * kWordSize), left);
-  __ movl(Address(ESP, 0 * kWordSize), right);
-  __ CallRuntime(kBigintCompareRuntimeEntry, 2);
-  // Result in EAX, 0 means equal.
-  __ LeaveFrame();
-  __ cmpl(EAX, Immediate(0));
-  __ jmp(&done);
 
   __ Bind(&reference_compare);
   __ cmpl(left, right);

@@ -240,8 +240,7 @@ class InheritanceManager {
       InterfaceType definingType) {
     // if the baseFunctionType is null, or does not have any parameters,
     // return it.
-    if (baseFunctionType == null ||
-        baseFunctionType.typeArguments.length == 0) {
+    if (baseFunctionType == null || baseFunctionType.typeArguments.isEmpty) {
       return baseFunctionType;
     }
     // First, generate the path from the defining type to the overridden member
@@ -517,9 +516,7 @@ class InheritanceManager {
       int numOfPositionalParameters,
       List<String> namedParameters) {
     DynamicTypeImpl dynamicType = DynamicTypeImpl.instance;
-    DartType bottomType = _library.context.analysisOptions.strongMode
-        ? BottomTypeImpl.instance
-        : dynamicType;
+    DartType bottomType = BottomTypeImpl.instance;
     SimpleIdentifier nameIdentifier = astFactory
         .simpleIdentifier(new StringToken(TokenType.IDENTIFIER, name, 0));
     ExecutableElementImpl executable;
@@ -691,7 +688,7 @@ class InheritanceManager {
         }
       }
     }
-    if (lookupMaps.length == 0) {
+    if (lookupMaps.isEmpty) {
       return null;
     }
     return lookupMaps;

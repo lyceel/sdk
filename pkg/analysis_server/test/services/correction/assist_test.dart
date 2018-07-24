@@ -104,7 +104,7 @@ class AssistProcessorTest extends AbstractSingleUnitTest {
   }
 
   test_addTypeAnnotation_BAD_privateType_closureParameter() async {
-    addSource('/my_lib.dart', '''
+    addSource('/project/my_lib.dart', '''
 library my_lib;
 class A {}
 class _B extends A {}
@@ -120,7 +120,7 @@ main() {
   }
 
   test_addTypeAnnotation_BAD_privateType_declaredIdentifier() async {
-    addSource('/my_lib.dart', '''
+    addSource('/project/my_lib.dart', '''
 library my_lib;
 class A {}
 class _B extends A {}
@@ -141,7 +141,7 @@ class A<T> {
   test_addTypeAnnotation_BAD_privateType_list() async {
     // This is now failing because we're suggesting "List" rather than nothing.
     // Is it really better to produce nothing?
-    addSource('/my_lib.dart', '''
+    addSource('/project/my_lib.dart', '''
 library my_lib;
 class A {}
 class _B extends A {}
@@ -162,7 +162,7 @@ main() {
   }
 
   test_addTypeAnnotation_BAD_privateType_variable() async {
-    addSource('/my_lib.dart', '''
+    addSource('/project/my_lib.dart', '''
 library my_lib;
 class A {}
 class _B extends A {}
@@ -279,7 +279,7 @@ main(List<String> items) {
   }
 
   test_addTypeAnnotation_declaredIdentifier_OK_addImport_dartUri() async {
-    addSource('/my_lib.dart', r'''
+    addSource('/project/my_lib.dart', r'''
 import 'dart:async';
 List<Future<int>> getFutures() => null;
 ''');
@@ -416,7 +416,7 @@ class A<T> {
   }
 
   test_addTypeAnnotation_local_OK_addImport_dartUri() async {
-    addSource('/my_lib.dart', r'''
+    addSource('/project/my_lib.dart', r'''
 import 'dart:async';
 Future<int> getFutureInt() => null;
 ''');
@@ -438,7 +438,7 @@ main() {
 
   test_addTypeAnnotation_local_OK_addImport_notLibraryUnit() async {
     // prepare library
-    addSource('/my_lib.dart', r'''
+    addSource('/project/my_lib.dart', r'''
 import 'dart:async';
 Future<int> getFutureInt() => null;
 ''');
@@ -455,8 +455,8 @@ main() {
 }
 ''';
     // add sources
-    addSource('/app.dart', appCode);
-    testSource = addSource('/test.dart', testCode);
+    addSource('/project/app.dart', appCode);
+    testSource = addSource('/project/test.dart', testCode);
     // resolve
     await resolveTestUnit(testCode);
     // prepare the assist
@@ -465,7 +465,7 @@ main() {
     change = assist.change;
     // verify
     {
-      var testFileEdit = change.getFileEdit(convertPath('/app.dart'));
+      var testFileEdit = change.getFileEdit(convertPath('/project/app.dart'));
       var resultCode = SourceEdit.applySequence(appCode, testFileEdit.edits);
       expect(resultCode, '''
 library my_app;
@@ -476,7 +476,7 @@ part 'test.dart';
 ''');
     }
     {
-      var testFileEdit = change.getFileEdit(convertPath('/test.dart'));
+      var testFileEdit = change.getFileEdit(convertPath('/project/test.dart'));
       var resultCode = SourceEdit.applySequence(testCode, testFileEdit.edits);
       expect(resultCode, '''
 part of my_app;
@@ -488,10 +488,10 @@ main() {
   }
 
   test_addTypeAnnotation_local_OK_addImport_relUri() async {
-    addSource('/aa/bbb/lib_a.dart', r'''
+    addSource('/project/aa/bbb/lib_a.dart', r'''
 class MyClass {}
 ''');
-    addSource('/ccc/lib_b.dart', r'''
+    addSource('/project/ccc/lib_b.dart', r'''
 import '../aa/bbb/lib_a.dart';
 MyClass newMyClass() => null;
 ''');
@@ -518,7 +518,7 @@ main() {
 ''');
     await assertHasAssistAt('v =', DartAssistKind.ADD_TYPE_ANNOTATION, '''
 main() {
-  Function v = () => 1;
+  int Function() v = () => 1;
 }
 ''');
   }
@@ -1676,6 +1676,34 @@ class A {
 }
 class B extends A {
   final int foo;
+}
+''');
+  }
+
+  test_convertToFinalField_OK_noReturnType() async {
+    await resolveTestUnit('''
+class A {
+  get foo => 42;
+}
+''');
+    await assertHasAssistAt(
+        'get foo', DartAssistKind.CONVERT_INTO_FINAL_FIELD, '''
+class A {
+  final foo = 42;
+}
+''');
+  }
+
+  test_convertToFinalField_OK_noReturnType_static() async {
+    await resolveTestUnit('''
+class A {
+  static get foo => 42;
+}
+''');
+    await assertHasAssistAt(
+        'get foo', DartAssistKind.CONVERT_INTO_FINAL_FIELD, '''
+class A {
+  static final foo = 42;
 }
 ''');
   }
@@ -3025,6 +3053,314 @@ class MyWidgetState extends State<MyWidget> {
         new Text('${widget.bbb}'),
       ],
     );
+  }
+}
+''');
+  }
+
+  test_flutterConvertToStatefulWidget_OK_empty() async {
+    addFlutterPackage();
+    await resolveTestUnit(r'''
+import 'package:flutter/material.dart';
+
+class /*caret*/MyWidget extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return new Container();
+  }
+}
+''');
+    _setCaretLocation();
+    await assertHasAssist(
+        DartAssistKind.FLUTTER_CONVERT_TO_STATEFUL_WIDGET, r'''
+import 'package:flutter/material.dart';
+
+class /*caret*/MyWidget extends StatefulWidget {
+  @override
+  MyWidgetState createState() {
+    return new MyWidgetState();
+  }
+}
+
+class MyWidgetState extends State<MyWidget> {
+  @override
+  Widget build(BuildContext context) {
+    return new Container();
+  }
+}
+''');
+  }
+
+  test_flutterConvertToStatefulWidget_OK_fields() async {
+    addFlutterPackage();
+    await resolveTestUnit(r'''
+import 'package:flutter/material.dart';
+
+class /*caret*/MyWidget extends StatelessWidget {
+  static String staticField1;
+  final String instanceField1;
+  final String instanceField2;
+  String instanceField3;
+  static String staticField2;
+  String instanceField4;
+  String instanceField5;
+  static String staticField3;
+
+  MyWidget(this.instanceField1) : instanceField2 = '' {
+    instanceField3 = '';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    instanceField4 = instanceField1;
+    return new Row(
+      children: [
+        new Text(instanceField1),
+        new Text(instanceField2),
+        new Text(instanceField3),
+        new Text(instanceField4),
+        new Text(instanceField5),
+        new Text(staticField1),
+        new Text(staticField2),
+        new Text(staticField3),
+      ],
+    );
+  }
+}
+''');
+    _setCaretLocation();
+    await assertHasAssist(
+        DartAssistKind.FLUTTER_CONVERT_TO_STATEFUL_WIDGET, r'''
+import 'package:flutter/material.dart';
+
+class /*caret*/MyWidget extends StatefulWidget {
+  static String staticField1;
+  final String instanceField1;
+  final String instanceField2;
+  String instanceField3;
+  static String staticField2;
+  static String staticField3;
+
+  MyWidget(this.instanceField1) : instanceField2 = '' {
+    instanceField3 = '';
+  }
+
+  @override
+  MyWidgetState createState() {
+    return new MyWidgetState();
+  }
+}
+
+class MyWidgetState extends State<MyWidget> {
+  String instanceField4;
+
+  String instanceField5;
+
+  @override
+  Widget build(BuildContext context) {
+    instanceField4 = widget.instanceField1;
+    return new Row(
+      children: [
+        new Text(widget.instanceField1),
+        new Text(widget.instanceField2),
+        new Text(widget.instanceField3),
+        new Text(instanceField4),
+        new Text(instanceField5),
+        new Text(MyWidget.staticField1),
+        new Text(MyWidget.staticField2),
+        new Text(MyWidget.staticField3),
+      ],
+    );
+  }
+}
+''');
+  }
+
+  test_flutterConvertToStatefulWidget_OK_getters() async {
+    addFlutterPackage();
+    await resolveTestUnit(r'''
+import 'package:flutter/material.dart';
+
+class /*caret*/MyWidget extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return new Row(
+      children: [
+        new Text(staticGetter1),
+        new Text(staticGetter2),
+        new Text(instanceGetter1),
+        new Text(instanceGetter2),
+      ],
+    );
+  }
+
+  static String get staticGetter1 => '';
+
+  String get instanceGetter1 => '';
+
+  static String get staticGetter2 => '';
+
+  String get instanceGetter2 => '';
+}
+''');
+    _setCaretLocation();
+    await assertHasAssist(
+        DartAssistKind.FLUTTER_CONVERT_TO_STATEFUL_WIDGET, r'''
+import 'package:flutter/material.dart';
+
+class /*caret*/MyWidget extends StatefulWidget {
+  @override
+  MyWidgetState createState() {
+    return new MyWidgetState();
+  }
+
+  static String get staticGetter1 => '';
+
+  static String get staticGetter2 => '';
+}
+
+class MyWidgetState extends State<MyWidget> {
+  @override
+  Widget build(BuildContext context) {
+    return new Row(
+      children: [
+        new Text(MyWidget.staticGetter1),
+        new Text(MyWidget.staticGetter2),
+        new Text(instanceGetter1),
+        new Text(instanceGetter2),
+      ],
+    );
+  }
+
+  String get instanceGetter1 => '';
+
+  String get instanceGetter2 => '';
+}
+''');
+  }
+
+  test_flutterConvertToStatefulWidget_OK_methods() async {
+    addFlutterPackage();
+    await resolveTestUnit(r'''
+import 'package:flutter/material.dart';
+
+class /*caret*/MyWidget extends StatelessWidget {
+  static String staticField;
+  final String instanceField1;
+  String instanceField2;
+
+  MyWidget(this.instanceField1);
+
+  @override
+  Widget build(BuildContext context) {
+    return new Row(
+      children: [
+        new Text(instanceField1),
+        new Text(instanceField2),
+        new Text(staticField),
+      ],
+    );
+  }
+
+  void instanceMethod1() {
+    instanceMethod1();
+    instanceMethod2();
+    staticMethod1();
+  }
+
+  static void staticMethod1() {
+    print('static 1');
+  }
+
+  void instanceMethod2() {
+    print('instance 2');
+  }
+
+  static void staticMethod2() {
+    print('static 2');
+  }
+}
+''');
+    _setCaretLocation();
+    await assertHasAssist(
+        DartAssistKind.FLUTTER_CONVERT_TO_STATEFUL_WIDGET, r'''
+import 'package:flutter/material.dart';
+
+class /*caret*/MyWidget extends StatefulWidget {
+  static String staticField;
+  final String instanceField1;
+
+  MyWidget(this.instanceField1);
+
+  @override
+  MyWidgetState createState() {
+    return new MyWidgetState();
+  }
+
+  static void staticMethod1() {
+    print('static 1');
+  }
+
+  static void staticMethod2() {
+    print('static 2');
+  }
+}
+
+class MyWidgetState extends State<MyWidget> {
+  String instanceField2;
+
+  @override
+  Widget build(BuildContext context) {
+    return new Row(
+      children: [
+        new Text(widget.instanceField1),
+        new Text(instanceField2),
+        new Text(MyWidget.staticField),
+      ],
+    );
+  }
+
+  void instanceMethod1() {
+    instanceMethod1();
+    instanceMethod2();
+    MyWidget.staticMethod1();
+  }
+
+  void instanceMethod2() {
+    print('instance 2');
+  }
+}
+''');
+  }
+
+  test_flutterConvertToStatefulWidget_OK_tail() async {
+    addFlutterPackage();
+    await resolveTestUnit(r'''
+import 'package:flutter/material.dart';
+
+class /*caret*/MyWidget extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return new Container();
+  }
+}
+''');
+    _setCaretLocation();
+    await assertHasAssist(
+        DartAssistKind.FLUTTER_CONVERT_TO_STATEFUL_WIDGET, r'''
+import 'package:flutter/material.dart';
+
+class /*caret*/MyWidget extends StatefulWidget {
+  @override
+  MyWidgetState createState() {
+    return new MyWidgetState();
+  }
+}
+
+class MyWidgetState extends State<MyWidget> {
+  @override
+  Widget build(BuildContext context) {
+    return new Container();
   }
 }
 ''');

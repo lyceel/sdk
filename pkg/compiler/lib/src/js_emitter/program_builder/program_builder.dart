@@ -19,24 +19,26 @@ import '../../elements/entities.dart';
 import '../../elements/types.dart';
 import '../../io/source_information.dart';
 import '../../js/js.dart' as js;
+import '../../js_backend/allocator_analysis.dart' show JAllocatorAnalysis;
 import '../../js_backend/backend.dart' show SuperMemberData;
 import '../../js_backend/backend_usage.dart';
 import '../../js_backend/constant_handler_javascript.dart'
     show JavaScriptConstantCompiler;
 import '../../js_backend/custom_elements_analysis.dart';
-import '../../js_backend/namer.dart' show Namer, StringBackedName;
-import '../../js_backend/native_data.dart';
+import '../../js_backend/inferred_data.dart';
 import '../../js_backend/interceptor_data.dart';
 import '../../js_backend/js_interop_analysis.dart';
+import '../../js_backend/namer.dart' show Namer, StringBackedName;
+import '../../js_backend/native_data.dart';
 import '../../js_backend/runtime_types.dart'
     show RuntimeTypesChecks, RuntimeTypesNeed, RuntimeTypesEncoder;
-import '../../js_model/elements.dart' show JSignatureMethod;
+import '../../js_model/elements.dart' show JGeneratorBody, JSignatureMethod;
 import '../../native/enqueue.dart' show NativeCodegenEnqueuer;
 import '../../options.dart';
 import '../../universe/selector.dart' show Selector;
 import '../../universe/world_builder.dart'
     show CodegenWorldBuilder, SelectorConstraints;
-import '../../world.dart' show ClosedWorld;
+import '../../world.dart' show JClosedWorld;
 import '../js_emitter.dart'
     show
         ClassStubGenerator,
@@ -82,7 +84,9 @@ class ProgramBuilder {
   final Map<MemberEntity, js.Expression> _generatedCode;
   final Namer _namer;
   final CodeEmitterTask _task;
-  final ClosedWorld _closedWorld;
+  final JClosedWorld _closedWorld;
+  final JAllocatorAnalysis _allocatorAnalysis;
+  final InferredData _inferredData;
   final SourceInformationStrategy _sourceInformationStrategy;
 
   /// The [Sorter] used for ordering elements in the generated JavaScript.
@@ -98,6 +102,7 @@ class ProgramBuilder {
   final Registry _registry;
 
   final FunctionEntity _mainFunction;
+  final Iterable<ClassEntity> _rtiNeededClasses;
 
   /// True if the program should store function types in the metadata.
   bool _storeFunctionTypesInMetadata = false;
@@ -128,9 +133,11 @@ class ProgramBuilder {
       this._namer,
       this._task,
       this._closedWorld,
+      this._allocatorAnalysis,
+      this._inferredData,
       this._sourceInformationStrategy,
       this._sorter,
-      Set<ClassEntity> rtiNeededClasses,
+      this._rtiNeededClasses,
       this._mainFunction)
       : this.collector = new Collector(
             _options,
@@ -145,7 +152,7 @@ class ProgramBuilder {
             _interceptorData,
             _oneShotInterceptorData,
             _closedWorld,
-            rtiNeededClasses,
+            _rtiNeededClasses,
             _generatedCode,
             _sorter),
         this._registry = new Registry(_outputUnitData.mainOutputUnit, _sorter);
@@ -161,13 +168,6 @@ class ProgramBuilder {
   /// Mapping from [ConstantValue] to constructed [Constant]. We need this to
   /// update field-initializers to point to the ConstantModel.
   final Map<ConstantValue, Constant> _constants = <ConstantValue, Constant>{};
-
-  /// Mapping from names to strings.
-  ///
-  /// This mapping is used to support `const Symbol` expressions.
-  ///
-  /// This map is filled when building classes.
-  final Map<js.Name, String> _symbolsMap = <js.Name, String>{};
 
   Set<Class> _unneededNativeClasses;
 
@@ -237,7 +237,7 @@ class ProgramBuilder {
         collector.computeInterceptorsReferencedFromConstants();
 
     _unneededNativeClasses = _task.nativeEmitter.prepareNativeClasses(
-        nativeClasses, interceptorClassesNeededByConstants);
+        nativeClasses, interceptorClassesNeededByConstants, _rtiNeededClasses);
 
     _addJsInteropStubs(_registry.mainLibrariesMap);
 
@@ -264,7 +264,7 @@ class ProgramBuilder {
       finalizers.add(namingFinalizer as js.TokenFinalizer);
     }
 
-    return new Program(fragments, holders, _buildLoadMap(), _symbolsMap,
+    return new Program(fragments, holders, _buildLoadMap(),
         _buildTypeToInterceptorMap(), _task.metadataCollector, finalizers,
         needsNativeSupport: needsNativeSupport,
         outputContainsConstantList: collector.outputContainsConstantList,
@@ -623,7 +623,7 @@ class ProgramBuilder {
     List<StaticMethod> statics = memberElements
         .where((e) => !e.isField)
         .cast<FunctionEntity>()
-        .map(_buildStaticMethod)
+        .map<StaticMethod>(_buildStaticMethod)
         .toList();
 
     if (library == _commonElements.interceptorsLibrary) {
@@ -678,8 +678,10 @@ class ProgramBuilder {
 
     void visitMember(MemberEntity member) {
       if (member.isInstanceMember && !member.isAbstract && !member.isField) {
-        Method method = _buildMethod(member);
-        if (method != null && member is! JSignatureMethod) methods.add(method);
+        if (member is! JSignatureMethod) {
+          Method method = _buildMethod(member);
+          if (method != null) methods.add(method);
+        }
       }
       if (member.isGetter || member.isField) {
         Map<Selector, SelectorConstraints> selectors =
@@ -716,9 +718,7 @@ class ProgramBuilder {
       callStubs.add(_buildStubMethod(name, function));
     }
 
-    if (cls == _commonElements.instantiation1Class ||
-        cls == _commonElements.instantiation2Class ||
-        cls == _commonElements.instantiation3Class) {
+    if (_commonElements.isInstantiationClass(cls)) {
       callStubs.addAll(_generateInstantiationStubs(cls));
     }
 
@@ -830,13 +830,15 @@ class ProgramBuilder {
   }
 
   bool _methodNeedsStubs(FunctionEntity method) {
+    if (method is JGeneratorBody) return false;
+    if (method is ConstructorBodyEntity) return false;
     return method.parameterStructure.optionalParameters != 0 ||
         method.parameterStructure.typeParameters != 0;
   }
 
   bool _methodCanBeApplied(FunctionEntity method) {
     return _backendUsage.isFunctionApplyUsed &&
-        _closedWorld.getMightBePassedToApply(method);
+        _inferredData.getMightBePassedToApply(method);
   }
 
   /* Map | List */ _computeParameterDefaultValues(FunctionEntity method) {
@@ -878,7 +880,6 @@ class ProgramBuilder {
     bool isNotApplyTarget =
         !element.isFunction || element.isGetter || element.isSetter;
 
-    bool canBeReflected = false;
     bool canBeApplied = _methodCanBeApplied(element);
 
     js.Name aliasName = _superMemberData.isAliasedSuperMember(element)
@@ -893,8 +894,7 @@ class ProgramBuilder {
         isClosureCallMethod = true;
       } else {
         // Careful with operators.
-        canTearOff = _worldBuilder.hasInvokedGetter(element, _closedWorld) ||
-            (canBeReflected && !Selector.isOperatorName(element.name));
+        canTearOff = _worldBuilder.hasInvokedGetter(element, _closedWorld);
         assert(canTearOff ||
             !_worldBuilder.methodsNeedingSuperGetter.contains(element));
         tearOffName = _namer.getterForElement(element);
@@ -918,33 +918,38 @@ class ProgramBuilder {
 
     DartType memberType = _elementEnvironment.getFunctionType(element);
     js.Expression functionType;
-    if (canTearOff || canBeReflected) {
+    if (canTearOff) {
       OutputUnit outputUnit = _outputUnitData.outputUnitForMember(element);
       functionType = _generateFunctionType(memberType, outputUnit);
     }
 
     int requiredParameterCount;
     var /* List | Map */ optionalParameterDefaultValues;
-    if (canBeApplied || canBeReflected) {
+    int applyIndex = 0;
+    if (canBeApplied) {
       // TODO(redemption): Handle function entities.
       FunctionEntity method = element;
       ParameterStructure parameterStructure = method.parameterStructure;
       requiredParameterCount = parameterStructure.requiredParameters;
       optionalParameterDefaultValues = _computeParameterDefaultValues(method);
+
+      if (element.parameterStructure.typeParameters > 0) {
+        applyIndex = 1;
+      }
     }
 
     return new InstanceMethod(element, name, code,
-        _generateParameterStubs(element, canTearOff), callName,
+        _generateParameterStubs(element, canTearOff, canBeApplied), callName,
         needsTearOff: canTearOff,
         tearOffName: tearOffName,
         isClosureCallMethod: isClosureCallMethod,
         isIntercepted: isIntercepted,
         aliasName: aliasName,
         canBeApplied: canBeApplied,
-        canBeReflected: canBeReflected,
         requiredParameterCount: requiredParameterCount,
         optionalParameterDefaultValues: optionalParameterDefaultValues,
-        functionType: functionType);
+        functionType: functionType,
+        applyIndex: applyIndex);
   }
 
   js.Expression _generateFunctionType(
@@ -958,7 +963,7 @@ class ProgramBuilder {
   }
 
   List<ParameterStubMethod> _generateParameterStubs(
-      FunctionEntity element, bool canTearOff) {
+      FunctionEntity element, bool canTearOff, bool canBeApplied) {
     if (!_methodNeedsStubs(element)) return const <ParameterStubMethod>[];
 
     ParameterStubGenerator generator = new ParameterStubGenerator(
@@ -970,7 +975,8 @@ class ProgramBuilder {
         _worldBuilder,
         _closedWorld,
         _sourceInformationStrategy);
-    return generator.generateParameterStubs(element, canTearOff: canTearOff);
+    return generator.generateParameterStubs(element,
+        canTearOff: canTearOff, canBeApplied: canBeApplied);
   }
 
   List<StubMethod> _generateInstantiationStubs(ClassEntity instantiationClass) {
@@ -1073,8 +1079,16 @@ class ProgramBuilder {
           }
         }
       }
+
+      // TODO(sra): Generalize for constants other than null.
+      bool nullInitializerInAllocator = false;
+      if (_allocatorAnalysis.isInitializedInAllocator(field)) {
+        assert(_allocatorAnalysis.initializerValue(field).isNull);
+        nullInitializerInAllocator = true;
+      }
+
       fields.add(new Field(field, name, accessorName, getterFlags, setterFlags,
-          needsCheckedSetter));
+          needsCheckedSetter, nullInitializerInAllocator));
     }
 
     FieldVisitor visitor = new FieldVisitor(_options, _elementEnvironment,
@@ -1118,11 +1132,9 @@ class ProgramBuilder {
     bool isApplyTarget =
         !element.isConstructor && !element.isGetter && !element.isSetter;
     bool canBeApplied = _methodCanBeApplied(element);
-    bool canBeReflected = false;
 
     bool needsTearOff = isApplyTarget &&
-        (canBeReflected ||
-            _worldBuilder.staticFunctionsNeedingGetter.contains(element));
+        _worldBuilder.staticFunctionsNeedingGetter.contains(element);
 
     js.Name tearOffName =
         needsTearOff ? _namer.staticClosureName(element) : null;
@@ -1135,32 +1147,41 @@ class ProgramBuilder {
     }
     js.Expression functionType;
     DartType type = _elementEnvironment.getFunctionType(element);
-    if (needsTearOff || canBeReflected) {
+    if (needsTearOff) {
       OutputUnit outputUnit = _outputUnitData.outputUnitForMember(element);
       functionType = _generateFunctionType(type, outputUnit);
     }
 
     int requiredParameterCount;
     var /* List | Map */ optionalParameterDefaultValues;
-    if (canBeApplied || canBeReflected) {
+    int applyIndex = 0;
+    if (canBeApplied) {
       // TODO(redemption): Support entities;
       FunctionEntity method = element;
       ParameterStructure parameterStructure = method.parameterStructure;
       requiredParameterCount = parameterStructure.requiredParameters;
       optionalParameterDefaultValues = _computeParameterDefaultValues(method);
+      if (parameterStructure.typeParameters > 0) {
+        applyIndex = 1;
+      }
     }
 
     // TODO(floitsch): we shouldn't update the registry in the middle of
     // building a static method.
-    return new StaticDartMethod(element, name, _registry.registerHolder(holder),
-        code, _generateParameterStubs(element, needsTearOff), callName,
+    return new StaticDartMethod(
+        element,
+        name,
+        _registry.registerHolder(holder),
+        code,
+        _generateParameterStubs(element, needsTearOff, canBeApplied),
+        callName,
         needsTearOff: needsTearOff,
         tearOffName: tearOffName,
         canBeApplied: canBeApplied,
-        canBeReflected: canBeReflected,
         requiredParameterCount: requiredParameterCount,
         optionalParameterDefaultValues: optionalParameterDefaultValues,
-        functionType: functionType);
+        functionType: functionType,
+        applyIndex: applyIndex);
   }
 
   void _registerConstants(

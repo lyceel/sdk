@@ -3,6 +3,7 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import 'dart:collection';
+import 'package:analyzer/src/generated/engine.dart' show AnalysisContext;
 
 /// Helpers for Analyzer's Element model and corelib model.
 
@@ -24,8 +25,7 @@ class Tuple2<T0, T1> {
 T fillDynamicTypeArgs<T extends DartType>(T t) {
   if (t is ParameterizedType && t.typeArguments.isNotEmpty) {
     var rawT = (t.element as TypeParameterizedElement).type;
-    var dyn =
-        new List.filled(rawT.typeArguments.length, DynamicTypeImpl.instance);
+    var dyn = List.filled(rawT.typeArguments.length, DynamicTypeImpl.instance);
     return rawT.substitute2(dyn, rawT.typeArguments) as T;
   }
   return t;
@@ -45,6 +45,7 @@ T fillDynamicTypeArgs<T extends DartType>(T t) {
 ///    (v) => v.type.name == 'Deprecated' && v.type.element.library.isDartCore
 ///
 DartObject findAnnotation(Element element, bool test(DartObjectImpl value)) {
+  if (element == null) return null;
   for (var metadata in element.metadata) {
     var value = metadata.computeConstantValue();
     if (value is DartObjectImpl && test(value)) return value;
@@ -131,7 +132,7 @@ String getAnnotationName(Element element, bool match(DartObjectImpl value)) =>
 
 List<ClassElement> getSuperclasses(ClassElement cls) {
   var result = <ClassElement>[];
-  var visited = new HashSet<ClassElement>();
+  var visited = HashSet<ClassElement>();
   while (cls != null && visited.add(cls)) {
     for (var mixinType in cls.mixins.reversed) {
       var mixin = mixinType.element;
@@ -300,7 +301,7 @@ Uri uriForCompilationUnit(CompilationUnitElement unit) {
   return sourcePath.startsWith('package:')
       ? Uri.parse(sourcePath)
       // TODO(jmesserly): shouldn't this be path.toUri?
-      : new Uri.file(sourcePath);
+      : Uri.file(sourcePath);
 }
 
 /// Returns true iff this factory constructor just throws [UnsupportedError]/
@@ -339,3 +340,6 @@ bool isBuiltinAnnotation(
   var path = uri.pathSegments[0];
   return uri.scheme == 'dart' && path == libraryName;
 }
+
+ClassElement getClass(AnalysisContext c, String uri, String name) =>
+    c.computeLibraryElement(c.sourceFactory.forUri(uri)).getType(name);

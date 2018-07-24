@@ -16,9 +16,9 @@ import 'package:test/test.dart';
 import 'integration_test_methods.dart';
 import 'protocol_matchers.dart';
 
-const Matcher isBool = const isInstanceOf<bool>();
+const Matcher isBool = const TypeMatcher<bool>();
 
-const Matcher isInt = const isInstanceOf<int>();
+const Matcher isInt = const TypeMatcher<int>();
 
 const Matcher isNotification = const MatchesJsonObject(
     'notification', const {'event': isString},
@@ -26,7 +26,7 @@ const Matcher isNotification = const MatchesJsonObject(
 
 const Matcher isObject = isMap;
 
-const Matcher isString = const isInstanceOf<String>();
+const Matcher isString = const TypeMatcher<String>();
 
 final Matcher isResponse = new MatchesJsonObject('response', {'id': isString},
     optionalFields: {'result': anything, 'error': isRequestError});
@@ -41,7 +41,7 @@ Matcher isOneOf(List<Matcher> choiceMatchers) => new _OneOf(choiceMatchers);
 /**
  * Assert that [actual] matches [matcher].
  */
-void outOfTestExpect(actual, matcher,
+void outOfTestExpect(actual, Matcher matcher,
     {String reason, skip, bool verbose: false}) {
   var matchState = {};
   try {
@@ -263,13 +263,11 @@ abstract class AbstractAnalysisServerIntegrationTest
    * Start [server].
    */
   Future startServer({
-    bool checked: true,
     int diagnosticPort,
     int servicesPort,
     bool cfe: false,
   }) {
     return server.start(
-        checked: checked,
         diagnosticPort: diagnosticPort,
         servicesPort: servicesPort,
         useCFE: cfe || useCFE);
@@ -415,7 +413,7 @@ class MatchesJsonObject extends _RecursiveMatcher {
     }
     if (requiredFields != null) {
       requiredFields.forEach((String key, Matcher valueMatcher) {
-        if (!item.containsKey(key)) {
+        if (!(item as Map).containsKey(key)) {
           mismatches.add((Description mismatchDescription) =>
               mismatchDescription
                   .add('is missing field ')
@@ -664,7 +662,6 @@ class Server {
    * to be used.
    */
   Future start({
-    bool checked: true,
     int diagnosticPort,
     String instrumentationLogFile,
     bool profileServer: false,
@@ -678,9 +675,28 @@ class Server {
     }
     _time.start();
     String dartBinary = Platform.executable;
-    String rootDir =
-        findRoot(Platform.script.toFilePath(windows: Platform.isWindows));
-    String serverPath = normalize(join(rootDir, 'bin', 'server.dart'));
+
+    // The integration tests run 3x faster when run from snapshots (you need to
+    // run test.py with --use-sdk).
+    final bool useSnapshot = true;
+    String serverPath;
+
+    if (useSnapshot) {
+      // Look for snapshots/analysis_server.dart.snapshot.
+      serverPath = normalize(join(dirname(Platform.resolvedExecutable),
+          'snapshots', 'analysis_server.dart.snapshot'));
+
+      if (!FileSystemEntity.isFileSync(serverPath)) {
+        // Look for dart-sdk/bin/snapshots/analysis_server.dart.snapshot.
+        serverPath = normalize(join(dirname(Platform.resolvedExecutable),
+            'dart-sdk', 'bin', 'snapshots', 'analysis_server.dart.snapshot'));
+      }
+    } else {
+      String rootDir =
+          findRoot(Platform.script.toFilePath(windows: Platform.isWindows));
+      serverPath = normalize(join(rootDir, 'bin', 'server.dart'));
+    }
+
     List<String> arguments = [];
     //
     // Add VM arguments.
@@ -695,14 +711,8 @@ class Server {
     } else if (servicesPort != null) {
       arguments.add('--enable-vm-service=$servicesPort');
     }
-    if (Platform.packageRoot != null) {
-      arguments.add('--package-root=${Platform.packageRoot}');
-    }
     if (Platform.packageConfig != null) {
       arguments.add('--packages=${Platform.packageConfig}');
-    }
-    if (checked) {
-      arguments.add('--checked');
     }
     //
     // Add the server executable.
@@ -728,9 +738,6 @@ class Server {
     if (useCFE) {
       arguments.add('--use-cfe');
     }
-    // TODO(devoncarew): We could experiment with instead launching the analysis
-    // server in a separate isolate. This would make it easier to debug the
-    // integration tests, and would likely speed up the tests as well.
     _process = await Process.start(dartBinary, arguments);
     _process.exitCode.then((int code) {
       if (code != 0) {

@@ -3,10 +3,10 @@
 // BSD-style license that can be found in the LICENSE file.
 
 #include "platform/assert.h"
+#include "vm/heap/safepoint.h"
 #include "vm/isolate.h"
 #include "vm/lockers.h"
 #include "vm/profiler.h"
-#include "vm/safepoint.h"
 #include "vm/stack_frame.h"
 #include "vm/thread_pool.h"
 #include "vm/unit_test.h"
@@ -58,7 +58,7 @@ VM_UNIT_TEST_CASE(Monitor) {
 
     // Check whether this attempt falls within the expected time limits.
     int64_t wakeup_time = (stop - start) / kMicrosecondsPerMillisecond;
-    OS::Print("wakeup_time: %" Pd64 "\n", wakeup_time);
+    OS::PrintErr("wakeup_time: %" Pd64 "\n", wakeup_time);
     const int kAcceptableTimeJitter = 20;    // Measured in milliseconds.
     const int kAcceptableWakeupDelay = 150;  // Measured in milliseconds.
     if (((wait_time - kAcceptableTimeJitter) <= wakeup_time) &&
@@ -131,7 +131,7 @@ class TaskWithZoneAllocation : public ThreadPool::Task {
         ObjectCounter counter(isolate_, &smi);
         // Ensure that our particular zone is visited.
         iteration.IterateStackPointers(&counter,
-                                       StackFrameIterator::kValidateFrames);
+                                       ValidationPolicy::kValidateFrames);
         EXPECT_EQ(1, counter.count());
       }
       char* unique_chars = zone->PrintToString("unique_str_%" Pd, id_);
@@ -148,7 +148,7 @@ class TaskWithZoneAllocation : public ThreadPool::Task {
         ObjectCounter str_counter(isolate_, &unique_str);
         // Ensure that our particular zone is visited.
         iteration.IterateStackPointers(&str_counter,
-                                       StackFrameIterator::kValidateFrames);
+                                       ValidationPolicy::kValidateFrames);
         // We should visit the string object exactly once.
         EXPECT_EQ(1, str_counter.count());
       }
@@ -429,7 +429,7 @@ class SafepointTestTask : public ThreadPool::Task {
         ASSERT(thread->IsAtSafepoint());
         ObjectCounter counter(isolate_, &smi);
         iteration.IterateStackPointers(&counter,
-                                       StackFrameIterator::kValidateFrames);
+                                       ValidationPolicy::kValidateFrames);
         {
           MonitorLocker ml(monitor_);
           EXPECT_EQ(*expected_count_, counter.count());

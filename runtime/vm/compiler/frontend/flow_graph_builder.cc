@@ -19,7 +19,7 @@
 #include "vm/compiler/jit/compiler.h"
 #include "vm/exceptions.h"
 #include "vm/flags.h"
-#include "vm/heap.h"
+#include "vm/heap/heap.h"
 #include "vm/isolate.h"
 #include "vm/object.h"
 #include "vm/object_store.h"
@@ -837,7 +837,7 @@ Definition* EffectGraphVisitor::BuildStoreLocal(const LocalVariable& local,
     }
     Value* tmp_val = Bind(new (Z) LoadLocalInstr(*tmp_var, token_pos));
     StoreInstanceFieldInstr* store = new (Z)
-        StoreInstanceFieldInstr(Context::variable_offset(local.index()),
+        StoreInstanceFieldInstr(Context::variable_offset(local.index().value()),
                                 context, tmp_val, kEmitStoreBarrier, token_pos);
     Do(store);
     return ExitTempLocalScope(value);
@@ -859,9 +859,9 @@ Definition* EffectGraphVisitor::BuildLoadLocal(const LocalVariable& local,
                                             Type::ZoneHandle(Z, Type::null()),
                                             token_pos));
     }
-    LoadFieldInstr* load =
-        new (Z) LoadFieldInstr(context, Context::variable_offset(local.index()),
-                               local.type(), token_pos);
+    LoadFieldInstr* load = new (Z)
+        LoadFieldInstr(context, Context::variable_offset(local.index().value()),
+                       local.type(), token_pos);
     load->set_is_immutable(local.is_final());
     return load;
   } else {
@@ -2104,8 +2104,8 @@ void EffectGraphVisitor::VisitAwaitMarkerNode(AwaitMarkerNode* node) {
 }
 
 intptr_t EffectGraphVisitor::GetCurrentTempLocalIndex() const {
-  return kFirstLocalSlotFromFp - owner()->num_stack_locals() -
-         owner()->args_pushed() - owner()->temp_count() + 1;
+  return -owner()->num_stack_locals() - owner()->args_pushed() -
+         owner()->temp_count() + 1;
 }
 
 LocalVariable* EffectGraphVisitor::EnterTempLocalScope(Value* value) {
@@ -2117,7 +2117,7 @@ LocalVariable* EffectGraphVisitor::EnterTempLocalScope(Value* value) {
       new (Z) LocalVariable(TokenPosition::kNoSource, TokenPosition::kNoSource,
                             String::ZoneHandle(Z, Symbols::New(T, name)),
                             *value->Type()->ToAbstractType());
-  var->set_index(index);
+  var->set_index(VariableIndex(index));
   return var;
 }
 
@@ -2132,8 +2132,8 @@ void EffectGraphVisitor::BuildLetTempExpressions(LetNode* node) {
     node->InitializerAt(i)->Visit(&for_value);
     Append(for_value);
     ASSERT(!node->TempAt(i)->HasIndex() ||
-           (node->TempAt(i)->index() == GetCurrentTempLocalIndex()));
-    node->TempAt(i)->set_index(GetCurrentTempLocalIndex());
+           (node->TempAt(i)->index().value() == GetCurrentTempLocalIndex()));
+    node->TempAt(i)->set_index(VariableIndex(GetCurrentTempLocalIndex()));
   }
 }
 
@@ -3126,18 +3126,22 @@ void ValueGraphVisitor::VisitStaticSetterNode(StaticSetterNode* node) {
   BuildStaticSetter(node, true);  // Result needed.
 }
 
-static intptr_t OffsetForLengthGetter(MethodRecognizer::Kind kind) {
+static const NativeFieldDesc* NativeFieldForLengthGetter(
+    MethodRecognizer::Kind kind) {
   switch (kind) {
     case MethodRecognizer::kObjectArrayLength:
     case MethodRecognizer::kImmutableArrayLength:
-      return Array::length_offset();
+      return NativeFieldDesc::Array_length();
+
     case MethodRecognizer::kTypedDataLength:
       // .length is defined in _TypedList which is the base class for internal
       // and external typed data.
       ASSERT(TypedData::length_offset() == ExternalTypedData::length_offset());
-      return TypedData::length_offset();
+      return NativeFieldDesc::TypedData_length();
+
     case MethodRecognizer::kGrowableArrayLength:
-      return GrowableObjectArray::length_offset();
+      return NativeFieldDesc::GrowableObjectArray_length();
+
     default:
       UNREACHABLE();
       return 0;
@@ -3153,15 +3157,10 @@ LoadLocalInstr* EffectGraphVisitor::BuildLoadThisVar(LocalScope* scope,
 
 LoadFieldInstr* EffectGraphVisitor::BuildNativeGetter(
     NativeBodyNode* node,
-    MethodRecognizer::Kind kind,
-    intptr_t offset,
-    const Type& type,
-    intptr_t class_id) {
+    const NativeFieldDesc* native_field) {
   Value* receiver = Bind(BuildLoadThisVar(node->scope(), node->token_pos()));
   LoadFieldInstr* load =
-      new (Z) LoadFieldInstr(receiver, offset, type, node->token_pos());
-  load->set_result_cid(class_id);
-  load->set_recognized_kind(kind);
+      new (Z) LoadFieldInstr(receiver, native_field, node->token_pos());
   return load;
 }
 
@@ -3200,10 +3199,8 @@ void EffectGraphVisitor::VisitNativeBodyNode(NativeBodyNode* node) {
       }
       case MethodRecognizer::kStringBaseLength:
       case MethodRecognizer::kStringBaseIsEmpty: {
-        LoadFieldInstr* load = BuildNativeGetter(
-            node, MethodRecognizer::kStringBaseLength, String::length_offset(),
-            Type::ZoneHandle(Z, Type::SmiType()), kSmiCid);
-        load->set_is_immutable(true);
+        LoadFieldInstr* load =
+            BuildNativeGetter(node, NativeFieldDesc::String_length());
         if (kind == MethodRecognizer::kStringBaseLength) {
           return ReturnDefinition(load);
         }
@@ -3221,9 +3218,7 @@ void EffectGraphVisitor::VisitNativeBodyNode(NativeBodyNode* node) {
       case MethodRecognizer::kImmutableArrayLength:
       case MethodRecognizer::kTypedDataLength: {
         LoadFieldInstr* load =
-            BuildNativeGetter(node, kind, OffsetForLengthGetter(kind),
-                              Type::ZoneHandle(Z, Type::SmiType()), kSmiCid);
-        load->set_is_immutable(kind != MethodRecognizer::kGrowableArrayLength);
+            BuildNativeGetter(node, NativeFieldForLengthGetter(kind));
         return ReturnDefinition(load);
       }
       case MethodRecognizer::kClassIDgetID: {
@@ -3241,11 +3236,89 @@ void EffectGraphVisitor::VisitNativeBodyNode(NativeBodyNode* node) {
         data_load->set_result_cid(kArrayCid);
         Value* data = Bind(data_load);
         LoadFieldInstr* length_load = new (Z) LoadFieldInstr(
-            data, Array::length_offset(), Type::ZoneHandle(Z, Type::SmiType()),
-            node->token_pos());
-        length_load->set_result_cid(kSmiCid);
-        length_load->set_recognized_kind(MethodRecognizer::kObjectArrayLength);
+            data, NativeFieldDesc::Array_length(), node->token_pos());
         return ReturnDefinition(length_load);
+      }
+      case MethodRecognizer::kListFactory: {
+        // factory List<E>([int length]) {
+        //   return (:arg_desc.positional_count == 2) ? new _List<E>(length)
+        //                                            : new _GrowableList<E>(0);
+        // }
+        ASSERT(owner_->parsed_function().has_arg_desc_var());
+        const auto type_args_parameter = node->scope()->LookupVariable(
+            Symbols::TypeArgumentsParameter(), true);
+        const auto length_parameter =
+            node->scope()->LookupVariable(Symbols::Length(), true);
+        const Library& core_lib = Library::Handle(Z, Library::CoreLibrary());
+
+        // Build: :arg_desc.positional_count == 2
+        TestGraphVisitor comparison(owner(), token_pos);
+        auto arg_descriptor = comparison.Bind(new (Z) LoadLocalInstr(
+            *owner_->parsed_function().arg_desc_var(), token_pos));
+        auto positional_count = comparison.Bind(new (Z) LoadFieldInstr(
+            arg_descriptor, ArgumentsDescriptor::positional_count_offset(),
+            AbstractType::ZoneHandle(Z, Type::SmiType()), token_pos));
+        auto constant_1 = comparison.Bind(
+            new (Z) ConstantInstr(Smi::ZoneHandle(Z, Smi::New(2))));
+        comparison.ReturnDefinition(new (Z) StrictCompareInstr(
+            token_pos, Token::kEQ_STRICT, positional_count, constant_1, false,
+            owner()->GetNextDeoptId()));  // No number check.
+
+        // Build: :expr_temp = new _List<E>(length)
+        ValueGraphVisitor allocate_non_growable(owner());
+        {
+          auto arguments = new (Z) ZoneGrowableArray<PushArgumentInstr*>(Z, 2);
+          arguments->Add(
+              allocate_non_growable.PushArgument(allocate_non_growable.Bind(
+                  new (Z) LoadLocalInstr(*type_args_parameter, token_pos))));
+          arguments->Add(
+              allocate_non_growable.PushArgument(allocate_non_growable.Bind(
+                  new (Z) LoadLocalInstr(*length_parameter, token_pos))));
+          const Class& cls = Class::Handle(
+              Z, core_lib.LookupClass(
+                     Library::PrivateCoreLibName(Symbols::_List())));
+          ASSERT(!cls.IsNull());
+          const intptr_t kTypeArgsLen = 0;
+          const Function& func = Function::ZoneHandle(
+              Z, cls.LookupFactoryAllowPrivate(Symbols::_ListFactory()));
+          ASSERT(!func.IsNull());
+          allocate_non_growable.ReturnDefinition(new (Z) StaticCallInstr(
+              token_pos, func, kTypeArgsLen,
+              Object::null_array(),  // No names.
+              arguments, owner()->ic_data_array(), owner()->GetNextDeoptId(),
+              ICData::kStatic));
+          allocate_non_growable.Do(
+              BuildStoreExprTemp(allocate_non_growable.value(), token_pos));
+        }
+
+        // Build: :expr_temp = new _GrowableList<E>(0)
+        ValueGraphVisitor allocate_growable(owner());
+        {
+          auto arguments = new (Z) ZoneGrowableArray<PushArgumentInstr*>(Z, 1);
+          arguments->Add(allocate_growable.PushArgument(allocate_growable.Bind(
+              new (Z) LoadLocalInstr(*type_args_parameter, token_pos))));
+          arguments->Add(allocate_growable.PushArgument(allocate_growable.Bind(
+              new (Z) ConstantInstr(Smi::ZoneHandle(Z, Smi::New(0))))));
+          const Class& cls = Class::Handle(
+              Z, core_lib.LookupClass(
+                     Library::PrivateCoreLibName(Symbols::_GrowableList())));
+          ASSERT(!cls.IsNull());
+          const intptr_t kTypeArgsLen = 0;
+          const Function& func = Function::ZoneHandle(
+              Z,
+              cls.LookupFactoryAllowPrivate(Symbols::_GrowableListFactory()));
+          ASSERT(!func.IsNull());
+          allocate_growable.ReturnDefinition(new (Z) StaticCallInstr(
+              token_pos, func, kTypeArgsLen,
+              Object::null_array(),  // No names.
+              arguments, owner()->ic_data_array(), owner()->GetNextDeoptId(),
+              ICData::kStatic));
+          allocate_growable.Do(
+              BuildStoreExprTemp(allocate_growable.value(), token_pos));
+        }
+
+        Join(comparison, allocate_non_growable, allocate_growable);
+        return ReturnDefinition(BuildLoadExprTemp(token_pos));
       }
       case MethodRecognizer::kObjectArrayAllocate: {
         LocalVariable* type_args_parameter = node->scope()->LookupVariable(
@@ -3260,20 +3333,9 @@ void EffectGraphVisitor::VisitNativeBodyNode(NativeBodyNode* node) {
             token_pos, element_type, length, owner()->GetNextDeoptId());
         return ReturnDefinition(create_array);
       }
-      case MethodRecognizer::kBigint_getDigits: {
-        return ReturnDefinition(BuildNativeGetter(
-            node, kind, Bigint::digits_offset(), Object::dynamic_type(),
-            kTypedDataUint32ArrayCid));
-      }
-      case MethodRecognizer::kBigint_getUsed: {
-        return ReturnDefinition(
-            BuildNativeGetter(node, kind, Bigint::used_offset(),
-                              Type::ZoneHandle(Z, Type::SmiType()), kSmiCid));
-      }
       case MethodRecognizer::kLinkedHashMap_getIndex: {
-        return ReturnDefinition(BuildNativeGetter(
-            node, kind, LinkedHashMap::index_offset(), Object::dynamic_type(),
-            kTypedDataUint32ArrayCid));
+        return ReturnDefinition(
+            BuildNativeGetter(node, NativeFieldDesc::LinkedHashMap_index()));
       }
       case MethodRecognizer::kLinkedHashMap_setIndex: {
         return ReturnDefinition(DoNativeSetterStoreValue(
@@ -3281,17 +3343,15 @@ void EffectGraphVisitor::VisitNativeBodyNode(NativeBodyNode* node) {
       }
       case MethodRecognizer::kLinkedHashMap_getData: {
         return ReturnDefinition(
-            BuildNativeGetter(node, kind, LinkedHashMap::data_offset(),
-                              Object::dynamic_type(), kArrayCid));
+            BuildNativeGetter(node, NativeFieldDesc::LinkedHashMap_data()));
       }
       case MethodRecognizer::kLinkedHashMap_setData: {
         return ReturnDefinition(DoNativeSetterStoreValue(
             node, LinkedHashMap::data_offset(), kEmitStoreBarrier));
       }
       case MethodRecognizer::kLinkedHashMap_getHashMask: {
-        return ReturnDefinition(
-            BuildNativeGetter(node, kind, LinkedHashMap::hash_mask_offset(),
-                              Type::ZoneHandle(Z, Type::SmiType()), kSmiCid));
+        return ReturnDefinition(BuildNativeGetter(
+            node, NativeFieldDesc::LinkedHashMap_hash_mask()));
       }
       case MethodRecognizer::kLinkedHashMap_setHashMask: {
         // Smi field; no barrier needed.
@@ -3299,9 +3359,8 @@ void EffectGraphVisitor::VisitNativeBodyNode(NativeBodyNode* node) {
             node, LinkedHashMap::hash_mask_offset(), kNoStoreBarrier));
       }
       case MethodRecognizer::kLinkedHashMap_getUsedData: {
-        return ReturnDefinition(
-            BuildNativeGetter(node, kind, LinkedHashMap::used_data_offset(),
-                              Type::ZoneHandle(Z, Type::SmiType()), kSmiCid));
+        return ReturnDefinition(BuildNativeGetter(
+            node, NativeFieldDesc::LinkedHashMap_used_data()));
       }
       case MethodRecognizer::kLinkedHashMap_setUsedData: {
         // Smi field; no barrier needed.
@@ -3309,19 +3368,14 @@ void EffectGraphVisitor::VisitNativeBodyNode(NativeBodyNode* node) {
             node, LinkedHashMap::used_data_offset(), kNoStoreBarrier));
       }
       case MethodRecognizer::kLinkedHashMap_getDeletedKeys: {
-        return ReturnDefinition(
-            BuildNativeGetter(node, kind, LinkedHashMap::deleted_keys_offset(),
-                              Type::ZoneHandle(Z, Type::SmiType()), kSmiCid));
+        return ReturnDefinition(BuildNativeGetter(
+            node, NativeFieldDesc::Get(
+                      NativeFieldDesc::kLinkedHashMap_deleted_keys)));
       }
       case MethodRecognizer::kLinkedHashMap_setDeletedKeys: {
         // Smi field; no barrier needed.
         return ReturnDefinition(DoNativeSetterStoreValue(
             node, LinkedHashMap::deleted_keys_offset(), kNoStoreBarrier));
-      }
-      case MethodRecognizer::kBigint_getNeg: {
-        return ReturnDefinition(
-            BuildNativeGetter(node, kind, Bigint::neg_offset(),
-                              Type::ZoneHandle(Z, Type::BoolType()), kBoolCid));
       }
       default:
         break;
@@ -4116,7 +4170,8 @@ void EffectGraphVisitor::VisitTryCatchNode(TryCatchNode* node) {
       owner()->AllocateBlockId(), catch_handler_index, owner()->graph_entry(),
       catch_block->handler_types(), try_handler_index,
       catch_block->exception_var(), catch_block->stacktrace_var(),
-      catch_block->needs_stacktrace(), owner()->GetNextDeoptId());
+      catch_block->needs_stacktrace(), owner()->GetNextDeoptId(),
+      &catch_block->exception_var(), &catch_block->stacktrace_var());
   owner()->AddCatchEntry(catch_entry);
   AppendFragment(catch_entry, for_catch);
 
@@ -4162,7 +4217,8 @@ void EffectGraphVisitor::VisitTryCatchNode(TryCatchNode* node) {
         owner()->AllocateBlockId(), original_handler_index,
         owner()->graph_entry(), types, catch_handler_index,
         catch_block->exception_var(), catch_block->stacktrace_var(),
-        catch_block->needs_stacktrace(), owner()->GetNextDeoptId());
+        catch_block->needs_stacktrace(), owner()->GetNextDeoptId(),
+        &catch_block->exception_var(), &catch_block->stacktrace_var());
     owner()->AddCatchEntry(finally_entry);
     AppendFragment(finally_entry, for_finally);
   }

@@ -4,10 +4,8 @@
 
 #include "vm/ast_printer.h"
 #include "platform/assert.h"
-#include "vm/heap.h"
 #include "vm/isolate.h"
 #include "vm/object.h"
-#include "vm/object_store.h"
 #include "vm/unit_test.h"
 
 namespace dart {
@@ -19,7 +17,7 @@ TEST_CASE(AstPrinter) {
   LocalVariable* v = new LocalVariable(
       kPos, kPos, String::ZoneHandle(Symbols::New(thread, "wurscht")),
       Type::ZoneHandle(Type::DynamicType()));
-  v->set_index(5);
+  v->set_index(VariableIndex(5));
   AstPrinter ast_printer;
   LoadLocalNode* ll = new LoadLocalNode(kPos, v);
   ReturnNode* r = new ReturnNode(kPos, ll);

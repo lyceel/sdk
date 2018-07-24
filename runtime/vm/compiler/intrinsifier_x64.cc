@@ -591,8 +591,8 @@ void Intrinsifier::Integer_greaterEqualThan(Assembler* assembler) {
   CompareIntegers(assembler, GREATER_EQUAL);
 }
 
-// This is called for Smi, Mint and Bigint receivers. The right argument
-// can be Smi, Mint, Bigint or double.
+// This is called for Smi and Mint receivers. The right argument
+// can be Smi, Mint or double.
 void Intrinsifier::Integer_equalToInteger(Assembler* assembler) {
   Label fall_through, true_label, check_for_mint;
   const intptr_t kReceiverOffset = 2;
@@ -621,7 +621,7 @@ void Intrinsifier::Integer_equalToInteger(Assembler* assembler) {
   __ j(NOT_ZERO, &receiver_not_smi);
 
   // Left (receiver) is Smi, return false if right is not Double.
-  // Note that an instance of Mint or Bigint never contains a value that can be
+  // Note that an instance of Mint never contains a value that can be
   // represented by Smi.
   __ movq(RAX, Address(RSP, +kArgumentOffset * kWordSize));
   __ CompareClassId(RAX, kDoubleCid);
@@ -1104,7 +1104,7 @@ void Intrinsifier::Bigint_sqrAdd(Assembler* assembler) {
   __ ret();
 }
 
-void Intrinsifier::Bigint_estQuotientDigit(Assembler* assembler) {
+void Intrinsifier::Bigint_estimateQuotientDigit(Assembler* assembler) {
   // Pseudo code:
   // static int _estQuotientDigit(Uint32List args, Uint32List digits, int i) {
   //   uint64_t yt = args[_YT_LO .. _YT];  // _YT_LO == 0, _YT == 1.
@@ -1335,7 +1335,7 @@ void Intrinsifier::Double_mulFromInteger(Assembler* assembler) {
   __ Bind(&fall_through);
 }
 
-// Left is double right is integer (Bigint, Mint or Smi)
+// Left is double, right is integer (Mint or Smi)
 void Intrinsifier::DoubleFromInteger(Assembler* assembler) {
   Label fall_through;
   __ movq(RAX, Address(RSP, +1 * kWordSize));
@@ -1496,17 +1496,8 @@ void Intrinsifier::Random_nextState(Assembler* assembler) {
   const Field& state_field = Field::ZoneHandle(
       random_class.LookupInstanceFieldAllowPrivate(Symbols::_state()));
   ASSERT(!state_field.IsNull());
-  const Field& random_A_field = Field::ZoneHandle(
-      random_class.LookupStaticFieldAllowPrivate(Symbols::_A()));
-  ASSERT(!random_A_field.IsNull());
-  ASSERT(random_A_field.is_const());
-  Instance& a_value = Instance::Handle(random_A_field.StaticValue());
-  if (a_value.raw() == Object::sentinel().raw() ||
-      a_value.raw() == Object::transition_sentinel().raw()) {
-    random_A_field.EvaluateInitializer();
-    a_value = random_A_field.StaticValue();
-  }
-  const int64_t a_int_value = Integer::Cast(a_value).AsInt64Value();
+  const int64_t a_int_value = Intrinsifier::kRandomAValue;
+
   // Receiver.
   __ movq(RAX, Address(RSP, +1 * kWordSize));
   // Field '_state'.
@@ -1560,13 +1551,13 @@ const Condition kIfNotInRange = ABOVE;
 const Condition kIfInRange = BELOW_EQUAL;
 
 static void JumpIfInteger(Assembler* assembler, Register cid, Label* target) {
-  RangeCheck(assembler, cid, kSmiCid, kBigintCid, kIfInRange, target);
+  RangeCheck(assembler, cid, kSmiCid, kMintCid, kIfInRange, target);
 }
 
 static void JumpIfNotInteger(Assembler* assembler,
                              Register cid,
                              Label* target) {
-  RangeCheck(assembler, cid, kSmiCid, kBigintCid, kIfNotInRange, target);
+  RangeCheck(assembler, cid, kSmiCid, kMintCid, kIfNotInRange, target);
 }
 
 static void JumpIfString(Assembler* assembler, Register cid, Label* target) {

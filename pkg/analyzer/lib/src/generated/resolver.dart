@@ -2,8 +2,6 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-library analyzer.src.generated.resolver;
-
 import 'dart:collection';
 
 import 'package:analyzer/dart/ast/ast.dart';
@@ -46,13 +44,19 @@ export 'package:analyzer/src/generated/type_system.dart';
  */
 class AstRewriteVisitor extends ScopedVisitor {
   final bool addConstKeyword;
+  final TypeSystem typeSystem;
 
   /**
    * Initialize a newly created visitor.
    */
-  AstRewriteVisitor(LibraryElement definingLibrary, Source source,
-      TypeProvider typeProvider, AnalysisErrorListener errorListener,
-      {Scope nameScope, this.addConstKeyword: false})
+  AstRewriteVisitor(
+      this.typeSystem,
+      LibraryElement definingLibrary,
+      Source source,
+      TypeProvider typeProvider,
+      AnalysisErrorListener errorListener,
+      {Scope nameScope,
+      this.addConstKeyword: false})
       : super(definingLibrary, source, typeProvider, errorListener,
             nameScope: nameScope);
 
@@ -78,15 +82,20 @@ class AstRewriteVisitor extends ScopedVisitor {
       if (element is ClassElement) {
         AstFactory astFactory = new AstFactoryImpl();
         TypeName typeName = astFactory.typeName(methodName, node.typeArguments);
+        ConstructorName constructorName =
+            astFactory.constructorName(typeName, null, null);
         InstanceCreationExpression instanceCreationExpression =
             astFactory.instanceCreationExpression(
-                _getKeyword(node),
-                astFactory.constructorName(typeName, null, null),
-                node.argumentList);
-        DartType type = _getType(element, node.typeArguments);
+                _getKeyword(node), constructorName, node.argumentList);
+        InterfaceType type = _getType(element, node.typeArguments);
+        ConstructorElement constructorElement =
+            type.lookUpConstructor(null, definingLibrary);
         methodName.staticElement = element;
         methodName.staticType = type;
         typeName.type = type;
+        constructorName.staticElement = constructorElement;
+        instanceCreationExpression.staticType = type;
+        instanceCreationExpression.staticElement = constructorElement;
         NodeReplacer.replace(node, instanceCreationExpression);
       }
     } else if (target is SimpleIdentifier) {
@@ -98,19 +107,24 @@ class AstRewriteVisitor extends ScopedVisitor {
       Element element = nameScope.lookup(target, definingLibrary);
       if (element is ClassElement) {
         // Possible case: C.n()
-        if (element.getNamedConstructor(methodName.name) != null) {
+        var constructorElement = element.getNamedConstructor(methodName.name);
+        if (constructorElement != null) {
           AstFactory astFactory = new AstFactoryImpl();
           TypeName typeName = astFactory.typeName(target, node.typeArguments);
+          ConstructorName constructorName =
+              astFactory.constructorName(typeName, node.operator, methodName);
           InstanceCreationExpression instanceCreationExpression =
               astFactory.instanceCreationExpression(
-                  _getKeyword(node),
-                  astFactory.constructorName(
-                      typeName, node.operator, methodName),
-                  node.argumentList);
-          DartType type = _getType(element, node.typeArguments);
+                  _getKeyword(node), constructorName, node.argumentList);
+          InterfaceType type = _getType(element, node.typeArguments);
+          constructorElement =
+              type.lookUpConstructor(methodName.name, definingLibrary);
           methodName.staticElement = element;
           methodName.staticType = type;
           typeName.type = type;
+          constructorName.staticElement = constructorElement;
+          instanceCreationExpression.staticType = type;
+          instanceCreationExpression.staticElement = constructorElement;
           NodeReplacer.replace(node, instanceCreationExpression);
         }
       } else if (element is PrefixElement) {
@@ -125,15 +139,20 @@ class AstRewriteVisitor extends ScopedVisitor {
           TypeName typeName = astFactory.typeName(
               astFactory.prefixedIdentifier(target, node.operator, methodName),
               node.typeArguments);
+          ConstructorName constructorName =
+              astFactory.constructorName(typeName, null, null);
           InstanceCreationExpression instanceCreationExpression =
               astFactory.instanceCreationExpression(
-                  _getKeyword(node),
-                  astFactory.constructorName(typeName, null, null),
-                  node.argumentList);
-          DartType type = _getType(prefixedElement, node.typeArguments);
+                  _getKeyword(node), constructorName, node.argumentList);
+          InterfaceType type = _getType(prefixedElement, node.typeArguments);
+          ConstructorElement constructorElement =
+              type.lookUpConstructor(null, definingLibrary);
           methodName.staticElement = element;
           methodName.staticType = type;
           typeName.type = type;
+          constructorName.staticElement = constructorElement;
+          instanceCreationExpression.staticType = type;
+          instanceCreationExpression.staticElement = constructorElement;
           NodeReplacer.replace(node, instanceCreationExpression);
         }
       }
@@ -143,19 +162,24 @@ class AstRewriteVisitor extends ScopedVisitor {
       if (prefixElement is PrefixElement) {
         Element element = nameScope.lookup(target, definingLibrary);
         if (element is ClassElement) {
-          if (element.getNamedConstructor(methodName.name) != null) {
+          var constructorElement = element.getNamedConstructor(methodName.name);
+          if (constructorElement != null) {
             AstFactory astFactory = new AstFactoryImpl();
             TypeName typeName = astFactory.typeName(target, node.typeArguments);
+            ConstructorName constructorName =
+                astFactory.constructorName(typeName, node.operator, methodName);
             InstanceCreationExpression instanceCreationExpression =
                 astFactory.instanceCreationExpression(
-                    _getKeyword(node),
-                    astFactory.constructorName(
-                        typeName, node.operator, methodName),
-                    node.argumentList);
-            DartType type = _getType(element, node.typeArguments);
+                    _getKeyword(node), constructorName, node.argumentList);
+            InterfaceType type = _getType(element, node.typeArguments);
+            constructorElement =
+                type.lookUpConstructor(methodName.name, definingLibrary);
             methodName.staticElement = element;
             methodName.staticType = type;
             typeName.type = type;
+            constructorName.staticElement = constructorElement;
+            instanceCreationExpression.staticType = type;
+            instanceCreationExpression.staticElement = constructorElement;
             NodeReplacer.replace(node, instanceCreationExpression);
           }
         }
@@ -191,6 +215,8 @@ class AstRewriteVisitor extends ScopedVisitor {
           .map((TypeParameterElement parameter) => parameter.type)
           .toList();
       type = type.substitute2(argumentTypes, parameterTypes);
+    } else if (typeArguments == null && typeParameters != null) {
+      type = typeSystem.instantiateToBounds(type);
     }
     return type;
   }
@@ -293,12 +319,11 @@ class BestPracticesVerifier extends RecursiveAstVisitor<Object> {
   @override
   Object visitArgumentList(ArgumentList node) {
     for (Expression argument in node.arguments) {
-      ParameterElement parameter = argument.bestParameterElement;
+      ParameterElement parameter = argument.staticParameterElement;
       if (parameter?.isOptionalPositional == true) {
         _checkForDeprecatedMemberUse(parameter, argument);
       }
     }
-    _checkForArgumentTypesNotAssignableInList(node);
     return super.visitArgumentList(node);
   }
 
@@ -314,7 +339,7 @@ class BestPracticesVerifier extends RecursiveAstVisitor<Object> {
     if (operatorType == TokenType.EQ) {
       _checkForInvalidAssignment(node.leftHandSide, node.rightHandSide);
     } else {
-      _checkForDeprecatedMemberUse(node.bestElement, node);
+      _checkForDeprecatedMemberUse(node.staticElement, node);
     }
     return super.visitAssignmentExpression(node);
   }
@@ -322,7 +347,7 @@ class BestPracticesVerifier extends RecursiveAstVisitor<Object> {
   @override
   Object visitBinaryExpression(BinaryExpression node) {
     _checkForDivisionOptimizationHint(node);
-    _checkForDeprecatedMemberUse(node.bestElement, node);
+    _checkForDeprecatedMemberUse(node.staticElement, node);
     return super.visitBinaryExpression(node);
   }
 
@@ -380,7 +405,8 @@ class BestPracticesVerifier extends RecursiveAstVisitor<Object> {
       inDeprecatedMember = true;
     }
     try {
-      _checkForMissingReturn(node.returnType, node.functionExpression.body);
+      _checkForMissingReturn(
+          node.returnType, node.functionExpression.body, element, node);
       return super.visitFunctionDeclaration(node);
     } finally {
       inDeprecatedMember = wasInDeprecatedMember;
@@ -399,7 +425,7 @@ class BestPracticesVerifier extends RecursiveAstVisitor<Object> {
 
   @override
   Object visitIndexExpression(IndexExpression node) {
-    _checkForDeprecatedMemberUse(node.bestElement, node);
+    _checkForDeprecatedMemberUse(node.staticElement, node);
     return super.visitIndexExpression(node);
   }
 
@@ -425,7 +451,7 @@ class BestPracticesVerifier extends RecursiveAstVisitor<Object> {
     try {
       // This was determined to not be a good hint, see: dartbug.com/16029
       //checkForOverridingPrivateMember(node);
-      _checkForMissingReturn(node.returnType, node.body);
+      _checkForMissingReturn(node.returnType, node.body, element, node);
       _checkForUnnecessaryNoSuchMethod(node);
       return super.visitMethodDeclaration(node);
     } finally {
@@ -439,23 +465,23 @@ class BestPracticesVerifier extends RecursiveAstVisitor<Object> {
     _checkForAbstractSuperMemberReference(realTarget, node.methodName);
     _checkForNullAwareHints(node, node.operator);
     DartType staticInvokeType = node.staticInvokeType;
-    if (staticInvokeType is InterfaceType) {
-      MethodElement methodElement = staticInvokeType.lookUpMethod(
-          FunctionElement.CALL_METHOD_NAME, _currentLibrary);
-      _checkForDeprecatedMemberUse(methodElement, node);
+    Element callElement = staticInvokeType?.element;
+    if (callElement is MethodElement &&
+        callElement.name == FunctionElement.CALL_METHOD_NAME) {
+      _checkForDeprecatedMemberUse(callElement, node);
     }
     return super.visitMethodInvocation(node);
   }
 
   @override
   Object visitPostfixExpression(PostfixExpression node) {
-    _checkForDeprecatedMemberUse(node.bestElement, node);
+    _checkForDeprecatedMemberUse(node.staticElement, node);
     return super.visitPostfixExpression(node);
   }
 
   @override
   Object visitPrefixExpression(PrefixExpression node) {
-    _checkForDeprecatedMemberUse(node.bestElement, node);
+    _checkForDeprecatedMemberUse(node.staticElement, node);
     return super.visitPrefixExpression(node);
   }
 
@@ -584,127 +610,6 @@ class BestPracticesVerifier extends RecursiveAstVisitor<Object> {
   }
 
   /**
-   * This verifies that the passed expression can be assigned to its corresponding parameters.
-   *
-   * This method corresponds to ErrorVerifier.checkForArgumentTypeNotAssignable.
-   *
-   * TODO (jwren) In the ErrorVerifier there are other warnings that we could have a corresponding
-   * hint for: see other callers of ErrorVerifier.checkForArgumentTypeNotAssignable(..).
-   *
-   * @param expression the expression to evaluate
-   * @param expectedStaticType the expected static type of the parameter
-   * @param actualStaticType the actual static type of the argument
-   * @param expectedPropagatedType the expected propagated type of the parameter, may be
-   *          `null`
-   * @param actualPropagatedType the expected propagated type of the parameter, may be `null`
-   * @return `true` if and only if an hint code is generated on the passed node
-   * See [HintCode.ARGUMENT_TYPE_NOT_ASSIGNABLE].
-   */
-  bool _checkForArgumentTypeNotAssignable(
-      Expression expression,
-      DartType expectedStaticType,
-      DartType actualStaticType,
-      DartType expectedPropagatedType,
-      DartType actualPropagatedType,
-      ErrorCode hintCode) {
-    //
-    // Warning case: test static type information
-    //
-    if (actualStaticType != null && expectedStaticType != null) {
-      if (!_typeSystem.isAssignableTo(actualStaticType, expectedStaticType)) {
-        // A warning was created in the ErrorVerifier, return false, don't
-        // create a hint when a warning has already been created.
-        return false;
-      }
-    }
-    //
-    // Hint case: test propagated type information
-    //
-    // Compute the best types to use.
-    DartType expectedBestType = expectedPropagatedType ?? expectedStaticType;
-    DartType actualBestType = actualPropagatedType ?? actualStaticType;
-    if (actualBestType != null && expectedBestType != null) {
-      if (!_typeSystem.isAssignableTo(actualBestType, expectedBestType)) {
-        _errorReporter.reportTypeErrorForNode(
-            hintCode, expression, [actualBestType, expectedBestType]);
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /**
-   * This verifies that the passed argument can be assigned to its corresponding parameter.
-   *
-   * This method corresponds to ErrorCode.checkForArgumentTypeNotAssignableForArgument.
-   *
-   * @param argument the argument to evaluate
-   * @return `true` if and only if an hint code is generated on the passed node
-   * See [HintCode.ARGUMENT_TYPE_NOT_ASSIGNABLE].
-   */
-  bool _checkForArgumentTypeNotAssignableForArgument(Expression argument) {
-    if (argument == null) {
-      return false;
-    }
-    ParameterElement staticParameterElement = argument.staticParameterElement;
-    DartType staticParameterType = staticParameterElement?.type;
-    ParameterElement propagatedParameterElement =
-        argument.propagatedParameterElement;
-    DartType propagatedParameterType = propagatedParameterElement?.type;
-    return _checkForArgumentTypeNotAssignableWithExpectedTypes(
-        argument,
-        staticParameterType,
-        propagatedParameterType,
-        HintCode.ARGUMENT_TYPE_NOT_ASSIGNABLE);
-  }
-
-  /**
-   * This verifies that the passed expression can be assigned to its corresponding parameters.
-   *
-   * This method corresponds to ErrorCode.checkForArgumentTypeNotAssignableWithExpectedTypes.
-   *
-   * @param expression the expression to evaluate
-   * @param expectedStaticType the expected static type
-   * @param expectedPropagatedType the expected propagated type, may be `null`
-   * @return `true` if and only if an hint code is generated on the passed node
-   * See [HintCode.ARGUMENT_TYPE_NOT_ASSIGNABLE].
-   */
-  bool _checkForArgumentTypeNotAssignableWithExpectedTypes(
-          Expression expression,
-          DartType expectedStaticType,
-          DartType expectedPropagatedType,
-          ErrorCode errorCode) =>
-      _checkForArgumentTypeNotAssignable(
-          expression,
-          expectedStaticType,
-          expression.staticType,
-          expectedPropagatedType,
-          expression.propagatedType,
-          errorCode);
-
-  /**
-   * This verifies that the passed arguments can be assigned to their corresponding parameters.
-   *
-   * This method corresponds to ErrorCode.checkForArgumentTypesNotAssignableInList.
-   *
-   * @param node the arguments to evaluate
-   * @return `true` if and only if an hint code is generated on the passed node
-   * See [HintCode.ARGUMENT_TYPE_NOT_ASSIGNABLE].
-   */
-  bool _checkForArgumentTypesNotAssignableInList(ArgumentList argumentList) {
-    if (argumentList == null) {
-      return false;
-    }
-    bool problemReported = false;
-    for (Expression argument in argumentList.arguments) {
-      if (_checkForArgumentTypeNotAssignableForArgument(argument)) {
-        problemReported = true;
-      }
-    }
-    return problemReported;
-  }
-
-  /**
    * Given some [Element], look at the associated metadata and report the use of the member if
    * it is declared as deprecated.
    *
@@ -765,9 +670,8 @@ class BestPracticesVerifier extends RecursiveAstVisitor<Object> {
       } else if (displayName == FunctionElement.CALL_METHOD_NAME &&
           node is MethodInvocation &&
           node.staticInvokeType is InterfaceType) {
-        displayName = "${resolutionMap
-            .staticInvokeTypeForInvocationExpression(node)
-            .displayName}.${element.displayName}";
+        displayName =
+            "${resolutionMap.staticInvokeTypeForInvocationExpression(node).displayName}.${element.displayName}";
       }
       _errorReporter.reportErrorForNode(
           HintCode.DEPRECATED_MEMBER_USE, node, [displayName]);
@@ -801,7 +705,7 @@ class BestPracticesVerifier extends RecursiveAstVisitor<Object> {
         parent is HideCombinator) {
       return;
     }
-    _checkForDeprecatedMemberUse(identifier.bestElement, identifier);
+    _checkForDeprecatedMemberUse(identifier.staticElement, identifier);
   }
 
   /**
@@ -817,8 +721,8 @@ class BestPracticesVerifier extends RecursiveAstVisitor<Object> {
       return false;
     }
     // Return if the '/' operator is not defined in core, or if we don't know
-    // its static or propagated type
-    MethodElement methodElement = node.bestElement;
+    // its static type
+    MethodElement methodElement = node.staticElement;
     if (methodElement == null) {
       return false;
     }
@@ -988,7 +892,7 @@ class BestPracticesVerifier extends RecursiveAstVisitor<Object> {
         library.definingCompilationUnit.source.fullName.contains(_testDir) ||
         library.definingCompilationUnit.source.fullName.contains(_testingDir);
 
-    Element element = identifier.bestElement;
+    Element element = identifier.staticElement;
     if (!isProtected(element) && !isVisibleForTesting(element)) {
       return;
     }
@@ -1059,7 +963,7 @@ class BestPracticesVerifier extends RecursiveAstVisitor<Object> {
       return false;
     }
     // Test for, and then generate the hint
-    DartType bestRightType = rhs.bestType;
+    DartType bestRightType = rhs.staticType;
     if (leftType != null && bestRightType != null) {
       if (!_typeSystem.isAssignableTo(bestRightType, leftType,
           isDeclarationCast: true)) {
@@ -1147,33 +1051,52 @@ class BestPracticesVerifier extends RecursiveAstVisitor<Object> {
    * @return `true` if and only if a hint code is generated on the passed node
    * See [HintCode.MISSING_RETURN].
    */
-  void _checkForMissingReturn(TypeAnnotation returnType, FunctionBody body) {
-    // Check that the method or function has a return type, and a function body
-    if (returnType == null || body == null) {
-      return;
-    }
-    // Check that the body is a BlockFunctionBody
+  void _checkForMissingReturn(TypeAnnotation returnNode, FunctionBody body,
+      ExecutableElement element, AstNode functionNode) {
     if (body is BlockFunctionBody) {
+      // Prefer the type from the element model, in case we've inferred one.
+      DartType returnType = element?.returnType ?? returnNode?.type;
+      AstNode errorNode = returnNode ?? functionNode;
+
+      // Skip the check if we're missing a return type (e.g. erroneous code).
       // Generators are never required to have a return statement.
-      if (body.isGenerator) {
+      if (returnType == null || body.isGenerator) {
         return;
       }
-      // Check that the type is resolvable, and is not "void"
-      DartType returnTypeType = returnType.type;
-      if (returnTypeType == null ||
-          returnTypeType.isVoid ||
-          (body.isAsynchronous && _isFutureVoid(returnTypeType))) {
+
+      if (_typeSystem is StrongTypeSystemImpl) {
+        var flattenedType = body.isAsynchronous
+            ? returnType.flattenFutures(_typeSystem)
+            : returnType;
+
+        // dynamic/Null/void are allowed to omit a return.
+        if (flattenedType.isDynamic ||
+            flattenedType.isDartCoreNull ||
+            flattenedType.isVoid) {
+          return;
+        }
+        // Otherwise issue a warning if the block doesn't have a return.
+        if (!ExitDetector.exits(body)) {
+          _errorReporter.reportErrorForNode(
+              HintCode.MISSING_RETURN, errorNode, [returnType.displayName]);
+        }
+        return;
+      }
+
+      // TODO(leafp): Delete this non-strong mode path
+      // Check that the type is resolvable and not "void"
+      if (returnType.isVoid ||
+          (body.isAsynchronous && _isFutureVoid(returnType))) {
         return;
       }
       // For async, give no hint if the return type does not matter, i.e.
       // dynamic, Future<Null> or Future<dynamic>.
       if (body.isAsynchronous) {
-        if (returnTypeType.isDynamic) {
+        if (returnType.isDynamic) {
           return;
         }
-        if (returnTypeType is InterfaceType &&
-            returnTypeType.isDartAsyncFuture) {
-          DartType futureArgument = returnTypeType.typeArguments[0];
+        if (returnType is InterfaceType && returnType.isDartAsyncFuture) {
+          DartType futureArgument = returnType.typeArguments[0];
           if (futureArgument.isDynamic ||
               futureArgument.isDartCoreNull ||
               futureArgument.isVoid ||
@@ -1185,7 +1108,7 @@ class BestPracticesVerifier extends RecursiveAstVisitor<Object> {
       // Check the block for a return statement, if not, create the hint
       if (!ExitDetector.exits(body)) {
         _errorReporter.reportErrorForNode(
-            HintCode.MISSING_RETURN, returnType, [returnTypeType.displayName]);
+            HintCode.MISSING_RETURN, errorNode, [returnType.displayName]);
       }
     }
   }
@@ -4061,6 +3984,20 @@ class ImportsVerifier {
   final HashMap<ImportDirective, List<SimpleIdentifier>> _unusedShownNamesMap =
       new HashMap<ImportDirective, List<SimpleIdentifier>>();
 
+  /**
+   * A map of names that are hidden more than once.
+   */
+  final HashMap<NamespaceDirective, List<SimpleIdentifier>>
+      _duplicateHiddenNamesMap =
+      new HashMap<NamespaceDirective, List<SimpleIdentifier>>();
+
+  /**
+   * A map of names that are shown more than once.
+   */
+  final HashMap<NamespaceDirective, List<SimpleIdentifier>>
+      _duplicateShownNamesMap =
+      new HashMap<NamespaceDirective, List<SimpleIdentifier>>();
+
   void addImports(CompilationUnit node) {
     for (Directive directive in node.directives) {
       if (directive is ImportDirective) {
@@ -4089,6 +4026,9 @@ class ImportsVerifier {
           }
         }
         _addShownNames(directive);
+      }
+      if (directive is NamespaceDirective) {
+        _addDuplicateShownHiddenNames(directive);
       }
     }
     if (_unusedImports.length > 1) {
@@ -4129,6 +4069,37 @@ class ImportsVerifier {
       errorReporter.reportErrorForNode(
           HintCode.DUPLICATE_IMPORT, _duplicateImports[i].uri);
     }
+  }
+
+  /**
+   * Report a [HintCode.DUPLICATE_SHOWN_HIDDEN_NAME] hint for each duplicate
+   * shown or hidden name.
+   *
+   * Only call this method after all of the compilation units have been visited
+   * by this visitor.
+   *
+   * @param errorReporter the error reporter used to report the set of
+   *          [HintCode.UNUSED_SHOWN_NAME] hints
+   */
+  void generateDuplicateShownHiddenNameHints(ErrorReporter reporter) {
+    _duplicateHiddenNamesMap.forEach(
+        (NamespaceDirective directive, List<SimpleIdentifier> identifiers) {
+      int length = identifiers.length;
+      for (int i = 0; i < length; i++) {
+        Identifier identifier = identifiers[i];
+        reporter.reportErrorForNode(
+            HintCode.DUPLICATE_HIDDEN_NAME, identifier, [identifier.name]);
+      }
+    });
+    _duplicateShownNamesMap.forEach(
+        (NamespaceDirective directive, List<SimpleIdentifier> identifiers) {
+      int length = identifiers.length;
+      for (int i = 0; i < length; i++) {
+        Identifier identifier = identifiers[i];
+        reporter.reportErrorForNode(
+            HintCode.DUPLICATE_SHOWN_NAME, identifier, [identifier.name]);
+      }
+    });
   }
 
   /**
@@ -4222,6 +4193,43 @@ class ImportsVerifier {
         if (namespace?.get(name) != null) {
           _unusedImports.remove(importDirective);
           _removeFromUnusedShownNamesMap(element, importDirective);
+        }
+      }
+    }
+  }
+
+  /**
+   * Add duplicate shown and hidden names from [directive] into
+   * [_duplicateHiddenNamesMap] and [_duplicateShownNamesMap].
+   */
+  void _addDuplicateShownHiddenNames(NamespaceDirective directive) {
+    if (directive.combinators == null) {
+      return;
+    }
+    for (Combinator combinator in directive.combinators) {
+      // Use a Set to find duplicates in faster than O(n^2) time.
+      Set<Element> identifiers = new Set<Element>();
+      if (combinator is HideCombinator) {
+        for (SimpleIdentifier name in combinator.hiddenNames) {
+          if (name.staticElement != null) {
+            if (!identifiers.add(name.staticElement)) {
+              // [name] is a duplicate.
+              List<SimpleIdentifier> duplicateNames = _duplicateHiddenNamesMap
+                  .putIfAbsent(directive, () => new List<SimpleIdentifier>());
+              duplicateNames.add(name);
+            }
+          }
+        }
+      } else if (combinator is ShowCombinator) {
+        for (SimpleIdentifier name in combinator.shownNames) {
+          if (name.staticElement != null) {
+            if (!identifiers.add(name.staticElement)) {
+              // [name] is a duplicate.
+              List<SimpleIdentifier> duplicateNames = _duplicateShownNamesMap
+                  .putIfAbsent(directive, () => new List<SimpleIdentifier>());
+              duplicateNames.add(name);
+            }
+          }
         }
       }
     }
@@ -4570,8 +4578,7 @@ class InstanceFieldResolverVisitor extends ResolverVisitor {
       typeAnalyzer.thisType = enclosingClass?.type;
       if (enclosingClass == null) {
         AnalysisEngine.instance.logger.logInformation(
-            "Missing element for class declaration ${node.name
-                .name} in ${definingLibrary.source.fullName}",
+            "Missing element for class declaration ${node.name.name} in ${definingLibrary.source.fullName}",
             new CaughtException(new AnalysisException(), null));
         // Don't try to re-resolve the initializers if we cannot set up the
         // right name scope for resolution.
@@ -4973,11 +4980,6 @@ class ResolverVisitor extends ScopedVisitor {
   DartType _enclosingSwitchStatementExpressionType;
 
   /**
-   * Are we running in strong mode or not.
-   */
-  bool strongMode;
-
-  /**
    * Initialize a newly created visitor to resolve the nodes in an AST node.
    *
    * The [definingLibrary] is the element for the library containing the node
@@ -5002,7 +5004,6 @@ class ResolverVisitor extends ScopedVisitor {
       : super(definingLibrary, source, typeProvider, errorListener,
             nameScope: nameScope) {
     AnalysisOptions options = definingLibrary.context.analysisOptions;
-    this.strongMode = options.strongMode;
     this.elementResolver = new ElementResolver(this,
         reportConstEvaluationErrors: reportConstEvaluationErrors);
     this.typeSystem = definingLibrary.context.typeSystem;
@@ -5012,8 +5013,7 @@ class ResolverVisitor extends ScopedVisitor {
     }
     this.inferenceContext = new InferenceContext._(
         typeProvider, typeSystem, strongModeHints, errorReporter);
-    this.typeAnalyzer =
-        new StaticTypeAnalyzer(this, propagateTypes: propagateTypes);
+    this.typeAnalyzer = new StaticTypeAnalyzer(this);
   }
 
   /**
@@ -5037,28 +5037,6 @@ class ResolverVisitor extends ScopedVisitor {
    * @return the object keeping track of which elements have had their types promoted
    */
   TypePromotionManager get promoteManager => _promoteManager;
-
-  /**
-   * Return the propagated element associated with the given expression whose type can be
-   * overridden, or `null` if there is no element whose type can be overridden.
-   *
-   * @param expression the expression with which the element is associated
-   * @return the element associated with the given expression
-   */
-  VariableElement getOverridablePropagatedElement(Expression expression) {
-    Element element = null;
-    if (expression is SimpleIdentifier) {
-      element = expression.propagatedElement;
-    } else if (expression is PrefixedIdentifier) {
-      element = expression.propagatedElement;
-    } else if (expression is PropertyAccess) {
-      element = expression.propertyName.propagatedElement;
-    }
-    if (element is VariableElement) {
-      return element;
-    }
-    return null;
-  }
 
   /**
    * Return the static element associated with the given expression whose type can be overridden, or
@@ -5154,29 +5132,18 @@ class ResolverVisitor extends ScopedVisitor {
   }
 
   /**
-   * If it is appropriate to do so, override the current type of the static and propagated elements
+   * If it is appropriate to do so, override the current type of the static element
    * associated with the given expression with the given type. Generally speaking, it is appropriate
    * if the given type is more specific than the current type.
    *
-   * @param expression the expression used to access the static and propagated elements whose types
+   * @param expression the expression used to access the static element whose types
    *          might be overridden
    * @param potentialType the potential type of the elements
    * @param allowPrecisionLoss see @{code overrideVariable} docs
    */
   void overrideExpression(Expression expression, DartType potentialType,
       bool allowPrecisionLoss, bool setExpressionType) {
-    VariableElement element = getOverridableStaticElement(expression);
-    if (element != null) {
-      DartType newBestType =
-          overrideVariable(element, potentialType, allowPrecisionLoss);
-      if (setExpressionType) {
-        recordPropagatedTypeIfBetter(expression, newBestType);
-      }
-    }
-    element = getOverridablePropagatedElement(expression);
-    if (element != null) {
-      overrideVariable(element, potentialType, allowPrecisionLoss);
-    }
+    // TODO(brianwilkerson) Remove this method.
   }
 
   /**
@@ -5248,45 +5215,6 @@ class ResolverVisitor extends ScopedVisitor {
     _enclosingClassDeclaration = node;
     enclosingClass = node.element;
     typeAnalyzer.thisType = enclosingClass?.type;
-  }
-
-  /**
-   * If the given [type] is valid, strongly more specific than the
-   * existing static type of the given [expression], record it as a propagated
-   * type of the given [expression]. Otherwise, reset it to `null`.
-   *
-   * If [hasOldPropagatedType] is `true` then the existing propagated type
-   * should also is checked.
-   */
-  void recordPropagatedTypeIfBetter(Expression expression, DartType type,
-      [bool hasOldPropagatedType = false]) {
-    // Ensure that propagated type invalid.
-    if (strongMode ||
-        type == null ||
-        type.isBottom ||
-        type.isDynamic ||
-        type.isDartCoreNull) {
-      if (!hasOldPropagatedType) {
-        expression.propagatedType = null;
-      }
-      return;
-    }
-    // Ensure that propagated type is more specific than the static type.
-    DartType staticType = expression.staticType;
-    if (type == staticType || !type.isMoreSpecificThan(staticType)) {
-      expression.propagatedType = null;
-      return;
-    }
-    // Ensure that the new propagated type is more specific than the old one.
-    if (hasOldPropagatedType) {
-      DartType oldPropagatedType = expression.propagatedType;
-      if (oldPropagatedType != null &&
-          !type.isMoreSpecificThan(oldPropagatedType)) {
-        return;
-      }
-    }
-    // OK
-    expression.propagatedType = type;
   }
 
   /**
@@ -5366,16 +5294,6 @@ class ResolverVisitor extends ScopedVisitor {
       }
     }
     return super.visitArgumentList(node);
-  }
-
-  @override
-  Object visitAsExpression(AsExpression node) {
-    super.visitAsExpression(node);
-    // Since an as-statement doesn't actually change the type, we don't
-    // let it affect the propagated type when it would result in a loss
-    // of precision.
-    overrideExpression(node.expression, node.type.type, false, false);
-    return null;
   }
 
   @override
@@ -5776,6 +5694,7 @@ class ResolverVisitor extends ScopedVisitor {
     if (node.metadata != null) {
       node.metadata.accept(this);
       ElementResolver.resolveMetadata(node);
+      node.constants.forEach(ElementResolver.resolveMetadata);
     }
     //
     // Continue the enum resolution.
@@ -5896,8 +5815,6 @@ class ResolverVisitor extends ScopedVisitor {
             }
             if (propagatedType != null) {
               overrideVariable(loopElement, propagatedType, true);
-              recordPropagatedTypeIfBetter(
-                  loopVariable.identifier, propagatedType);
             }
           }
         } else if (identifier != null && iterable != null) {
@@ -5905,7 +5822,6 @@ class ResolverVisitor extends ScopedVisitor {
           if (identifierElement is VariableElement) {
             DartType iteratorElementType = _getIteratorElementType(iterable);
             overrideVariable(identifierElement, iteratorElementType, true);
-            recordPropagatedTypeIfBetter(identifier, iteratorElementType);
           }
         }
         visitStatementInScope(body);
@@ -6134,7 +6050,7 @@ class ResolverVisitor extends ScopedVisitor {
       if (targs.length == 1 && !targs[0].isDynamic) {
         listT = typeProvider.listType.instantiate([targs[0]]);
       }
-    } else if (strongMode) {
+    } else {
       listT = typeAnalyzer.inferListType(node, downwards: true);
     }
     if (listT != null) {
@@ -6158,7 +6074,7 @@ class ResolverVisitor extends ScopedVisitor {
       if (targs.length == 2 && targs.any((t) => !t.isDynamic)) {
         mapT = typeProvider.mapType.instantiate([targs[0], targs[1]]);
       }
-    } else if (strongMode) {
+    } else {
       mapT = typeAnalyzer.inferMapType(node, downwards: true);
     }
     if (mapT != null) {
@@ -6385,13 +6301,14 @@ class ResolverVisitor extends ScopedVisitor {
   }
 
   @override
-  visitVariableDeclarationList(VariableDeclarationList node) {
+  Object visitVariableDeclarationList(VariableDeclarationList node) {
     for (VariableDeclaration decl in node.variables) {
       VariableElement variableElement =
           resolutionMap.elementDeclaredByVariableDeclaration(decl);
       InferenceContext.setType(decl, variableElement?.type);
     }
     super.visitVariableDeclarationList(node);
+    return null;
   }
 
   @override
@@ -6557,7 +6474,7 @@ class ResolverVisitor extends ScopedVisitor {
    * that will return the Iterable being iterated over.
    */
   DartType _getIteratorElementType(Expression iteratorExpression) {
-    DartType expressionType = iteratorExpression.bestType;
+    DartType expressionType = iteratorExpression.staticType;
     if (expressionType is InterfaceType) {
       PropertyAccessorElement iteratorFunction =
           expressionType.lookUpInheritedGetter("iterator");
@@ -6587,7 +6504,7 @@ class ResolverVisitor extends ScopedVisitor {
    * is the expression that will return the stream being iterated over.
    */
   DartType _getStreamElementType(Expression streamExpression) {
-    DartType streamType = streamExpression.bestType;
+    DartType streamType = streamExpression.staticType;
     if (streamType is InterfaceType) {
       MethodElement listenFunction = streamType.lookUpInheritedMethod("listen");
       if (listenFunction == null) {
@@ -6649,7 +6566,7 @@ class ResolverVisitor extends ScopedVisitor {
   void _inferArgumentTypesForInstanceCreate(InstanceCreationExpression node) {
     ConstructorName constructor = node.constructorName;
     TypeName classTypeName = constructor?.type;
-    if (classTypeName == null || !strongMode) {
+    if (classTypeName == null) {
       return;
     }
 
@@ -6709,11 +6626,6 @@ class ResolverVisitor extends ScopedVisitor {
   }
 
   void _inferArgumentTypesForInvocation(InvocationExpression node) {
-    if (!strongMode) {
-      // Use propagated type inference for lambdas if not in strong mode.
-      _inferFunctionExpressionsParametersTypes(node.argumentList);
-      return;
-    }
     DartType inferred = _inferArgumentTypesForGeneric(
         node, node.function.staticType, node.typeArguments);
     InferenceContext.setType(
@@ -6739,75 +6651,6 @@ class ResolverVisitor extends ScopedVisitor {
       // To get this right, we'd have to delay reporting until we have the
       // complete type including return type.
       inferenceContext.recordInference(node.parent, type);
-    }
-  }
-
-  /**
-   * If given "mayBeClosure" is [FunctionExpression] without explicit parameters types and its
-   * required type is [FunctionType], then infer parameters types from [FunctionType].
-   */
-  void _inferFunctionExpressionParametersTypes(
-      Expression mayBeClosure, DartType mayByFunctionType) {
-    // prepare closure
-    if (mayBeClosure is! FunctionExpression) {
-      return;
-    }
-    FunctionExpression closure = mayBeClosure as FunctionExpression;
-    // prepare expected closure type
-    if (mayByFunctionType is! FunctionType) {
-      return;
-    }
-    FunctionType expectedClosureType = mayByFunctionType as FunctionType;
-    // If the expectedClosureType is not more specific than the static type,
-    // return.
-    DartType staticClosureType =
-        resolutionMap.elementDeclaredByFunctionExpression(closure)?.type;
-    if (staticClosureType != null &&
-        !FunctionTypeImpl.relate(
-            expectedClosureType,
-            staticClosureType,
-            (s, t) => true,
-            new TypeSystemImpl(typeProvider).instantiateToBounds,
-            parameterRelation: (t, s) =>
-                (t.type as TypeImpl).isMoreSpecificThan(s.type))) {
-      return;
-    }
-    // set propagated type for the closure
-    if (!strongMode) {
-      closure.propagatedType = expectedClosureType;
-    }
-    // set inferred types for parameters
-    NodeList<FormalParameter> parameters = closure.parameters.parameters;
-    List<ParameterElement> expectedParameters = expectedClosureType.parameters;
-    for (int i = 0;
-        i < parameters.length && i < expectedParameters.length;
-        i++) {
-      FormalParameter parameter = parameters[i];
-      ParameterElement element = parameter.element;
-      DartType currentType = _overrideManager.getBestType(element);
-      // may be override the type
-      DartType expectedType = expectedParameters[i].type;
-      if (currentType == null || expectedType.isMoreSpecificThan(currentType)) {
-        _overrideManager.setType(element, expectedType);
-      }
-    }
-  }
-
-  /**
-   * Try to infer types of parameters of the [FunctionExpression] arguments.
-   */
-  void _inferFunctionExpressionsParametersTypes(ArgumentList argumentList) {
-    NodeList<Expression> arguments = argumentList.arguments;
-    int length = arguments.length;
-    for (int i = 0; i < length; i++) {
-      Expression argument = arguments[i];
-      ParameterElement parameter = argument.propagatedParameterElement;
-      if (parameter == null) {
-        parameter = argument.staticParameterElement;
-      }
-      if (parameter != null) {
-        _inferFunctionExpressionParametersTypes(argument, parameter.type);
-      }
     }
   }
 
@@ -6976,14 +6819,6 @@ class ResolverVisitor extends ScopedVisitor {
         _propagateFalseState(condition.leftOperand);
         _propagateFalseState(condition.rightOperand);
       }
-    } else if (condition is IsExpression) {
-      if (condition.notOperator != null) {
-        // Since an is-statement doesn't actually change the type, we don't
-        // let it affect the propagated type when it would result in a loss
-        // of precision.
-        overrideExpression(
-            condition.expression, condition.type.type, false, false);
-      }
     } else if (condition is PrefixExpression) {
       if (condition.operator.type == TokenType.BANG) {
         _propagateTrueState(condition.operand);
@@ -7014,14 +6849,6 @@ class ResolverVisitor extends ScopedVisitor {
       if (condition.operator.type == TokenType.AMPERSAND_AMPERSAND) {
         _propagateTrueState(condition.leftOperand);
         _propagateTrueState(condition.rightOperand);
-      }
-    } else if (condition is IsExpression) {
-      if (condition.notOperator == null) {
-        // Since an is-statement doesn't actually change the type, we don't
-        // let it affect the propagated type when it would result in a loss
-        // of precision.
-        overrideExpression(
-            condition.expression, condition.type.type, false, false);
       }
     } else if (condition is PrefixExpression) {
       if (condition.operator.type == TokenType.BANG) {
@@ -7303,8 +7130,7 @@ abstract class ScopedVisitor extends UnifyingAstVisitor<Object> {
     try {
       if (classElement == null) {
         AnalysisEngine.instance.logger.logInformation(
-            "Missing element for class declaration ${node.name
-                .name} in ${definingLibrary.source.fullName}",
+            "Missing element for class declaration ${node.name.name} in ${definingLibrary.source.fullName}",
             new CaughtException(new AnalysisException(), null));
         super.visitClassDeclaration(node);
       } else {
@@ -7432,8 +7258,7 @@ abstract class ScopedVisitor extends UnifyingAstVisitor<Object> {
     try {
       if (classElement == null) {
         AnalysisEngine.instance.logger.logInformation(
-            "Missing element for enum declaration ${node.name
-                .name} in ${definingLibrary.source.fullName}",
+            "Missing element for enum declaration ${node.name.name} in ${definingLibrary.source.fullName}",
             new CaughtException(new AnalysisException(), null));
         super.visitEnumDeclaration(node);
       } else {
@@ -7549,8 +7374,7 @@ abstract class ScopedVisitor extends UnifyingAstVisitor<Object> {
     try {
       if (functionElement == null) {
         AnalysisEngine.instance.logger.logInformation(
-            "Missing element for top-level function ${node.name
-                .name} in ${definingLibrary.source.fullName}",
+            "Missing element for top-level function ${node.name.name} in ${definingLibrary.source.fullName}",
             new CaughtException(new AnalysisException(), null));
       } else {
         nameScope = new FunctionScope(nameScope, functionElement);
@@ -7626,8 +7450,7 @@ abstract class ScopedVisitor extends UnifyingAstVisitor<Object> {
       ParameterElement parameterElement = node.element;
       if (parameterElement == null) {
         AnalysisEngine.instance.logger.logInformation(
-            "Missing element for function typed formal parameter ${node
-                .identifier.name} in ${definingLibrary.source.fullName}",
+            "Missing element for function typed formal parameter ${node.identifier.name} in ${definingLibrary.source.fullName}",
             new CaughtException(new AnalysisException(), null));
       } else {
         nameScope = new EnclosedScope(nameScope);
@@ -7728,8 +7551,7 @@ abstract class ScopedVisitor extends UnifyingAstVisitor<Object> {
       ExecutableElement methodElement = node.element;
       if (methodElement == null) {
         AnalysisEngine.instance.logger.logInformation(
-            "Missing element for method ${node.name.name} in ${definingLibrary
-                .source.fullName}",
+            "Missing element for method ${node.name.name} in ${definingLibrary.source.fullName}",
             new CaughtException(new AnalysisException(), null));
       } else {
         nameScope = new FunctionScope(nameScope, methodElement);
@@ -8144,16 +7966,6 @@ class TypeNameResolver {
       // neither of which are in the name scope and hence will not be found by
       // normal means.
       //
-      if (typeName.name == dynamicType.name) {
-        _setElement(typeName, dynamicType.element);
-//        if (argumentList != null) {
-//          // TODO(brianwilkerson) Report this error
-//          reporter.reportError(StaticTypeWarningCode.WRONG_NUMBER_OF_TYPE_ARGUMENTS, node, dynamicType.getName(), 0, argumentList.getArguments().size());
-//        }
-        typeName.staticType = dynamicType;
-        node.type = dynamicType;
-        return;
-      }
       VoidTypeImpl voidType = VoidTypeImpl.instance;
       if (typeName.name == voidType.name) {
         // There is no element for 'void'.
@@ -8324,6 +8136,17 @@ class TypeNameResolver {
         return;
       }
       _setElement(typeName, element);
+    } else if (element is TypeDefiningElement &&
+        element.kind == ElementKind.DYNAMIC) {
+//      if (argumentList != null) {
+//        // Type parameters cannot have type arguments.
+//        // TODO(mfairhurst) Report this error.
+//        resolver.reportError(ResolverErrorCode.?, keyType);
+//      }
+      _setElement(typeName, element);
+      typeName.staticType = element.type;
+      node.type = element.type;
+      return;
     } else if (element is FunctionTypeAliasElement) {
       _setElement(typeName, element);
       type = element.type;
@@ -8475,21 +8298,6 @@ class TypeNameResolver {
     DartType type = annotation.type;
     if (type == null) {
       return undefinedType;
-    } else if (type is FunctionType) {
-      Element element = type.element;
-      if (annotation is TypeName && element is GenericTypeAliasElementImpl) {
-        TypeArgumentList argumentList = annotation.typeArguments;
-        List<DartType> typeArguments = null;
-        if (argumentList != null) {
-          List<TypeAnnotation> arguments = argumentList.arguments;
-          int argumentCount = arguments.length;
-          typeArguments = new List<DartType>(argumentCount);
-          for (int i = 0; i < argumentCount; i++) {
-            typeArguments[i] = _getType(arguments[i]);
-          }
-        }
-        return element.typeAfterSubstitution(typeArguments) ?? dynamicType;
-      }
     }
     return type;
   }
@@ -8758,9 +8566,6 @@ class TypeOverrideManager {
   /**
    * Update overrides assuming [perBranchOverrides] is the collection of
    * per-branch overrides for *all* branches flowing into a join point.
-   *
-   * If a variable type in any of branches is not the same as its type before
-   * the branching, then its propagated type is reset to `null`.
    */
   void mergeOverrides(List<Map<VariableElement, DartType>> perBranchOverrides) {
     int length = perBranchOverrides.length;
@@ -8903,7 +8708,10 @@ class TypeParameterBoundsResolver {
   TypeNameResolver typeNameResolver = null;
 
   TypeParameterBoundsResolver(
-      this.typeSystem, this.library, this.source, this.errorListener);
+      this.typeSystem, this.library, this.source, this.errorListener)
+      : libraryScope = new LibraryScope(library),
+        typeNameResolver = new TypeNameResolver(typeSystem,
+            typeSystem.typeProvider, library, source, errorListener);
 
   /**
    * Resolve bounds of type parameters of classes, class and function type
@@ -8930,27 +8738,40 @@ class TypeParameterBoundsResolver {
       typeNameResolver.resolveTypeName(type);
       // TODO(scheglov) report error when don't apply type bounds for type bounds
     } else if (type is GenericFunctionType) {
-      void resolveTypeParameter(TypeParameter t) {
-        _resolveTypeName(t.bound);
-      }
+      // While GenericFunctionTypes with free types are not allowed as bounds,
+      // those free types *should* ideally be recognized as type parameter types
+      // rather than classnames. Create a scope to accomplish that.
+      Scope previousScope = typeNameResolver.nameScope;
 
-      void resolveParameter(FormalParameter p) {
-        if (p is SimpleFormalParameter) {
-          _resolveTypeName(p.type);
-        } else if (p is DefaultFormalParameter) {
-          resolveParameter(p.parameter);
-        } else if (p is FieldFormalParameter) {
-          _resolveTypeName(p.type);
-        } else if (p is FunctionTypedFormalParameter) {
-          _resolveTypeName(p.returnType);
-          p.typeParameters?.typeParameters?.forEach(resolveTypeParameter);
-          p.parameters?.parameters?.forEach(resolveParameter);
+      try {
+        Scope typeParametersScope = new TypeParameterScope(
+            typeNameResolver.nameScope, type.type.element);
+        typeNameResolver.nameScope = typeParametersScope;
+
+        void resolveTypeParameter(TypeParameter t) {
+          _resolveTypeName(t.bound);
         }
-      }
 
-      _resolveTypeName(type.returnType);
-      type.typeParameters?.typeParameters?.forEach(resolveTypeParameter);
-      type.parameters?.parameters?.forEach(resolveParameter);
+        void resolveParameter(FormalParameter p) {
+          if (p is SimpleFormalParameter) {
+            _resolveTypeName(p.type);
+          } else if (p is DefaultFormalParameter) {
+            resolveParameter(p.parameter);
+          } else if (p is FieldFormalParameter) {
+            _resolveTypeName(p.type);
+          } else if (p is FunctionTypedFormalParameter) {
+            _resolveTypeName(p.returnType);
+            p.typeParameters?.typeParameters?.forEach(resolveTypeParameter);
+            p.parameters?.parameters?.forEach(resolveParameter);
+          }
+        }
+
+        _resolveTypeName(type.returnType);
+        type.typeParameters?.typeParameters?.forEach(resolveTypeParameter);
+        type.parameters?.parameters?.forEach(resolveParameter);
+      } finally {
+        typeNameResolver.nameScope = previousScope;
+      }
     }
   }
 
@@ -8971,10 +8792,10 @@ class TypeParameterBoundsResolver {
                 bound.type = typeParameterElement.bound;
               }
             } else {
-              libraryScope ??= new LibraryScope(library);
               typeParametersScope ??= createTypeParametersScope();
-              typeNameResolver ??= new TypeNameResolver(typeSystem,
-                  typeSystem.typeProvider, library, source, errorListener);
+              // _resolveTypeParameters is the entry point into each declaration
+              // with a separate scope. We can safely, and should, clobber the
+              // old scope here.
               typeNameResolver.nameScope = typeParametersScope;
               _resolveTypeName(bound);
               typeParameterElement.bound = bound.type;
@@ -9666,7 +9487,7 @@ class TypeResolverVisitor extends ScopedVisitor {
   /**
    * True if we're analyzing in strong mode.
    */
-  bool _strongMode;
+  final bool _strongMode = true;
 
   /**
    * Type type system in use for this resolver pass.
@@ -9713,7 +9534,6 @@ class TypeResolverVisitor extends ScopedVisitor {
             nameScope: nameScope) {
     _dynamicType = typeProvider.dynamicType;
     _undefinedType = typeProvider.undefinedType;
-    _strongMode = definingLibrary.context.analysisOptions.strongMode;
     _typeSystem = TypeSystem.create(definingLibrary.context);
     _typeNameResolver = new TypeNameResolver(
         _typeSystem, typeProvider, definingLibrary, source, errorListener);
@@ -10380,6 +10200,10 @@ class TypeResolverVisitor extends ScopedVisitor {
     // If the type is not an InterfaceType, then visitTypeName() sets the type
     // to be a DynamicTypeImpl
     Identifier name = typeName.name;
+    // TODO(mfairhurst) differentiate between dynamic via clean path, and error
+    // types, and then check `type.isDynamic`. However, if we do that now, then
+    // [nonTypeError] will never be reported because non types are resolved to
+    // dynamic.
     if (name.name == Keyword.DYNAMIC.lexeme) {
       errorReporter.reportErrorForNode(dynamicTypeError, name, [name.name]);
     } else if (!nameScope.shouldIgnoreUndefined(name)) {

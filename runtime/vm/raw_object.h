@@ -68,7 +68,6 @@ typedef RawObject* RawCompressed;
   V(Integer)                                                                   \
   V(Smi)                                                                       \
   V(Mint)                                                                      \
-  V(Bigint)                                                                    \
   V(Double)                                                                    \
   V(Bool)                                                                      \
   V(GrowableObjectArray)                                                       \
@@ -624,28 +623,20 @@ class RawObject {
 
   template <class TagBitField>
   void UpdateTagBit(bool value) {
-    uint32_t tags = ptr()->tags_;
-    uint32_t old_tags;
-    do {
-      old_tags = tags;
-      uint32_t new_tags = TagBitField::update(value, old_tags);
-      tags = AtomicOperations::CompareAndSwapUint32(&ptr()->tags_, old_tags,
-                                                    new_tags);
-    } while (tags != old_tags);
+    if (value) {
+      AtomicOperations::FetchOrRelaxedUint32(&ptr()->tags_,
+                                             TagBitField::encode(true));
+    } else {
+      AtomicOperations::FetchAndRelaxedUint32(&ptr()->tags_,
+                                              ~TagBitField::encode(true));
+    }
   }
 
   template <class TagBitField>
   bool TryAcquireTagBit() {
-    uint32_t tags = ptr()->tags_;
-    uint32_t old_tags;
-    do {
-      old_tags = tags;
-      if (TagBitField::decode(tags)) return false;
-      uint32_t new_tags = TagBitField::update(true, old_tags);
-      tags = AtomicOperations::CompareAndSwapUint32(&ptr()->tags_, old_tags,
-                                                    new_tags);
-    } while (tags != old_tags);
-    return true;
+    uint32_t old_tags = AtomicOperations::FetchOrRelaxedUint32(
+        &ptr()->tags_, TagBitField::encode(true));
+    return !TagBitField::decode(old_tags);
   }
 
   // All writes to heap objects should ultimately pass through one of the
@@ -677,7 +668,6 @@ class RawObject {
   friend class Array;
   friend class Become;  // GetClassId
   friend class CompactorTask;  // GetClassId
-  friend class Bigint;
   friend class ByteBuffer;
   friend class CidRewriteVisitor;
   friend class Closure;
@@ -834,7 +824,7 @@ class RawPatchClass : public RawObject {
   RawClass* patched_class_;
   RawClass* origin_class_;
   RawScript* script_;
-  RawTypedData* library_kernel_data_;
+  RawExternalTypedData* library_kernel_data_;
   VISIT_TO(RawObject*, library_kernel_data_);
 
   RawObject** to_snapshot(Snapshot::Kind kind) {
@@ -877,6 +867,9 @@ class RawFunction : public RawObject {
     kNoSuchMethodDispatcher,  // invokes noSuchMethod.
     kInvokeFieldDispatcher,   // invokes a field as a closure.
     kIrregexpFunction,  // represents a generated irregexp matcher function.
+    kDynamicInvocationForwarder,  // represents forwarder which performs type
+                                  // checks for arguments of a dynamic
+                                  // invocation.
   };
 
   enum AsyncModifier {
@@ -1048,7 +1041,6 @@ class RawField : public RawObject {
   } initializer_;
   RawSmi* guarded_list_length_;
   RawArray* dependent_code_;
-  VISIT_TO(RawObject*, dependent_code_);
   RawObject** to_snapshot(Snapshot::Kind kind) {
     switch (kind) {
       case Snapshot::kFull:
@@ -1066,7 +1058,12 @@ class RawField : public RawObject {
     UNREACHABLE();
     return NULL;
   }
-
+#if defined(DART_USE_INTERPRETER)
+  RawSubtypeTestCache* type_test_cache_;  // For type test in implicit setter.
+  VISIT_TO(RawObject*, type_test_cache_);
+#else
+  VISIT_TO(RawObject*, dependent_code_);
+#endif
   TokenPosition token_pos_;
   TokenPosition end_token_pos_;
   classid_t guarded_cid_;
@@ -1178,7 +1175,7 @@ class RawLibrary : public RawObject {
   RawArray* imports_;        // List of Namespaces imported without prefix.
   RawArray* exports_;        // List of re-exported Namespaces.
   RawInstance* load_error_;  // Error iff load_state_ == kLoadError.
-  RawTypedData* kernel_data_;
+  RawExternalTypedData* kernel_data_;
   RawObject** to_snapshot(Snapshot::Kind kind) {
     switch (kind) {
       case Snapshot::kFullAOT:
@@ -1234,10 +1231,10 @@ class RawKernelProgramInfo : public RawObject {
 
   VISIT_FROM(RawObject*, string_offsets_);
   RawTypedData* string_offsets_;
-  RawTypedData* string_data_;
+  RawExternalTypedData* string_data_;
   RawTypedData* canonical_names_;
-  RawTypedData* metadata_payloads_;
-  RawTypedData* metadata_mappings_;
+  RawExternalTypedData* metadata_payloads_;
+  RawExternalTypedData* metadata_mappings_;
   RawArray* scripts_;
   RawArray* constants_;
   RawGrowableObjectArray* potential_natives_;
@@ -1670,8 +1667,10 @@ class RawICData : public RawObject {
   NOT_IN_PRECOMPILED(int32_t deopt_id_);
   uint32_t state_bits_;  // Number of arguments tested in IC, deopt reasons.
 #if defined(TAG_IC_DATA)
-  intptr_t tag_;  // Debugging, verifying that the icdata is assigned to the
-                  // same instruction again. Store -1 or Instruction::Tag.
+  enum class Tag : intptr_t{kUnknown, kInstanceCall, kStaticCall};
+
+  Tag tag_;  // Debugging, verifying that the icdata is assigned to the
+             // same instruction again.
 #endif
 };
 
@@ -1811,6 +1810,13 @@ class RawAbstractType : public RawInstance {
     kFinalizedInstantiated,    // Instantiated type ready for use.
     kFinalizedUninstantiated,  // Uninstantiated type ready for use.
   };
+
+  // Note: we don't handle this field in GC in any special way.
+  // Instead we rely on two things:
+  //   (1) GC not moving code objects and
+  //   (2) lifetime of optimized stubs exceeding that of types;
+  // Practically (2) means that optimized stubs never die because
+  // canonical types to which they are attached never die.
   uword type_test_stub_entry_point_;  // Accessed from generated code.
 
  private:
@@ -1962,16 +1968,6 @@ class RawMint : public RawInteger {
 };
 COMPILE_ASSERT(sizeof(RawMint) == 16);
 
-class RawBigint : public RawInteger {
-  RAW_HEAP_OBJECT_IMPLEMENTATION(Bigint);
-
-  VISIT_FROM(RawObject*, neg_)
-  RawBool* neg_;
-  RawSmi* used_;
-  RawTypedData* digits_;
-  VISIT_TO(RawObject*, digits_)
-};
-
 class RawDouble : public RawNumber {
   RAW_HEAP_OBJECT_IMPLEMENTATION(Double);
   VISIT_NOTHING();
@@ -2032,36 +2028,11 @@ class RawTwoByteString : public RawString {
   friend class String;
 };
 
-template <typename T>
-class ExternalStringData {
- public:
-  ExternalStringData(const T* data, void* peer, Dart_PeerFinalizer callback)
-      : data_(data), peer_(peer), callback_(callback) {}
-  ~ExternalStringData() {
-    if (callback_ != NULL) (*callback_)(peer_);
-  }
-
-  const T* data() { return data_; }
-  void* peer() { return peer_; }
-
-  static intptr_t data_offset() {
-    return OFFSET_OF(ExternalStringData<T>, data_);
-  }
-
- private:
-  const T* data_;
-  void* peer_;
-  Dart_PeerFinalizer callback_;
-};
-
 class RawExternalOneByteString : public RawString {
   RAW_HEAP_OBJECT_IMPLEMENTATION(ExternalOneByteString);
 
- public:
-  typedef ExternalStringData<uint8_t> ExternalData;
-
- private:
-  ExternalData* external_data_;
+  const uint8_t* external_data_;
+  void* peer_;
   friend class Api;
   friend class String;
 };
@@ -2069,11 +2040,8 @@ class RawExternalOneByteString : public RawString {
 class RawExternalTwoByteString : public RawString {
   RAW_HEAP_OBJECT_IMPLEMENTATION(ExternalTwoByteString);
 
- public:
-  typedef ExternalStringData<uint16_t> ExternalData;
-
- private:
-  ExternalData* external_data_;
+  const uint16_t* external_data_;
+  void* peer_;
   friend class Api;
   friend class String;
 };
@@ -2375,17 +2343,14 @@ inline bool RawObject::IsErrorClassId(intptr_t index) {
 inline bool RawObject::IsNumberClassId(intptr_t index) {
   // Make sure this function is updated when new Number types are added.
   COMPILE_ASSERT(kIntegerCid == kNumberCid + 1 && kSmiCid == kNumberCid + 2 &&
-                 kMintCid == kNumberCid + 3 && kBigintCid == kNumberCid + 4 &&
-                 kDoubleCid == kNumberCid + 5);
-  return (index >= kNumberCid && index < kBoolCid);
+                 kMintCid == kNumberCid + 3 && kDoubleCid == kNumberCid + 4);
+  return (index >= kNumberCid && index <= kDoubleCid);
 }
 
 inline bool RawObject::IsIntegerClassId(intptr_t index) {
   // Make sure this function is updated when new Integer types are added.
-  COMPILE_ASSERT(kSmiCid == kIntegerCid + 1 && kMintCid == kIntegerCid + 2 &&
-                 kBigintCid == kIntegerCid + 3 &&
-                 kDoubleCid == kIntegerCid + 4);
-  return (index >= kIntegerCid && index < kDoubleCid);
+  COMPILE_ASSERT(kSmiCid == kIntegerCid + 1 && kMintCid == kIntegerCid + 2);
+  return (index >= kIntegerCid && index <= kMintCid);
 }
 
 inline bool RawObject::IsStringClassId(intptr_t index) {

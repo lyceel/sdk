@@ -447,6 +447,8 @@ const char* RangeBoundary::ToCString() const {
   return Thread::Current()->zone()->MakeCopyOfString(buffer);
 }
 
+void MakeTempInstr::PrintOperandsTo(BufferFormatter* f) const {}
+
 void DropTempsInstr::PrintOperandsTo(BufferFormatter* f) const {
   f->Print("%" Pd "", num_temps());
   if (value() != NULL) {
@@ -561,11 +563,11 @@ void StaticCallInstr::PrintOperandsTo(BufferFormatter* f) const {
 }
 
 void LoadLocalInstr::PrintOperandsTo(BufferFormatter* f) const {
-  f->Print("%s @%d", local().name().ToCString(), local().index());
+  f->Print("%s @%d", local().name().ToCString(), local().index().value());
 }
 
 void StoreLocalInstr::PrintOperandsTo(BufferFormatter* f) const {
-  f->Print("%s @%d, ", local().name().ToCString(), local().index());
+  f->Print("%s @%d, ", local().name().ToCString(), local().index().value());
   value()->PrintTo(f);
 }
 
@@ -589,6 +591,7 @@ void StoreInstanceFieldInstr::PrintOperandsTo(BufferFormatter* f) const {
   instance()->PrintTo(f);
   f->Print(", ");
   value()->PrintTo(f);
+  if (!ShouldEmitStoreBarrier()) f->Print(", barrier removed");
 }
 
 void IfThenElseInstr::PrintOperandsTo(BufferFormatter* f) const {
@@ -647,7 +650,7 @@ void LoadFieldInstr::PrintOperandsTo(BufferFormatter* f) const {
   instance()->PrintTo(f);
   f->Print(", %" Pd, offset_in_bytes());
 
-  if (field() != NULL) {
+  if (field() != nullptr) {
     f->Print(" {%s}", String::Handle(field()->name()).ToCString());
     const char* expected = "?";
     if (field()->guarded_cid() != kIllegalCid) {
@@ -660,7 +663,13 @@ void LoadFieldInstr::PrintOperandsTo(BufferFormatter* f) const {
              expected);
   }
 
-  f->Print(", immutable=%d", immutable_);
+  if (native_field() != nullptr) {
+    f->Print(" {%s}", native_field()->name());
+  }
+
+  if (immutable_) {
+    f->Print(", immutable");
+  }
 }
 
 void InstantiateTypeInstr::PrintOperandsTo(BufferFormatter* f) const {

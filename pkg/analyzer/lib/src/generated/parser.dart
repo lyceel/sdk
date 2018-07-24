@@ -24,7 +24,6 @@ import 'package:analyzer/src/generated/java_core.dart';
 import 'package:analyzer/src/generated/java_engine.dart';
 import 'package:analyzer/src/generated/source.dart';
 import 'package:analyzer/src/generated/utilities_dart.dart';
-import 'package:front_end/src/fasta/kernel/kernel_builder.dart';
 import 'package:front_end/src/fasta/parser/identifier_context.dart' as fasta;
 import 'package:front_end/src/fasta/parser/member_kind.dart' as fasta;
 import 'package:front_end/src/fasta/parser/parser.dart' as fasta;
@@ -213,7 +212,7 @@ class Parser {
    * A flag indicating whether the parser should parse instance creation
    * expressions that lack either the `new` or `const` keyword.
    */
-  bool _enableOptionalNewAndConst = false;
+  bool _enableOptionalNewAndConst = true;
 
   /**
    * A flag indicating whether parser is to parse function bodies.
@@ -4638,7 +4637,7 @@ class Parser {
       Token token = getAndAdvance();
       int value = null;
       try {
-        value = int.parse(token.lexeme.substring(2), radix: 16);
+        value = int.parse(token.lexeme);
       } on FormatException {
         // The invalid format should have been reported by the scanner.
       }

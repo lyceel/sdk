@@ -19,7 +19,10 @@
 #include "vm/debugger.h"
 #include "vm/deopt_instructions.h"
 #include "vm/flags.h"
-#include "vm/heap.h"
+#include "vm/heap/heap.h"
+#include "vm/heap/safepoint.h"
+#include "vm/heap/store_buffer.h"
+#include "vm/heap/verifier.h"
 #include "vm/image_snapshot.h"
 #include "vm/interpreter.h"
 #include "vm/isolate_reload.h"
@@ -34,13 +37,11 @@
 #include "vm/port.h"
 #include "vm/profiler.h"
 #include "vm/reusable_handles.h"
-#include "vm/safepoint.h"
 #include "vm/service.h"
 #include "vm/service_event.h"
 #include "vm/service_isolate.h"
 #include "vm/simulator.h"
 #include "vm/stack_frame.h"
-#include "vm/store_buffer.h"
 #include "vm/stub_code.h"
 #include "vm/symbols.h"
 #include "vm/tags.h"
@@ -49,7 +50,6 @@
 #include "vm/timeline.h"
 #include "vm/timeline_analysis.h"
 #include "vm/timer.h"
-#include "vm/verifier.h"
 #include "vm/visitor.h"
 
 namespace dart {
@@ -84,13 +84,15 @@ DEFINE_FLAG_HANDLER(CheckedModeHandler, checked, "Enable checked mode.");
 
 static void DeterministicModeHandler(bool value) {
   if (value) {
-    FLAG_background_compilation = false;
-    FLAG_collect_code = false;
+    FLAG_background_compilation = false;  // Timing dependent.
+    FLAG_collect_code = false;            // Timing dependent.
     FLAG_random_seed = 0x44617274;  // "Dart"
 #if !defined(PRODUCT) && !defined(DART_PRECOMPILED_RUNTIME)
     FLAG_load_deferred_eagerly = true;
+    FLAG_print_stop_message = false;  // Embedds addresses in instructions.
 #else
     COMPILE_ASSERT(FLAG_load_deferred_eagerly);
+    COMPILE_ASSERT(!FLAG_print_stop_message);
 #endif
   }
 }
@@ -698,7 +700,7 @@ static MessageHandler::MessageStatus StoreError(Thread* thread,
 MessageHandler::MessageStatus IsolateMessageHandler::ProcessUnhandledException(
     const Error& result) {
   if (FLAG_trace_isolates) {
-    OS::Print(
+    OS::PrintErr(
         "[!] Unhandled exception in %s:\n"
         "         exception: %s\n",
         T->isolate()->name(), result.ToErrorCString());
@@ -801,6 +803,8 @@ void Isolate::FlagsCopyFrom(const Dart_IsolateFlags& api_flags) {
 #define FLAG_FOR_NONPRODUCT(action)
 #endif
 
+#define FLAG_FOR_PRODUCT(action) action
+
 #define SET_FROM_FLAG(when, name, bitname, isolate_flag, flag)                 \
   FLAG_FOR_##when(isolate_flags_ = bitname##Bit::update(                       \
                       api_flags.isolate_flag, isolate_flags_));
@@ -809,6 +813,7 @@ void Isolate::FlagsCopyFrom(const Dart_IsolateFlags& api_flags) {
 
 #undef FLAG_FOR_NONPRODUCT
 #undef FLAG_FOR_PRECOMPILER
+#undef FLAG_FOR_PRODUCT
 #undef SET_FROM_FLAG
 
   set_use_dart_frontend(api_flags.use_dart_frontend);
@@ -1061,8 +1066,7 @@ Isolate* Isolate::Init(const char* name_prefix,
                  : FLAG_new_gen_semi_max_size * MBInWords,
              (is_service_or_kernel_isolate ? kDefaultMaxOldGenHeapSize
                                            : FLAG_old_gen_heap_size) *
-                 MBInWords,
-             FLAG_external_max_size * MBInWords);
+                 MBInWords);
 
   // TODO(5411455): For now just set the recently created isolate as
   // the current isolate.
@@ -1100,7 +1104,7 @@ Isolate* Isolate::Init(const char* name_prefix,
 #endif
   if (FLAG_trace_isolates) {
     if (name_prefix == NULL || strcmp(name_prefix, "vm-isolate") != 0) {
-      OS::Print(
+      OS::PrintErr(
           "[+] Starting isolate:\n"
           "\tisolate:    %s\n",
           result->name());
@@ -1761,7 +1765,7 @@ void Isolate::LowLevelShutdown() {
   }
   if (FLAG_trace_isolates) {
     heap()->PrintSizes();
-    OS::Print(
+    OS::PrintErr(
         "[-] Stopping isolate:\n"
         "\tisolate:    %s\n",
         name());
@@ -1822,7 +1826,7 @@ void Isolate::Shutdown() {
     if (FLAG_support_compiler_stats && FLAG_compiler_stats &&
         !ServiceIsolate::IsServiceIsolateDescendant(this) &&
         (this != Dart::vm_isolate())) {
-      OS::Print("%s", aggregate_compiler_stats()->PrintToZone());
+      OS::PrintErr("%s", aggregate_compiler_stats()->PrintToZone());
     }
   }
 
@@ -1842,6 +1846,7 @@ void Isolate::Shutdown() {
 
 #if !defined(PRODUCT) && !defined(DART_PRECOMPILED_RUNTIME)
   if (FLAG_check_reloaded && is_runnable() && (this != Dart::vm_isolate()) &&
+      !KernelIsolate::IsKernelIsolate(this) &&
       !ServiceIsolate::IsServiceIsolateDescendant(this)) {
     if (!HasAttemptedReload()) {
       FATAL(
@@ -1849,6 +1854,10 @@ void Isolate::Shutdown() {
           "--check-reloaded is enabled.\n");
     }
   }
+
+  // TODO(33514): Ideally this should be moved to Dart_ShutdownIsolate,
+  // next to ServiceIsolate::SendIsolateShutdownMessage().
+  KernelIsolate::NotifyAboutIsolateShutdown(Isolate::Current());
 #endif  // !defined(PRODUCT) && !defined(DART_PRECOMPILED_RUNTIME)
 
   // Then, proceed with low-level teardown.
@@ -1882,7 +1891,7 @@ Isolate* Isolate::isolates_list_head_ = NULL;
 bool Isolate::creation_enabled_ = false;
 
 void Isolate::VisitObjectPointers(ObjectPointerVisitor* visitor,
-                                  bool validate_frames) {
+                                  ValidationPolicy validate_frames) {
   ASSERT(visitor != NULL);
 
   // Visit objects in the object store.
@@ -1960,7 +1969,7 @@ void Isolate::VisitObjectPointers(ObjectPointerVisitor* visitor,
 }
 
 void Isolate::VisitStackPointers(ObjectPointerVisitor* visitor,
-                                 bool validate_frames) {
+                                 ValidationPolicy validate_frames) {
   // Visit objects in all threads (e.g., Dart stack, handles in zones).
   thread_registry()->VisitObjectPointers(visitor, validate_frames);
 }
@@ -2501,7 +2510,7 @@ void Isolate::PauseEventHandler() {
         const int64_t reload_time_micros =
             OS::GetCurrentMonotonicMicros() - start_time_micros;
         double reload_millis = MicrosecondsToMilliseconds(reload_time_micros);
-        OS::Print("Reloading has finished! (%.2f ms)\n", reload_millis);
+        OS::PrintErr("Reloading has finished! (%.2f ms)\n", reload_millis);
       }
       break;
     }
@@ -2597,8 +2606,9 @@ bool Isolate::IsolateCreationEnabled() {
 }
 
 bool Isolate::IsVMInternalIsolate(Isolate* isolate) {
-  return ((isolate == Dart::vm_isolate()) ||
-          ServiceIsolate::IsServiceIsolateDescendant(isolate));
+  return (isolate == Dart::vm_isolate()) ||
+         ServiceIsolate::IsServiceIsolateDescendant(isolate) ||
+         KernelIsolate::IsKernelIsolate(isolate);
 }
 
 void Isolate::KillLocked(LibMsgId msg_id) {

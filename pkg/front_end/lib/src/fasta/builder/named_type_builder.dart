@@ -4,12 +4,17 @@
 
 library fasta.named_type_builder;
 
-import '../fasta_codes.dart' show Message;
+import '../fasta_codes.dart'
+    show
+        Message,
+        templateMissingExplicitTypeArguments,
+        templateTypeArgumentMismatch;
 
 import 'builder.dart'
     show
-        Builder,
+        Declaration,
         InvalidTypeBuilder,
+        LibraryBuilder,
         PrefixBuilder,
         QualifiedName,
         Scope,
@@ -21,7 +26,7 @@ abstract class NamedTypeBuilder<T extends TypeBuilder, R> extends TypeBuilder {
 
   List<T> arguments;
 
-  TypeDeclarationBuilder<T, R> builder;
+  TypeDeclarationBuilder<T, R> declaration;
 
   NamedTypeBuilder(this.name, this.arguments);
 
@@ -29,17 +34,18 @@ abstract class NamedTypeBuilder<T extends TypeBuilder, R> extends TypeBuilder {
       [Message message]);
 
   @override
-  void bind(TypeDeclarationBuilder builder) {
-    this.builder = builder?.origin;
+  void bind(TypeDeclarationBuilder declaration) {
+    this.declaration = declaration?.origin;
   }
 
   @override
-  void resolveIn(Scope scope, int charOffset, Uri fileUri) {
-    if (builder != null) return;
+  void resolveIn(
+      Scope scope, int charOffset, Uri fileUri, LibraryBuilder library) {
+    if (declaration != null) return;
     final name = this.name;
-    Builder member;
+    Declaration member;
     if (name is QualifiedName) {
-      var prefix = scope.lookup(name.prefix, charOffset, fileUri);
+      Declaration prefix = scope.lookup(name.prefix, charOffset, fileUri);
       if (prefix is PrefixBuilder) {
         member = prefix.lookup(name.suffix, name.charOffset, fileUri);
       }
@@ -47,10 +53,39 @@ abstract class NamedTypeBuilder<T extends TypeBuilder, R> extends TypeBuilder {
       member = scope.lookup(name, charOffset, fileUri);
     }
     if (member is TypeDeclarationBuilder) {
-      builder = member.origin;
+      declaration = member.origin;
+      if (arguments == null && declaration.typeVariablesCount != 0) {
+        library.addProblem(
+            templateMissingExplicitTypeArguments
+                .withArguments(declaration.typeVariablesCount),
+            charOffset,
+            "$name".length,
+            fileUri);
+      }
       return;
     }
-    builder = buildInvalidType(charOffset, fileUri);
+    declaration = buildInvalidType(charOffset, fileUri);
+  }
+
+  @override
+  void check(int charOffset, Uri fileUri) {
+    if (arguments != null &&
+        arguments.length != declaration.typeVariablesCount) {
+      declaration = buildInvalidType(
+          charOffset,
+          fileUri,
+          templateTypeArgumentMismatch.withArguments(
+              name, declaration.typeVariablesCount));
+    }
+  }
+
+  @override
+  void normalize(int charOffset, Uri fileUri) {
+    if (arguments != null &&
+        arguments.length != declaration.typeVariablesCount) {
+      // [arguments] will be normalized later if they are null.
+      arguments = null;
+    }
   }
 
   String get debugName => "NamedTypeBuilder";

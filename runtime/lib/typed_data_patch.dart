@@ -114,20 +114,12 @@ abstract class _IntListMixin implements List<int> {
 
   List<int> _createList(int length);
 
-  // TODO(leafp): Restore this functionality once generic methods are enabled
-  // in the VM and dart2js.
-  // https://github.com/dart-lang/sdk/issues/32463
-  Iterable<T> whereType<T>() =>
-      throw new UnimplementedError("whereType is not yet supported");
+  Iterable<T> whereType<T>() => new WhereTypeIterable<T>(this);
 
   Iterable<int> followedBy(Iterable<int> other) =>
       new FollowedByIterable<int>.firstEfficient(this, other);
 
   List<R> cast<R>() => List.castFrom<int, R>(this);
-
-  @Deprecated("Use cast instead.")
-  List<R> retype<R>() => cast<R>();
-
   void set first(int value) {
     if (this.length == 0) throw new RangeError.index(0, this);
     this[0] = value;
@@ -475,20 +467,12 @@ abstract class _DoubleListMixin implements List<double> {
 
   List<double> _createList(int length);
 
-  // TODO(leafp): Restore this functionality once generic methods are enabled
-  // in the VM and dart2js.
-  // https://github.com/dart-lang/sdk/issues/32463
-  Iterable<T> whereType<T>() =>
-      throw new UnimplementedError("whereType is not yet supported");
+  Iterable<T> whereType<T>() => new WhereTypeIterable<T>(this);
 
   Iterable<double> followedBy(Iterable<double> other) =>
       new FollowedByIterable<double>.firstEfficient(this, other);
 
   List<R> cast<R>() => List.castFrom<double, R>(this);
-
-  @Deprecated("Use cast instead.")
-  List<R> retype<R>() => cast<R>();
-
   void set first(double value) {
     if (this.length == 0) throw new RangeError.index(0, this);
     this[0] = value;
@@ -839,20 +823,12 @@ abstract class _Float32x4ListMixin implements List<Float32x4> {
 
   List<Float32x4> _createList(int length);
 
-  // TODO(leafp): Restore this functionality once generic methods are enabled
-  // in the VM and dart2js.
-  // https://github.com/dart-lang/sdk/issues/32463
-  Iterable<T> whereType<T>() =>
-      throw new UnimplementedError("whereType is not yet supported");
+  Iterable<T> whereType<T>() => new WhereTypeIterable<T>(this);
 
   Iterable<Float32x4> followedBy(Iterable<Float32x4> other) =>
       new FollowedByIterable<Float32x4>.firstEfficient(this, other);
 
   List<R> cast<R>() => List.castFrom<Float32x4, R>(this);
-
-  @Deprecated("Use cast instead.")
-  List<R> retype<R>() => cast<R>();
-
   void set first(Float32x4 value) {
     if (this.length == 0) throw new RangeError.index(0, this);
     this[0] = value;
@@ -1207,20 +1183,12 @@ abstract class _Int32x4ListMixin implements List<Int32x4> {
 
   List<Int32x4> _createList(int length);
 
-  // TODO(leafp): Restore this functionality once generic methods are enabled
-  // in the VM and dart2js.
-  // https://github.com/dart-lang/sdk/issues/32463
-  Iterable<T> whereType<T>() =>
-      throw new UnimplementedError("whereType is not yet supported");
+  Iterable<T> whereType<T>() => new WhereTypeIterable<T>(this);
 
   Iterable<Int32x4> followedBy(Iterable<Int32x4> other) =>
       new FollowedByIterable<Int32x4>.firstEfficient(this, other);
 
   List<R> cast<R>() => List.castFrom<Int32x4, R>(this);
-
-  @Deprecated("Use cast instead.")
-  List<R> retype<R>() => cast<R>();
-
   void set first(Int32x4 value) {
     if (this.length == 0) throw new RangeError.index(0, this);
     this[0] = value;
@@ -1574,20 +1542,12 @@ abstract class _Float64x2ListMixin implements List<Float64x2> {
 
   List<Float64x2> _createList(int length);
 
-  // TODO(leafp): Restore this functionality once generic methods are enabled
-  // in the VM and dart2js.
-  // https://github.com/dart-lang/sdk/issues/32463
-  Iterable<T> whereType<T>() =>
-      throw new UnimplementedError("whereType is not yet supported");
+  Iterable<T> whereType<T>() => new WhereTypeIterable<T>(this);
 
   Iterable<Float64x2> followedBy(Iterable<Float64x2> other) =>
       new FollowedByIterable<Float64x2>.firstEfficient(this, other);
 
   List<R> cast<R>() => List.castFrom<Float64x2, R>(this);
-
-  @Deprecated("Use cast instead.")
-  List<R> retype<R>() => cast<R>();
-
   void set first(Float64x2 value) {
     if (this.length == 0) throw new RangeError.index(0, this);
     this[0] = value;
@@ -2501,7 +2461,7 @@ class _Int64List extends _TypedList with _IntListMixin implements Int64List {
     if (index < 0 || index >= length) {
       throw new RangeError.index(index, this, "index");
     }
-    _setIndexedInt64(index, _toInt64(value));
+    _setIndexedInt64(index, value);
   }
 
   // Method(s) implementing the TypedData interface.
@@ -2548,7 +2508,7 @@ class _Uint64List extends _TypedList with _IntListMixin implements Uint64List {
     if (index < 0 || index >= length) {
       throw new RangeError.index(index, this, "index");
     }
-    _setIndexedUint64(index, _toUint64(value));
+    _setIndexedUint64(index, value);
   }
 
   // Method(s) implementing the TypedData interface.
@@ -3066,7 +3026,7 @@ class _ExternalInt64Array extends _TypedList
     if (index < 0 || index >= length) {
       throw new RangeError.index(index, this, "index");
     }
-    _setIndexedInt64(index, _toInt64(value));
+    _setIndexedInt64(index, value);
   }
 
   // Method(s) implementing the TypedData interface.
@@ -3104,7 +3064,7 @@ class _ExternalUint64Array extends _TypedList
     if (index < 0 || index >= length) {
       throw new RangeError.index(index, this, "index");
     }
-    _setIndexedUint64(index, _toUint64(value));
+    _setIndexedUint64(index, value);
   }
 
   // Method(s) implementing the TypedData interface.
@@ -3867,7 +3827,7 @@ class _Int64ArrayView extends _TypedListView
       throw new RangeError.index(index, this, "index");
     }
     _typedData._setInt64(
-        offsetInBytes + (index * Int64List.bytesPerElement), _toInt64(value));
+        offsetInBytes + (index * Int64List.bytesPerElement), value);
   }
 
   // Method(s) implementing TypedData interface.
@@ -3912,7 +3872,7 @@ class _Uint64ArrayView extends _TypedListView
       throw new RangeError.index(index, this, "index");
     }
     _typedData._setUint64(
-        offsetInBytes + (index * Uint64List.bytesPerElement), _toUint64(value));
+        offsetInBytes + (index * Uint64List.bytesPerElement), value);
   }
 
   // Method(s) implementing TypedData interface.
@@ -4442,25 +4402,6 @@ int _toInt32(int value) {
 
 int _toUint32(int value) {
   return value & 0xFFFFFFFF;
-}
-
-// Note: in --limit-ints-to-64-bits mode all integers are 64-bit already.
-// Still, it is harmless to apply _uint64Mask because (1 << 64) is 0 (all bits
-// are shifted out), so _uint64Mask is -1 (its bit pattern is 0xffffffffffffffff).
-const _uint64Mask = (1 << 64) - 1;
-
-int _toInt64(int value) {
-  // Avoid bigint mask when possible.
-  return (ClassID.getID(value) == ClassID.cidBigint)
-      ? _toInt(value, _uint64Mask)
-      : value;
-}
-
-int _toUint64(int value) {
-  // Avoid bigint mask when possible.
-  return (ClassID.getID(value) == ClassID.cidBigint)
-      ? _toInt(value, _uint64Mask)
-      : value;
 }
 
 void _rangeCheck(int listLength, int start, int length) {

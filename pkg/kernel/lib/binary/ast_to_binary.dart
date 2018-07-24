@@ -31,6 +31,8 @@ class BinaryPrinter implements Visitor<void>, BinarySink {
 
   final BufferedSink _mainSink;
   final BufferedSink _metadataSink;
+  final BytesSink _constantsBytesSink;
+  BufferedSink _constantsSink;
   BufferedSink _sink;
 
   List<int> libraryOffsets;
@@ -51,15 +53,13 @@ class BinaryPrinter implements Visitor<void>, BinarySink {
   ///
   /// The BinaryPrinter will use its own buffer, so the [sink] does not need
   /// one.
-  ///
-  /// If multiple binaries are to be written based on the same IR, a shared
-  /// [globalIndexer] may be passed in to avoid rebuilding the same indices
-  /// in every printer.
   BinaryPrinter(Sink<List<int>> sink, {StringIndexer stringIndexer})
       : _mainSink = new BufferedSink(sink),
         _metadataSink = new BufferedSink(new BytesSink()),
+        _constantsBytesSink = new BytesSink(),
         stringIndexer = stringIndexer ?? new StringIndexer() {
-    _constantIndexer = new ConstantIndexer(this.stringIndexer);
+    _constantsSink = new BufferedSink(_constantsBytesSink);
+    _constantIndexer = new ConstantIndexer(this.stringIndexer, this);
     _sink = _mainSink;
   }
 
@@ -98,7 +98,7 @@ class BinaryPrinter implements Visitor<void>, BinarySink {
   }
 
   int getBufferOffset() {
-    return _sink.flushedLength + _sink.length;
+    return _sink.offset;
   }
 
   void writeStringTable(StringIndexer indexer) {
@@ -141,12 +141,15 @@ class BinaryPrinter implements Visitor<void>, BinarySink {
     _binaryOffsetForConstantTable = getBufferOffset();
 
     writeUInt30(indexer.entries.length);
-    for (final entry in indexer.entries) {
-      writeConstantTableEntry(entry);
-    }
+    assert(identical(_sink, _mainSink));
+    _constantsSink.flushAndDestroy();
+    writeBytes(_constantsBytesSink.builder.takeBytes());
   }
 
-  void writeConstantTableEntry(Constant constant) {
+  int writeConstantTableEntry(Constant constant) {
+    BufferedSink oldSink = _sink;
+    _sink = _constantsSink;
+    int initialOffset = _sink.offset;
     if (constant is NullConstant) {
       writeByte(ConstantTag.NullConstant);
     } else if (constant is BoolConstant) {
@@ -202,6 +205,8 @@ class BinaryPrinter implements Visitor<void>, BinarySink {
     } else {
       throw 'Unsupported constant $constant';
     }
+    _sink = oldSink;
+    return _constantsSink.offset - initialOffset;
   }
 
   void writeDartType(DartType type) {
@@ -215,16 +220,9 @@ class BinaryPrinter implements Visitor<void>, BinarySink {
 
   // Returns the new active file uri.
   Uri writeUriReference(Uri uri) {
-    if (_knownSourceUri.contains(uri)) {
-      final int index = _sourceUriIndexer.put(uri);
-      writeUInt30(index);
-      return uri;
-    } else {
-      // This is equivalent to `index = _sourceUriIndexer[null];`.
-      final int index = 0;
-      writeUInt30(index);
-      return null;
-    }
+    final int index = _sourceUriIndexer.put(uri);
+    writeUInt30(index);
+    return uri;
   }
 
   void writeList<T>(List<T> items, void writeItem(T x)) {
@@ -491,8 +489,9 @@ class BinaryPrinter implements Visitor<void>, BinarySink {
     Utf8Encoder utf8Encoder = const Utf8Encoder();
     for (Uri uri in _sourceUriIndexer.index.keys) {
       index[i] = getBufferOffset();
-
-      Source source = uriToSource[uri] ?? new Source(<int>[], const <int>[]);
+      Source source =
+          (_knownSourceUri.contains(uri) ? uriToSource[uri] : null) ??
+              new Source(<int>[], const <int>[]);
 
       writeByteList(utf8Encoder.convert(uri == null ? "" : "$uri"));
       writeByteList(source.source);
@@ -720,25 +719,18 @@ class BinaryPrinter implements Visitor<void>, BinarySink {
     }
   }
 
-  int _encodeClassFlags(bool isAbstract, bool isEnum,
-      bool isSyntheticMixinImplementation, ClassLevel level) {
-    int abstractFlag = isAbstract ? 1 : 0;
-    int isEnumFlag = isEnum ? 2 : 0;
-    int isSyntheticMixinImplementationFlag =
-        isSyntheticMixinImplementation ? 4 : 0;
-    int levelFlags = (level.index - 1) << 3;
-    return abstractFlag |
-        isEnumFlag |
-        isSyntheticMixinImplementationFlag |
-        levelFlags;
+  int _encodeClassFlags(int flags, ClassLevel level) {
+    assert((flags & Class.LevelMask) == 0);
+    final levelIndex = level.index - 1;
+    assert((levelIndex & Class.LevelMask) == levelIndex);
+    return flags | levelIndex;
   }
 
   @override
   void visitClass(Class node) {
     classOffsets.add(getBufferOffset());
 
-    int flags = _encodeClassFlags(node.isAbstract, node.isEnum,
-        node.isSyntheticMixinImplementation, node.level);
+    int flags = _encodeClassFlags(node.flags, node.level);
     if (node.canonicalName == null) {
       throw 'Missing canonical name for $node';
     }
@@ -748,8 +740,10 @@ class BinaryPrinter implements Visitor<void>, BinarySink {
     final Uri activeFileUriSaved = _activeFileUri;
     _activeFileUri = writeUriReference(node.fileUri);
 
+    writeOffset(node.startFileOffset);
     writeOffset(node.fileOffset);
     writeOffset(node.fileEndOffset);
+
     writeByte(flags);
     writeStringReference(node.name ?? '');
 
@@ -790,8 +784,10 @@ class BinaryPrinter implements Visitor<void>, BinarySink {
     final Uri activeFileUriSaved = _activeFileUri;
     _activeFileUri = writeUriReference(node.fileUri);
 
+    writeOffset(node.startFileOffset);
     writeOffset(node.fileOffset);
     writeOffset(node.fileEndOffset);
+
     writeByte(node.flags);
     writeName(node.name ?? _emptyName);
 
@@ -822,11 +818,12 @@ class BinaryPrinter implements Visitor<void>, BinarySink {
     final Uri activeFileUriSaved = _activeFileUri;
     _activeFileUri = writeUriReference(node.fileUri);
 
+    writeOffset(node.startFileOffset);
     writeOffset(node.fileOffset);
     writeOffset(node.fileEndOffset);
     writeByte(node.kind.index);
     writeByte(node.flags);
-    writeName(node.name ?? '');
+    writeName(node.name ?? _emptyName);
     writeAnnotationList(node.annotations);
     writeOptionalReference(node.forwardingStubSuperTargetReference);
     writeOptionalReference(node.forwardingStubInterfaceTargetReference);
@@ -920,6 +917,7 @@ class BinaryPrinter implements Visitor<void>, BinarySink {
   void visitSuperInitializer(SuperInitializer node) {
     writeByte(Tag.SuperInitializer);
     writeByte(node.isSynthetic ? 1 : 0);
+    writeOffset(node.fileOffset);
     writeReference(node.targetReference);
     writeNode(node.arguments);
   }
@@ -928,6 +926,7 @@ class BinaryPrinter implements Visitor<void>, BinarySink {
   void visitRedirectingInitializer(RedirectingInitializer node) {
     writeByte(Tag.RedirectingInitializer);
     writeByte(node.isSynthetic ? 1 : 0);
+    writeOffset(node.fileOffset);
     writeReference(node.targetReference);
     writeNode(node.arguments);
   }
@@ -2015,15 +2014,18 @@ class ConstantIndexer extends RecursiveVisitor {
   final StringIndexer stringIndexer;
 
   final List<Constant> entries = <Constant>[];
-  final Map<Constant, int> index = <Constant, int>{};
+  final Map<Constant, int> offsets = <Constant, int>{};
+  int nextOffset = 0;
 
-  ConstantIndexer(this.stringIndexer);
+  final BinaryPrinter _printer;
+
+  ConstantIndexer(this.stringIndexer, this._printer);
 
   int put(Constant constant) {
-    final int oldIndex = index[constant];
-    if (oldIndex != null) return oldIndex;
+    final int oldOffset = offsets[constant];
+    if (oldOffset != null) return oldOffset;
 
-    // Traverse DAG in post-order to ensure children have their id's assigned
+    // Traverse DAG in post-order to ensure children have their offsets assigned
     // before the parent.
     constant.visitChildren(this);
 
@@ -2038,16 +2040,17 @@ class ConstantIndexer extends RecursiveVisitor {
       }
     }
 
-    final int newIndex = entries.length;
+    final int newOffset = nextOffset;
     entries.add(constant);
-    return index[constant] = newIndex;
+    nextOffset += _printer.writeConstantTableEntry(constant);
+    return offsets[constant] = newOffset;
   }
 
   defaultConstantReference(Constant node) {
     put(node);
   }
 
-  int operator [](Constant node) => index[node];
+  int operator [](Constant node) => offsets[node];
 }
 
 class TypeParameterIndexer {
@@ -2108,53 +2111,6 @@ class UriIndexer {
   }
 }
 
-/// Computes and stores the index of a library, class, or member within its
-/// parent list.
-class GlobalIndexer extends TreeVisitor {
-  final Map<TreeNode, int> indices = <TreeNode, int>{};
-
-  void buildIndexForContainer(TreeNode libraryOrClass) {
-    libraryOrClass.accept(this);
-  }
-
-  void buildIndexForList(List<TreeNode> list) {
-    for (int i = 0; i < list.length; ++i) {
-      TreeNode child = list[i];
-      if (child != null) {
-        indices[child] = i;
-      }
-    }
-  }
-
-  visitComponent(Component node) {
-    buildIndexForList(node.libraries);
-  }
-
-  visitLibrary(Library node) {
-    buildIndexForList(node.classes);
-    buildIndexForList(node.fields);
-    buildIndexForList(node.procedures);
-  }
-
-  visitClass(Class node) {
-    buildIndexForList(node.fields);
-    buildIndexForList(node.constructors);
-    buildIndexForList(node.procedures);
-  }
-
-  int operator [](TreeNode memberOrLibraryOrClass) {
-    var node = memberOrLibraryOrClass;
-    assert(node is Member || node is Library || node is Class);
-    int index = indices[node];
-    if (index == null) {
-      buildIndexForContainer(node.parent);
-      return indices[node];
-    } else {
-      return index;
-    }
-  }
-}
-
 /// Puts a buffer in front of a [Sink<List<int>>].
 class BufferedSink {
   static const int SIZE = 100000;
@@ -2167,6 +2123,8 @@ class BufferedSink {
 
   Float64List _doubleBuffer = new Float64List(1);
   Uint8List _doubleBufferUint8;
+
+  int get offset => length + flushedLength;
 
   BufferedSink(this._sink);
 

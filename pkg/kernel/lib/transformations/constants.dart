@@ -20,13 +20,13 @@ library kernel.transformations.constants;
 
 import 'dart:io' as io;
 
-import '../kernel.dart';
 import '../ast.dart';
+import '../class_hierarchy.dart';
 import '../core_types.dart';
+import '../external_name.dart' show getExternalName;
+import '../kernel.dart';
 import '../type_algebra.dart';
 import '../type_environment.dart';
-import '../class_hierarchy.dart';
-import 'treeshaker.dart' show findNativeName;
 
 Component transformComponent(Component component, ConstantsBackend backend,
     {bool keepFields: false,
@@ -287,6 +287,10 @@ class ConstantsTransformer extends Transformer {
 
   // Handle use-sites of constants (and "inline" constant expressions):
 
+  visitSymbolLiteral(SymbolLiteral node) {
+    return new ConstantExpression(constantEvaluator.evaluate(node));
+  }
+
   visitStaticGet(StaticGet node) {
     final Member target = node.target;
     if (target is Field && target.isConst) {
@@ -406,6 +410,14 @@ class ConstantEvaluator extends RecursiveVisitor {
       return fun();
     } finally {
       popContext(node);
+    }
+  }
+
+  Constant runInsideContextIfNoContext(TreeNode node, Constant fun()) {
+    if (contextChain.isEmpty) {
+      return runInsideContext(node, fun);
+    } else {
+      return fun();
     }
   }
 
@@ -529,11 +541,13 @@ class ConstantEvaluator extends RecursiveVisitor {
 
     // Start building a new instance.
     return withNewInstanceBuilder(klass, typeArguments, () {
-      // "Run" the constructor (and any super constructor calls), which will
-      // initialize the fields of the new instance.
-      handleConstructorInvocation(
-          constructor, typeArguments, positionals, named);
-      return canonicalize(instanceBuilder.buildInstance());
+      return runInsideContextIfNoContext(node, () {
+        // "Run" the constructor (and any super constructor calls), which will
+        // initialize the fields of the new instance.
+        handleConstructorInvocation(
+            constructor, typeArguments, positionals, named);
+        return canonicalize(instanceBuilder.buildInstance());
+      });
     });
   }
 
@@ -715,8 +729,14 @@ class ConstantEvaluator extends RecursiveVisitor {
         }
       } else if (arguments.length == 1) {
         final Constant other = arguments[0];
+        final op = node.name.name;
         if (other is IntConstant) {
-          switch (node.name.name) {
+          if ((op == '<<' || op == '>>') && other.value < 0) {
+            errorReporter.negativeShift(contextChain,
+                node.arguments.positional.first, receiver, op, other);
+            throw const _AbortCurrentEvaluation();
+          }
+          switch (op) {
             case '|':
               return canonicalize(
                   new IntConstant(receiver.value | other.value));
@@ -735,12 +755,18 @@ class ConstantEvaluator extends RecursiveVisitor {
           }
         }
 
-        if (other is IntConstant || other is DoubleConstant) {
-          final num value = (other is IntConstant)
-              ? other.value
-              : (other as DoubleConstant).value;
+        if (other is IntConstant) {
+          if (other.value == 0 && (op == '%' || op == '~/')) {
+            errorReporter.zeroDivisor(
+                contextChain, node.arguments.positional.first, receiver, op);
+            throw const _AbortCurrentEvaluation();
+          }
+
           return evaluateBinaryNumericOperation(
-              node.name.name, receiver.value, value, node);
+              node.name.name, receiver.value, other.value, node);
+        } else if (other is DoubleConstant) {
+          return evaluateBinaryNumericOperation(
+              node.name.name, receiver.value, other.value, node);
         }
 
         errorReporter.invalidBinaryOperandType(
@@ -885,13 +911,19 @@ class ConstantEvaluator extends RecursiveVisitor {
     // TODO(kustermann): The heuristic of allowing all [VariableGet]s on [Let]
     // variables might allow more than it should.
     final VariableDeclaration variable = node.variable;
-    if (!variable.isConst &&
-        !_isFormalParameter(variable) &&
-        variable.parent is! Let) {
-      throw new Exception('The front-end should ensure we do not encounter a '
-          'variable get of a non-const variable.');
+    if (variable.parent is Let || _isFormalParameter(variable)) {
+      final Constant constant = env.lookupVariable(node.variable);
+      if (constant == null) {
+        errorReporter.nonConstantVariableGet(contextChain, node, variable.name);
+        throw const _AbortCurrentEvaluation();
+      }
+      return constant;
     }
-    return env.lookupVariable(node.variable);
+    if (variable.isConst) {
+      return evaluate(variable.initializer);
+    }
+    throw new Exception('The front-end should ensure we do not encounter a '
+        'variable get of a non-const variable.');
   }
 
   visitStaticGet(StaticGet node) {
@@ -940,7 +972,7 @@ class ConstantEvaluator extends RecursiveVisitor {
   visitStaticInvocation(StaticInvocation node) {
     final Procedure target = node.target;
     if (target.kind == ProcedureKind.Factory) {
-      final String nativeName = findNativeName(target);
+      final String nativeName = getExternalName(target);
       if (nativeName != null) {
         final Constant constant = backend.buildConstantForNative(
             nativeName,
@@ -1146,9 +1178,6 @@ class ConstantEvaluator extends RecursiveVisitor {
     }
     return value;
   }
-
-  static const kMaxInt64 = (1 << 63) - 1;
-  static const kMinInt64 = -(1 << 63);
 }
 
 /// Holds the necessary information for a constant object, namely
@@ -1211,9 +1240,7 @@ class EvaluationEnvironment {
   }
 
   Constant lookupVariable(VariableDeclaration variable) {
-    final Constant value = _variables[variable];
-    assert(value != null);
-    return value;
+    return _variables[variable];
   }
 
   DartType subsituteType(DartType type) {
@@ -1252,9 +1279,15 @@ abstract class ErrorReporter {
       List<TreeNode> context, TreeNode node, Procedure target);
   invalidStringInterpolationOperand(
       List<TreeNode> context, TreeNode node, Constant constant);
+  zeroDivisor(
+      List<TreeNode> context, TreeNode node, IntConstant receiver, String op);
+  negativeShift(List<TreeNode> context, TreeNode node, IntConstant receiver,
+      String op, IntConstant argument);
   nonConstLiteral(List<TreeNode> context, TreeNode node, String klass);
   duplicateKey(List<TreeNode> context, TreeNode node, Constant key);
   failedAssertion(List<TreeNode> context, TreeNode node, String message);
+  nonConstantVariableGet(
+      List<TreeNode> context, TreeNode node, String variableName);
 }
 
 abstract class ErrorReporterBase implements ErrorReporter {
@@ -1319,6 +1352,24 @@ abstract class ErrorReporterBase implements ErrorReporter {
         node);
   }
 
+  zeroDivisor(
+      List<TreeNode> context, TreeNode node, IntConstant receiver, String op) {
+    report(
+        context,
+        "Binary operator '$op' on '${receiver.value}' requires non-zero "
+        "divisor, but divisor was '0'.",
+        node);
+  }
+
+  negativeShift(List<TreeNode> context, TreeNode node, IntConstant receiver,
+      String op, IntConstant argument) {
+    report(
+        context,
+        "Binary operator '$op' on '${receiver.value}' requires non-negative "
+        "operand, but was '${argument.value}'.",
+        node);
+  }
+
   nonConstLiteral(List<TreeNode> context, TreeNode node, String klass) {
     report(
         context,
@@ -1337,6 +1388,15 @@ abstract class ErrorReporterBase implements ErrorReporter {
     report(
         context,
         'The assertion condition evaluated to "false" with message "$message"',
+        node);
+  }
+
+  nonConstantVariableGet(
+      List<TreeNode> context, TreeNode node, String variableName) {
+    report(
+        context,
+        'The variable "$variableName" cannot be used inside a constant '
+        'expression.',
         node);
   }
 }

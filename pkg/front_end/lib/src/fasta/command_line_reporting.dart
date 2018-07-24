@@ -10,22 +10,27 @@ library fasta.command_line_reporting;
 
 import 'dart:io' show exitCode;
 
+import 'dart:math' show min;
+
+import 'dart:typed_data' show Uint8List;
+
 import 'package:kernel/ast.dart' show Location;
 
-import 'colors.dart' show cyan, green, magenta, red;
+import 'colors.dart' show green, magenta, red;
 
 import 'compiler_context.dart' show CompilerContext;
 
-import 'deprecated_problems.dart'
-    show Crash, deprecated_InputError, safeToString;
+import 'crash.dart' show Crash, safeToString;
 
 import 'fasta_codes.dart' show LocatedMessage;
 
-import 'messages.dart' show getLocation, getSourceLine, isVerbose;
+import 'messages.dart' show getLocation, getSourceLine;
 
-import 'problems.dart' show unexpected;
+import 'problems.dart' show DebugAbort, unhandled;
 
-import 'severity.dart' show Severity;
+import 'severity.dart' show Severity, severityPrefixes;
+
+import 'scanner/characters.dart' show $CARET, $SPACE, $TAB;
 
 import 'util/relativize.dart' show relativizeUri;
 
@@ -42,8 +47,9 @@ String format(LocatedMessage message, Severity severity, {Location location}) {
       // empty names.
       length = 1;
     }
+    String prefix = severityPrefixes[severity];
     String text =
-        "${severityName(severity, capitalized: true)}: ${message.message}";
+        prefix == null ? message.message : "$prefix: ${message.message}";
     if (message.tip != null) {
       text += "\n${message.tip}";
     }
@@ -52,10 +58,6 @@ String format(LocatedMessage message, Severity severity, {Location location}) {
         case Severity.error:
         case Severity.internalProblem:
           text = red(text);
-          break;
-
-        case Severity.nit:
-          text = cyan(text);
           break;
 
         case Severity.warning:
@@ -67,7 +69,7 @@ String format(LocatedMessage message, Severity severity, {Location location}) {
           break;
 
         default:
-          return unexpected("$severity", "format", -1, null);
+          return unhandled("$severity", "format", -1, null);
       }
     }
 
@@ -79,8 +81,21 @@ String format(LocatedMessage message, Severity severity, {Location location}) {
       if (sourceLine == null) {
         sourceLine = "";
       } else if (sourceLine.isNotEmpty) {
-        String indentation = " " * (location.column - 1);
-        String pointer = indentation + ("^" * length);
+        // TODO(askesc): Much more could be done to indent properly in the
+        // presence of all sorts of unicode weirdness.
+        // This handling covers the common case of single-width characters
+        // indented with spaces and/or tabs, using no surrogates.
+        int indentLength = location.column - 1;
+        Uint8List indentation = new Uint8List(indentLength + length)
+          ..fillRange(0, indentLength, $SPACE)
+          ..fillRange(indentLength, indentLength + length, $CARET);
+        int lengthInSourceLine = min(indentation.length, sourceLine.length);
+        for (int i = 0; i < lengthInSourceLine; i++) {
+          if (sourceLine.codeUnitAt(i) == $TAB) {
+            indentation[i] = $TAB;
+          }
+        }
+        String pointer = new String.fromCharCodes(indentation);
         if (pointer.length > sourceLine.length) {
           // Truncate the carets to handle messages that span multiple lines.
           int pointerLength = sourceLine.length;
@@ -95,7 +110,7 @@ String format(LocatedMessage message, Severity severity, {Location location}) {
         sourceLine = "\n$sourceLine\n$pointer";
       }
       String position =
-          location == null ? "" : ":${location.line}:${location.column}";
+          location == null ? ":1" : ":${location.line}:${location.column}";
       return "$path$position: $text$sourceLine";
     } else {
       return text;
@@ -117,14 +132,11 @@ bool isHidden(Severity severity) {
     case Severity.context:
       return false;
 
-    case Severity.nit:
-      return !isVerbose;
-
     case Severity.warning:
       return hideWarnings;
 
     default:
-      return unexpected("$severity", "isHidden", -1, null);
+      return unhandled("$severity", "isHidden", -1, null);
   }
 }
 
@@ -138,9 +150,6 @@ bool shouldThrowOn(Severity severity) {
     case Severity.internalProblem:
       return true;
 
-    case Severity.nit:
-      return CompilerContext.current.options.throwOnNitsForDebugging;
-
     case Severity.warning:
       return CompilerContext.current.options.throwOnWarningsForDebugging;
 
@@ -148,30 +157,7 @@ bool shouldThrowOn(Severity severity) {
       return false;
 
     default:
-      return unexpected("$severity", "shouldThrowOn", -1, null);
-  }
-}
-
-/// Convert [severity] to a name that can be used to prefix a message.
-String severityName(Severity severity, {bool capitalized: false}) {
-  switch (severity) {
-    case Severity.error:
-      return capitalized ? "Error" : "error";
-
-    case Severity.internalProblem:
-      return capitalized ? "Internal problem" : "internal problem";
-
-    case Severity.nit:
-      return capitalized ? "Nit" : "nit";
-
-    case Severity.warning:
-      return capitalized ? "Warning" : "warning";
-
-    case Severity.context:
-      return capitalized ? "Context" : "context";
-
-    default:
-      return unexpected("$severity", "severityName", -1, null);
+      return unhandled("$severity", "shouldThrowOn", -1, null);
   }
 }
 
@@ -191,11 +177,7 @@ void _printAndThrowIfDebugging(
   }
   print(text);
   if (shouldThrowOn(severity)) {
-    if (isVerbose) print(StackTrace.current);
-    // TODO(sigmund,ahe): ensure there is no circularity when InputError is
-    // handled.
-    throw new deprecated_InputError(uri, charOffset,
-        "Compilation aborted due to fatal ${severityName(severity)}.");
+    throw new DebugAbort(uri, charOffset, severity, StackTrace.current);
   }
 }
 
@@ -208,12 +190,14 @@ bool isCompileTimeError(Severity severity) {
     case Severity.errorLegacyWarning:
       return CompilerContext.current.options.strongMode;
 
-    case Severity.nit:
     case Severity.warning:
     case Severity.context:
       return false;
+
+    case Severity.ignored:
+      break; // Fall-through to unhandled below.
   }
-  return unexpected("$severity", "isCompileTimeError", -1, null);
+  return unhandled("$severity", "isCompileTimeError", -1, null);
 }
 
 /// Report [message] unless [severity] is suppressed (see [isHidden]). Throws

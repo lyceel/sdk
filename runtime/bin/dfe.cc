@@ -61,24 +61,27 @@ const char kSnapshotsDirectory[] = "snapshots";
 static char* GetDirectoryPrefixFromExeName() {
   const char* name = Platform::GetExecutableName();
   const char* sep = File::PathSeparator();
-  // Locate the last occurance of |sep| in |name|.
-  intptr_t i;
-  for (i = strlen(name) - 1; i >= 0; --i) {
+  const intptr_t sep_length = strlen(sep);
+
+  for (intptr_t i = strlen(name) - 1; i >= 0; --i) {
     const char* str = name + i;
-    if (strstr(str, sep) == str) {
-      break;
+    if (strncmp(str, sep, sep_length) == 0
+#if defined(HOST_OS_WINDOWS)
+        // TODO(aam): GetExecutableName doesn't work reliably on Windows,
+        // the code below is a workaround for that (we would be using
+        // just single Platform::Separator instead of both slashes if it did).
+        || *str == '/'
+#endif
+    ) {
+      return Utils::StrNDup(name, i + 1);
     }
   }
-
-  if (i < 0) {
-    return strdup("");
-  }
-
-  return Utils::StrNDup(name, i + 1);
+  return strdup("");
 }
 
 DFE::DFE()
     : use_dfe_(false),
+      use_incremental_compiler_(false),
       frontend_filename_(NULL),
       application_kernel_buffer_(NULL),
       application_kernel_buffer_size_(0) {}
@@ -216,8 +219,8 @@ void DFE::CompileAndReadScript(const char* script_uri,
                                int* exit_code,
                                bool strong,
                                const char* package_config) {
-  Dart_KernelCompilationResult result =
-      CompileScript(script_uri, strong, true, package_config);
+  Dart_KernelCompilationResult result = CompileScript(
+      script_uri, strong, use_incremental_compiler(), package_config);
   switch (result.status) {
     case Dart_KernelCompilationStatus_Ok:
       *kernel_buffer = result.kernel;

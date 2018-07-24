@@ -14,6 +14,7 @@
 #include "vm/deopt_instructions.h"
 #include "vm/exceptions.h"
 #include "vm/flags.h"
+#include "vm/heap/verifier.h"
 #include "vm/instructions.h"
 #include "vm/interpreter.h"
 #include "vm/kernel_isolate.h"
@@ -26,7 +27,7 @@
 #include "vm/stack_frame.h"
 #include "vm/symbols.h"
 #include "vm/thread_registry.h"
-#include "vm/verifier.h"
+#include "vm/type_testing_stubs.h"
 
 namespace dart {
 
@@ -179,6 +180,10 @@ DEFINE_RUNTIME_ENTRY(NullError, 0) {
   const Code& code = Code::Handle(zone, caller_frame->LookupDartCode());
   const uword pc_offset = caller_frame->pc() - code.PayloadStart();
 
+  if (FLAG_shared_slow_path_triggers_gc) {
+    isolate->heap()->CollectAllGarbage();
+  }
+
   const CodeSourceMap& map =
       CodeSourceMap::Handle(zone, code.code_source_map());
   ASSERT(!map.IsNull());
@@ -213,6 +218,26 @@ DEFINE_RUNTIME_ENTRY(NullError, 0) {
   Exceptions::ThrowByType(Exceptions::kNoSuchMethod, args);
 }
 
+DEFINE_RUNTIME_ENTRY(ArgumentErrorUnboxedInt64, 0) {
+  // Unboxed value is passed through a dedicated slot in Thread.
+  int64_t unboxed_value = arguments.thread()->unboxed_int64_runtime_arg();
+  const Integer& value = Integer::Handle(zone, Integer::New(unboxed_value));
+  Exceptions::ThrowArgumentError(value);
+}
+
+static void EnsureNewOrRemembered(Isolate* isolate,
+                                  Thread* thread,
+                                  const Object& result) {
+  // For write barrier elimination, we need to ensure that the allocation ends
+  // up in the new space if Heap::IsGuaranteedNewSpaceAllocation is true for
+  // this size or else the object needs to go into the store buffer.
+  if (!isolate->heap()->new_space()->Contains(
+          reinterpret_cast<uword>(result.raw()))) {
+    result.raw()->SetRememberedBit();
+    thread->StoreBufferAddObject(result.raw());
+  }
+}
+
 // Allocation of a fixed length array of given element type.
 // This runtime entry is never called for allocating a List of a generic type,
 // because a prior run time call instantiates the element type if necessary.
@@ -242,6 +267,7 @@ DEFINE_RUNTIME_ENTRY(AllocateArray, 2) {
       ASSERT(element_type.IsNull() ||
              ((element_type.Length() >= 1) && element_type.IsInstantiated()));
       array.SetTypeArguments(element_type);  // May be null.
+      EnsureNewOrRemembered(isolate, thread, array);
       return;
     }
   }
@@ -276,7 +302,7 @@ DEFINE_RUNTIME_ENTRY(AllocateObject, 2) {
     if (String::EqualsIgnoringPrivateKey(
             name,
             String::Handle(String::New(FLAG_gc_at_instance_allocation)))) {
-      Isolate::Current()->heap()->CollectAllGarbage();
+      Isolate::Current()->heap()->CollectAllGarbage(Heap::kDebugging);
     }
   }
 #endif
@@ -298,6 +324,10 @@ DEFINE_RUNTIME_ENTRY(AllocateObject, 2) {
          (type_arguments.IsInstantiated() &&
           (type_arguments.Length() >= cls.NumTypeArguments())));
   instance.SetTypeArguments(type_arguments);
+
+  if (Heap::IsAllocatableInNewSpace(cls.instance_size())) {
+    EnsureNewOrRemembered(isolate, thread, instance);
+  }
 }
 
 // Instantiate type.
@@ -356,9 +386,13 @@ DEFINE_RUNTIME_ENTRY(InstantiateTypeArguments, 3) {
          instantiator_type_arguments.IsInstantiated());
   ASSERT(function_type_arguments.IsNull() ||
          function_type_arguments.IsInstantiated());
+#if !defined(DART_USE_INTERPRETER)
   // Code inlined in the caller should have optimized the case where the
   // instantiator can be reused as type argument vector.
+  // However, it is non-trivial for the bytecode generator to implement this
+  // optimization, so we do not require it when the interpreter is used.
   ASSERT(!type_arguments.IsUninstantiatedIdentity());
+#endif
   if (isolate->type_checks()) {
     Error& bound_error = Error::Handle(zone);
     type_arguments = type_arguments.InstantiateAndCanonicalizeFrom(
@@ -420,12 +454,27 @@ DEFINE_RUNTIME_ENTRY(SubtypeCheck, 5) {
   UNREACHABLE();
 }
 
+// Allocate a new SubtypeTestCache for use in interpreted implicit setters.
+// Return value: newly allocated SubtypeTestCache.
+DEFINE_RUNTIME_ENTRY(AllocateSubtypeTestCache, 0) {
+#if defined(DART_USE_INTERPRETER)
+  arguments.SetReturn(SubtypeTestCache::Handle(zone, SubtypeTestCache::New()));
+#else
+  UNREACHABLE();
+#endif  // defined(DART_USE_INTERPRETER)
+}
+
 // Allocate a new context large enough to hold the given number of variables.
 // Arg0: number of variables.
 // Return value: newly allocated context.
 DEFINE_RUNTIME_ENTRY(AllocateContext, 1) {
   const Smi& num_variables = Smi::CheckedHandle(zone, arguments.ArgAt(0));
-  arguments.SetReturn(Context::Handle(Context::New(num_variables.Value())));
+  const Context& context = Context::Handle(Context::New(num_variables.Value()));
+  arguments.SetReturn(context);
+  if (Heap::IsAllocatableInNewSpace(
+          Context::InstanceSize(num_variables.Value()))) {
+    EnsureNewOrRemembered(isolate, thread, context);
+  }
 }
 
 // Make a copy of the given context, including the values of the captured
@@ -481,7 +530,7 @@ static void PrintTypeCheck(const char* message,
                  String::Handle(instantiated_type.Name()).ToCString(),
                  String::Handle(type.Name()).ToCString(), caller_frame->pc());
     if (!bound_error.IsNull()) {
-      OS::Print("  bound error: %s\n", bound_error.ToErrorCString());
+      OS::PrintErr("  bound error: %s\n", bound_error.ToErrorCString());
     }
   }
   const Function& function =
@@ -508,13 +557,13 @@ static void UpdateTypeTestCache(
   // inlined assembly.
   if (new_cache.IsNull()) {
     if (FLAG_trace_type_checks) {
-      OS::Print("UpdateTypeTestCache: cache is null\n");
+      OS::PrintErr("UpdateTypeTestCache: cache is null\n");
     }
     return;
   }
   if (instance.IsSmi()) {
     if (FLAG_trace_type_checks) {
-      OS::Print("UpdateTypeTestCache: instance is Smi\n");
+      OS::PrintErr("UpdateTypeTestCache: instance is Smi\n");
     }
     return;
   }
@@ -535,7 +584,7 @@ static void UpdateTypeTestCache(
     if (Closure::Cast(instance).function_type_arguments() !=
         TypeArguments::null()) {
       if (FLAG_trace_type_checks) {
-        OS::Print(
+        OS::PrintErr(
             "UpdateTypeTestCache: closure function_type_arguments is "
             "not null\n");
       }
@@ -680,8 +729,9 @@ DEFINE_RUNTIME_ENTRY(Instanceof, 5) {
 // Arg3: type arguments of the function of the type being assigned to.
 // Arg4: name of variable being assigned to.
 // Arg5: SubtypeTestCache.
+// Arg6: invocation mode (see TypeCheckMode)
 // Return value: instance if a subtype, otherwise throw a TypeError.
-DEFINE_RUNTIME_ENTRY(TypeCheck, 6) {
+DEFINE_RUNTIME_ENTRY(TypeCheck, 7) {
   const Instance& src_instance =
       Instance::CheckedHandle(zone, arguments.ArgAt(0));
   AbstractType& dst_type =
@@ -697,6 +747,13 @@ DEFINE_RUNTIME_ENTRY(TypeCheck, 6) {
   SubtypeTestCache& cache = SubtypeTestCache::Handle(zone);
   cache ^= arguments.ArgAt(5);
   ASSERT(cache.IsNull() || cache.IsSubtypeTestCache());
+
+  const TypeCheckMode mode = static_cast<TypeCheckMode>(
+      Smi::CheckedHandle(zone, arguments.ArgAt(6)).Value());
+
+#if defined(TARGET_ARCH_IA32) || defined(TARGET_ARCH_DBC)
+  ASSERT(mode == kTypeCheckFromInline);
+#endif
 
   ASSERT(!dst_type.IsMalformed());    // Already checked in code generator.
   ASSERT(!dst_type.IsMalbounded());   // Already checked in code generator.
@@ -731,8 +788,10 @@ DEFINE_RUNTIME_ENTRY(TypeCheck, 6) {
       bound_error_message = String::New(bound_error.ToErrorCString());
     }
     if (dst_name.IsNull()) {
-#if !defined(TARGET_ARCH_DBC) && !defined(TARGET_ARCH_IA32) &&                 \
-    (defined(DART_PRECOMPILER) || defined(DART_PRECOMPILED_RUNTIME))
+#if !defined(TARGET_ARCH_DBC) && !defined(TARGET_ARCH_IA32)
+      // Can only come here from type testing stub.
+      ASSERT(mode != kTypeCheckFromInline);
+
       // Grab the [dst_name] from the pool.  It's stored at one pool slot after
       // the subtype-test-cache.
       DartFrameIterator iterator(thread,
@@ -756,14 +815,29 @@ DEFINE_RUNTIME_ENTRY(TypeCheck, 6) {
     UNREACHABLE();
   }
 
-  if (cache.IsNull()) {
+  bool should_update_cache = true;
 #if !defined(TARGET_ARCH_DBC) && !defined(TARGET_ARCH_IA32) &&                 \
-    (defined(DART_PRECOMPILER) || defined(DART_PRECOMPILED_RUNTIME))
+    !defined(DART_PRECOMPILED_RUNTIME)
+  if (mode == kTypeCheckFromLazySpecializeStub) {
+    TypeTestingStubGenerator::SpecializeStubFor(thread, dst_type);
+    // Only create the cache when we come from a normal stub.
+    should_update_cache = false;
+  }
+#endif
 
-#if defined(DART_PRECOMPILER)
-    if (FLAG_precompiled_mode) {
-#endif  // defined(DART_PRECOMPILER)
+  if (should_update_cache) {
+    if (cache.IsNull()) {
+#if defined(DART_USE_INTERPRETER)
+      // TODO(regis): Remove this workaround once the interpreter can provide a
+      // non-null cache for the type test in an implicit setter.
+      if (mode == kTypeCheckFromInline) {
+        arguments.SetReturn(src_instance);
+        return;
+      }
+#endif  // defined(DART_USE_INTERPRETER)
 
+#if !defined(TARGET_ARCH_DBC) && !defined(TARGET_ARCH_IA32)
+      ASSERT(mode == kTypeCheckFromSlowStub);
       // We lazily create [SubtypeTestCache] for those call sites which actually
       // need one and will patch the pool entry.
       DartFrameIterator iterator(thread,
@@ -780,37 +854,15 @@ DEFINE_RUNTIME_ENTRY(TypeCheck, 6) {
       ASSERT(pool.ObjectAt(stc_pool_idx) == Object::null());
       cache = SubtypeTestCache::New();
       pool.SetObjectAt(stc_pool_idx, cache);
-
-#if defined(DART_PRECOMPILER)
-    }
-#endif  // defined(DART_PRECOMPILER)
-
 #else
-    // WARNING: If we ever come here, it's a really bad sign, because it means
-    // that there was a type test, which generated code could not handle but we
-    // have no subtype cache.  Which means that this successfully-passing type
-    // check will always go to runtime.
-    //
-    // Currently there is one known case when this happens:
-    //
-    // The [FlowGraphCompiler::GenerateInstantiatedTypeNoArgumentsTest] is
-    // handling type checks against int/num specially: It generates a number of
-    // class-id checks.  Unfortunately it handles only normal implementations of
-    // 'int', such as kSmiCid, kMintCid, kBigintCid.  It will signal that there
-    // is no subtype-cache necessary on that call site, because all integer
-    // types have been handled.
-    //
-    // -> Though this is not true, due to (from runtime/lib/array_patch.dart):
-    //
-    //    class _GrowableArrayMarker implements int { }
-    //
-    // Because of this, we cannot have an `UNREACHABLE()` here, but rather just
-    // have a NOP and return `true`, to signal the type check passed.
-#endif  // defined(DART_PRECOMPILER) || defined(DART_PRECOMPILED_RUNTIME)
+      UNREACHABLE();
+#endif
+    }
+
+    UpdateTypeTestCache(src_instance, dst_type, instantiator_type_arguments,
+                        function_type_arguments, Bool::True(), cache);
   }
 
-  UpdateTypeTestCache(src_instance, dst_type, instantiator_type_arguments,
-                      function_type_arguments, Bool::True(), cache);
   arguments.SetReturn(src_instance);
 }
 
@@ -1013,6 +1065,16 @@ RawFunction* InlineCacheMissHelper(const Instance& receiver,
                                    const Array& args_descriptor,
                                    const String& target_name) {
   const Class& receiver_class = Class::Handle(receiver.clazz());
+
+#if !defined(DART_PRECOMPILED_RUNTIME)
+  // Handle noSuchMethod for dyn:methodName by getting a noSuchMethod dispatcher
+  // (or a call-through getter for methodName).
+  if (Function::IsDynamicInvocationForwaderName(target_name)) {
+    const String& demangled = String::Handle(
+        Function::DemangleDynamicInvocationForwarderName(target_name));
+    return InlineCacheMissHelper(receiver, args_descriptor, demangled);
+  }
+#endif
 
   Function& result = Function::Handle();
   if (!ResolveCallThroughGetter(receiver, receiver_class, target_name,
@@ -1717,42 +1779,6 @@ DEFINE_RUNTIME_ENTRY(InvokeClosureNoSuchMethod, 3) {
   arguments.SetReturn(result);
 }
 
-// Interpret a function call. Should be called only for uncompiled functions.
-// Arg0: function object
-// Arg1: ICData or MegamorphicCache
-// Arg2: arguments descriptor array
-// Arg3: arguments array
-DEFINE_RUNTIME_ENTRY(InterpretCall, 4) {
-#if defined(DART_USE_INTERPRETER)
-  const Function& function = Function::CheckedHandle(zone, arguments.ArgAt(0));
-  // TODO(regis): Use icdata.
-  // const Object& ic_data_or_cache = Object::Handle(zone, arguments.ArgAt(1));
-  const Array& orig_arguments_desc =
-      Array::CheckedHandle(zone, arguments.ArgAt(2));
-  const Array& orig_arguments = Array::CheckedHandle(zone, arguments.ArgAt(3));
-  ASSERT(!function.HasCode());
-  ASSERT(function.HasBytecode());
-  const Code& bytecode = Code::Handle(zone, function.Bytecode());
-  Object& result = Object::Handle(zone);
-  Interpreter* interpreter = Interpreter::Current();
-  ASSERT(interpreter != NULL);
-  {
-    TransitionToGenerated transition(thread);
-    result = interpreter->Call(bytecode, orig_arguments_desc, orig_arguments,
-                               thread);
-  }
-  if (result.IsError()) {
-    if (result.IsLanguageError()) {
-      Exceptions::ThrowCompileTimeError(LanguageError::Cast(result));
-      UNREACHABLE();
-    }
-    Exceptions::PropagateError(Error::Cast(result));
-  }
-#else
-  UNREACHABLE();
-#endif
-}
-
 #if !defined(PRODUCT) && !defined(DART_PRECOMPILED_RUNTIME)
 // The following code is used to stress test
 //  - deoptimization
@@ -1828,8 +1854,37 @@ static void HandleStackOverflowTestCases(Thread* thread) {
     JSONStream js;
     // Maybe adjust the rate of future reloads.
     isolate->MaybeIncreaseReloadEveryNStackOverflowChecks();
+
+    const char* script_uri;
+    {
+      NoReloadScope no_reload(isolate, thread);
+      const Library& lib =
+          Library::Handle(isolate->object_store()->_internal_library());
+      const Class& cls = Class::Handle(
+          lib.LookupClass(String::Handle(String::New("VMLibraryHooks"))));
+      const Function& func = Function::Handle(cls.LookupFunction(
+          String::Handle(String::New("get:platformScript"))));
+      Object& result = Object::Handle(
+          DartEntry::InvokeFunction(func, Object::empty_array()));
+      if (result.IsUnwindError()) {
+        Exceptions::PropagateError(Error::Cast(result));
+      }
+      if (!result.IsInstance()) {
+        FATAL1("Bad script uri hook: %s", result.ToCString());
+      }
+      result = DartLibraryCalls::ToString(Instance::Cast(result));
+      if (result.IsUnwindError()) {
+        Exceptions::PropagateError(Error::Cast(result));
+      }
+      if (!result.IsString()) {
+        FATAL1("Bad script uri hook: %s", result.ToCString());
+      }
+      script_uri = result.ToCString();  // Zone allocated.
+    }
+
     // Issue a reload.
-    bool success = isolate->ReloadSources(&js, true /* force_reload */);
+    bool success =
+        isolate->ReloadSources(&js, true /* force_reload */, script_uri);
     if (!success) {
       FATAL1("*** Isolate reload failed:\n%s\n", js.ToCString());
     }
@@ -1907,9 +1962,9 @@ static void HandleOSRRequest(Thread* thread) {
       Code::Handle(function.unoptimized_code()).GetDeoptIdForOsr(frame->pc());
   ASSERT(osr_id != Compiler::kNoOSRDeoptId);
   if (FLAG_trace_osr) {
-    OS::Print("Attempting OSR for %s at id=%" Pd ", count=%" Pd "\n",
-              function.ToFullyQualifiedCString(), osr_id,
-              function.usage_counter());
+    OS::PrintErr("Attempting OSR for %s at id=%" Pd ", count=%" Pd "\n",
+                 function.ToFullyQualifiedCString(), osr_id,
+                 function.usage_counter());
   }
 
   // Since the code is referenced from the frame and the ZoneHandle,
@@ -1941,10 +1996,26 @@ DEFINE_RUNTIME_ENTRY(StackOverflow, 0) {
   // persist.
   uword stack_overflow_flags = thread->GetAndClearStackOverflowFlags();
 
+  if (FLAG_shared_slow_path_triggers_gc) {
+    isolate->heap()->CollectAllGarbage();
+  }
+
+  bool interpreter_stack_overflow = false;
+#if defined(DART_USE_INTERPRETER)
+  // Do not allocate an interpreter, if none is allocated yet.
+  Interpreter* interpreter = Isolate::Current()->interpreter();
+  if (interpreter != NULL) {
+    interpreter_stack_overflow =
+        interpreter->get_sp() >= interpreter->stack_limit();
+  }
+#endif
+
   // If an interrupt happens at the same time as a stack overflow, we
   // process the stack overflow now and leave the interrupt for next
   // time.
-  if (IsCalleeFrameOf(thread->saved_stack_limit(), stack_pos)) {
+  // TODO(regis): Warning: IsCalleeFrameOf is overridden in stack_frame_dbc.h.
+  if (interpreter_stack_overflow ||
+      IsCalleeFrameOf(thread->saved_stack_limit(), stack_pos)) {
     // Use the preallocated stack overflow exception to avoid calling
     // into dart code.
     const Instance& exception =
@@ -2059,7 +2130,7 @@ DEFINE_RUNTIME_ENTRY(OptimizeInvokedFunction, 1) {
 // Patch static call to point to valid code's entry point.
 DEFINE_RUNTIME_ENTRY(FixCallersTarget, 0) {
 #if !defined(DART_PRECOMPILED_RUNTIME)
-  StackFrameIterator iterator(StackFrameIterator::kDontValidateFrames, thread,
+  StackFrameIterator iterator(ValidationPolicy::kDontValidateFrames, thread,
                               StackFrameIterator::kNoCrossThreadIteration);
   StackFrame* frame = iterator.NextFrame();
   ASSERT(frame != NULL);
@@ -2100,7 +2171,7 @@ DEFINE_RUNTIME_ENTRY(FixCallersTarget, 0) {
 // stub.
 DEFINE_RUNTIME_ENTRY(FixAllocationStubTarget, 0) {
 #if !defined(DART_PRECOMPILED_RUNTIME)
-  StackFrameIterator iterator(StackFrameIterator::kDontValidateFrames, thread,
+  StackFrameIterator iterator(ValidationPolicy::kDontValidateFrames, thread,
                               StackFrameIterator::kNoCrossThreadIteration);
   StackFrame* frame = iterator.NextFrame();
   ASSERT(frame != NULL);
@@ -2435,20 +2506,6 @@ DEFINE_RUNTIME_ENTRY(RewindPostDeopt, 0) {
   UNREACHABLE();
 }
 
-DEFINE_LEAF_RUNTIME_ENTRY(intptr_t,
-                          BigintCompare,
-                          2,
-                          RawBigint* left,
-                          RawBigint* right) {
-  Thread* thread = Thread::Current();
-  StackZone zone(thread);
-  HANDLESCOPE(thread);
-  const Bigint& big_left = Bigint::Handle(left);
-  const Bigint& big_right = Bigint::Handle(right);
-  return big_left.CompareWith(big_right);
-}
-END_LEAF_RUNTIME_ENTRY
-
 double DartModulo(double left, double right) {
   double remainder = fmod_ieee(left, right);
   if (remainder == 0.0) {
@@ -2485,7 +2542,7 @@ DEFINE_RUNTIME_ENTRY(InitStaticField, 1) {
 
 // Print the stop message.
 DEFINE_LEAF_RUNTIME_ENTRY(void, PrintStopMessage, 1, const char* message) {
-  OS::Print("Stop message: %s\n", message);
+  OS::PrintErr("Stop message: %s\n", message);
 }
 END_LEAF_RUNTIME_ENTRY
 
@@ -2572,5 +2629,37 @@ DEFINE_RAW_LEAF_RUNTIME_ENTRY(
     1,
     true /* is_float */,
     reinterpret_cast<RuntimeFunction>(static_cast<UnaryMathCFunction>(&atan)));
+
+uword RuntimeEntry::InterpretCallEntry() {
+  return reinterpret_cast<uword>(RuntimeEntry::InterpretCall);
+}
+
+// Interpret a function call. Should be called only for uncompiled functions.
+// argc indicates the number of arguments, including the type arguments.
+// argv points to the first argument.
+// If argc < 0, arguments are passed at decreasing memory addresses from argv.
+RawObject* RuntimeEntry::InterpretCall(RawFunction* function,
+                                       RawArray* argdesc,
+                                       intptr_t argc,
+                                       RawObject** argv,
+                                       Thread* thread) {
+#if defined(DART_USE_INTERPRETER)
+  RawObject* result;
+  Interpreter* interpreter = Interpreter::Current();
+#if defined(DEBUG)
+  uword exit_fp = thread->top_exit_frame_info();
+  ASSERT(exit_fp != 0);
+  ASSERT(thread == Thread::Current());
+  ASSERT(!Function::HasCode(function));
+  ASSERT(Function::HasBytecode(function));
+  ASSERT(interpreter != NULL);
+#endif
+  result = interpreter->Call(function, argdesc, argc, argv, thread);
+  DEBUG_ASSERT(thread->top_exit_frame_info() == exit_fp);
+  return result;
+#else
+  UNREACHABLE();
+#endif  // defined(DART_USE_INTERPRETER)
+}
 
 }  // namespace dart

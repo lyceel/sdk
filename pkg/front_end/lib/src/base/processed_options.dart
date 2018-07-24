@@ -4,6 +4,8 @@
 
 import 'dart:async' show Future;
 
+import 'dart:typed_data' show Uint8List;
+
 import 'package:kernel/binary/ast_from_binary.dart' show BinaryBuilder;
 
 import 'package:kernel/kernel.dart' show CanonicalName, Component, Location;
@@ -16,8 +18,7 @@ import 'package:package_config/packages.dart' show Packages;
 
 import 'package:package_config/packages_file.dart' as package_config;
 
-import 'package:package_config/src/packages_impl.dart'
-    show NonFilePackagesDirectoryPackages, MapPackages;
+import 'package:package_config/src/packages_impl.dart' show MapPackages;
 
 import 'package:source_span/source_span.dart' show SourceSpan, SourceLocation;
 
@@ -33,8 +34,6 @@ import '../api_prototype/file_system.dart'
 import '../base/performance_logger.dart' show PerformanceLog;
 
 import '../fasta/command_line_reporting.dart' as command_line_reporting;
-
-import '../fasta/deprecated_problems.dart' show deprecated_InputError;
 
 import '../fasta/fasta_codes.dart'
     show
@@ -54,9 +53,12 @@ import '../fasta/fasta_codes.dart'
         templateSdkSpecificationNotFound,
         templateSdkSummaryNotFound;
 
+// TODO(ahe): Remove this import.
+import '../fasta/fasta_codes.dart' show templateUnspecified;
+
 import '../fasta/messages.dart' show getLocation;
 
-import '../fasta/problems.dart' show unimplemented;
+import '../fasta/problems.dart' show DebugAbort, unimplemented;
 
 import '../fasta/severity.dart' show Severity;
 
@@ -104,18 +106,18 @@ class ProcessedOptions {
 
   /// The SDK summary, or `null` if it has not been read yet.
   ///
-  /// A summary, also referred to as "outline" internally, is a [Component] where
-  /// all method bodies are left out. In essence, it contains just API
-  /// signatures and constants. When strong-mode is enabled, the summary already
-  /// includes inferred types.
+  /// A summary, also referred to as "outline" internally, is a [Component]
+  /// where all method bodies are left out. In essence, it contains just API
+  /// signatures and constants. When strong-mode is enabled, the summary
+  /// already includes inferred types.
   Component _sdkSummaryComponent;
 
   /// The summary for each uri in `options.inputSummaries`.
   ///
-  /// A summary, also referred to as "outline" internally, is a [Component] where
-  /// all method bodies are left out. In essence, it contains just API
-  /// signatures and constants. When strong-mode is enabled, the summary already
-  /// includes inferred types.
+  /// A summary, also referred to as "outline" internally, is a [Component]
+  /// where all method bodies are left out. In essence, it contains just API
+  /// signatures and constants. When strong-mode is enabled, the summary
+  /// already includes inferred types.
   List<Component> _inputSummariesComponents;
 
   /// Other components that are meant to be linked and compiled with the input
@@ -143,7 +145,7 @@ class ProcessedOptions {
     if (_sdkSummaryBytes == null) {
       if (sdkSummary == null) return null;
       var entry = fileSystem.entityForUri(sdkSummary);
-      _sdkSummaryBytes = await entry.readAsBytes();
+      _sdkSummaryBytes = await _readAsBytes(entry);
     }
     return _sdkSummaryBytes;
   }
@@ -170,17 +172,6 @@ class ProcessedOptions {
 
   bool get throwOnWarningsForDebugging => _raw.throwOnWarningsForDebugging;
 
-  bool get throwOnNitsForDebugging => _raw.throwOnNitsForDebugging;
-
-  /// Like [CompilerOptions.chaseDependencies] but with the appropriate default
-  /// value filled in.
-  bool get chaseDependencies => _raw.chaseDependencies ?? !_modularApi;
-
-  /// Whether the compiler was invoked with a modular API.
-  ///
-  /// Used to determine the default behavior for [chaseDependencies].
-  final bool _modularApi;
-
   /// The entry-points provided to the compiler.
   final List<Uri> inputs;
 
@@ -189,7 +180,7 @@ class ProcessedOptions {
 
   /// Initializes a [ProcessedOptions] object wrapping the given [rawOptions].
   ProcessedOptions(CompilerOptions rawOptions,
-      [this._modularApi = false, this.inputs = const [], this.output])
+      [this.inputs = const [], this.output])
       : this._raw = rawOptions,
         // TODO(sigmund, ahe): create ticker even earlier or pass in a stopwatch
         // collecting time since the start of the VM.
@@ -222,17 +213,17 @@ class ProcessedOptions {
 
   void report(LocatedMessage message, Severity severity,
       {List<LocatedMessage> context}) {
-    context ??= [];
+    context ??= const <LocatedMessage>[];
     if (_raw.onProblem != null) {
-      _raw.onProblem(format(message, severity), severity,
-          context.map((message) => format(message, Severity.context)).toList());
+      List<FormattedMessage> formattedContext =
+          new List<FormattedMessage>(context.length);
+      for (int i = 0; i < context.length; i++) {
+        formattedContext[i] = format(context[i], severity);
+      }
+      _raw.onProblem(format(message, severity), severity, formattedContext);
       if (command_line_reporting.shouldThrowOn(severity)) {
-        if (verbose) print(StackTrace.current);
-        throw new deprecated_InputError(
-            message.uri,
-            message.charOffset,
-            "Compilation aborted due to fatal "
-            "${command_line_reporting.severityName(severity)}.");
+        throw new DebugAbort(
+            message.uri, message.charOffset, severity, StackTrace.current);
       }
       return;
     }
@@ -360,8 +351,8 @@ class ProcessedOptions {
       var uris = _raw.inputSummaries;
       if (uris == null || uris.isEmpty) return const <Component>[];
       // TODO(sigmund): throttle # of concurrent opreations.
-      var allBytes = await Future
-          .wait(uris.map((uri) => fileSystem.entityForUri(uri).readAsBytes()));
+      var allBytes = await Future.wait(
+          uris.map((uri) => _readAsBytes(fileSystem.entityForUri(uri))));
       _inputSummariesComponents =
           allBytes.map((bytes) => loadComponent(bytes, nameRoot)).toList();
     }
@@ -375,8 +366,8 @@ class ProcessedOptions {
       var uris = _raw.linkedDependencies;
       if (uris == null || uris.isEmpty) return const <Component>[];
       // TODO(sigmund): throttle # of concurrent opreations.
-      var allBytes = await Future
-          .wait(uris.map((uri) => fileSystem.entityForUri(uri).readAsBytes()));
+      var allBytes = await Future.wait(
+          uris.map((uri) => _readAsBytes(fileSystem.entityForUri(uri))));
       _linkedDependencies =
           allBytes.map((bytes) => loadComponent(bytes, nameRoot)).toList();
     }
@@ -503,10 +494,9 @@ class ProcessedOptions {
   /// the [FileSystem].
   ///
   /// This function first tries to locate a `.packages` file in the `scriptUri`
-  /// directory. If that is not found, it instead checks for the presence of a
-  /// `packages/` directory in the same place.  If that also fails, it starts
-  /// checking parent directories for a `.packages` file, and stops if it finds
-  /// it.  Otherwise it gives up and returns [Packages.noPackages].
+  /// directory. If that is not found, it starts checking parent directories for
+  /// a `.packages` file, and stops if it finds it. Otherwise it gives up and
+  /// returns [Packages.noPackages].
   ///
   /// Note: this is a fork from `package:package_config/discovery.dart` to adapt
   /// it to use [FileSystem]. The logic here is a mix of the logic in the
@@ -515,9 +505,8 @@ class ProcessedOptions {
   ///    * Like `findPackagesFromFile` resolution searches for parent
   ///    directories
   ///
-  ///    * Like `findPackagesFromNonFile` if we resolve packages as the
-  ///    `packages/` directory, we can't provide a list of packages that are
-  ///    visible.
+  ///    * Unlike package:package_config, it does not look for a `packages/`
+  ///    directory, as that won't be supported in Dart 2.
   Future<Packages> _findPackages(Uri scriptUri) async {
     var dir = scriptUri.resolve('.');
     if (!dir.isAbsolute) {
@@ -537,12 +526,6 @@ class ProcessedOptions {
     // Check for $cwd/.packages
     var candidate = await checkInDir(dir);
     if (candidate != null) return createPackagesFromFile(candidate);
-
-    // Check for $cwd/packages/
-    var packagesDir = dir.resolve("packages/");
-    if (await fileSystem.entityForUri(packagesDir).exists()) {
-      return new NonFilePackagesDirectoryPackages(packagesDir);
-    }
 
     // Check for cwd(/..)+/.packages
     var parentDir = dir.resolve('..');
@@ -596,31 +579,8 @@ class ProcessedOptions {
   }
 
   /// Create a [FileSystem] specific to the current options.
-  ///
-  /// If [chaseDependencies] is false, the resulting file system will be
-  /// hermetic.
   FileSystem _createFileSystem() {
-    var result = _raw.fileSystem;
-    if (!chaseDependencies) {
-      var allInputs = inputs.toSet();
-      allInputs.addAll(_raw.inputSummaries);
-      allInputs.addAll(_raw.linkedDependencies);
-
-      if (sdkSummary != null) allInputs.add(sdkSummary);
-
-      if (_raw.sdkRoot != null) {
-        // TODO(sigmund): refine this, we should be more explicit about when
-        // sdkRoot and libraries.json are allowed to be used.
-        allInputs.add(sdkRoot);
-        allInputs.add(sdkRoot.resolve("lib/libraries.json"));
-      }
-
-      /// Note: Searching the file-system for the package-config is not
-      /// supported in hermetic builds.
-      if (_raw.packagesFileUri != null) allInputs.add(_raw.packagesFileUri);
-      result = new HermeticFileSystem(allInputs, result);
-    }
-    return result;
+    return _raw.fileSystem;
   }
 
   String debugString() {
@@ -648,9 +608,6 @@ class ProcessedOptions {
     writeList('Input Summaries', _raw.inputSummaries);
     writeList('Linked Dependencies', _raw.linkedDependencies);
 
-    sb.writeln('Modular: ${_modularApi}');
-    sb.writeln('Hermetic: ${!chaseDependencies} (provided: '
-        '${_raw.chaseDependencies == null ? null : !_raw.chaseDependencies})');
     sb.writeln('Packages uri: ${_raw.packagesFileUri}');
     sb.writeln('Packages: ${_packages}');
 
@@ -665,13 +622,28 @@ class ProcessedOptions {
 
     sb.writeln('throwOnErrorsForDebugging: ${throwOnErrorsForDebugging}');
     sb.writeln('throwOnWarningsForDebugging: ${throwOnWarningsForDebugging}');
-    sb.writeln('throwOnNitsForDebugging: ${throwOnNitsForDebugging}');
     sb.writeln('exit on problem: ${setExitCodeOnProblem}');
     sb.writeln('Embed sources: ${embedSourceText}');
     sb.writeln('debugDump: ${debugDump}');
     sb.writeln('verbose: ${verbose}');
     sb.writeln('verify: ${verify}');
     return '$sb';
+  }
+
+  Future<List<int>> _readAsBytes(FileSystemEntity file) async {
+    try {
+      return await file.readAsBytes();
+    } on FileSystemException catch (error) {
+      report(
+          // TODO(ahe): Change to templateCantReadFile.withArguments(error.uri,
+          // error.message) when CL 63144 has landed.
+          templateUnspecified
+              .withArguments(
+                  "Error when reading '${error.uri}': ${error.message}")
+              .withoutLocation(),
+          Severity.error);
+      return new Uint8List(0);
+    }
   }
 }
 

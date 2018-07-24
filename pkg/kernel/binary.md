@@ -131,7 +131,7 @@ type CanonicalName {
 
 type ComponentFile {
   UInt32 magic = 0x90ABCDEF;
-  UInt32 formatVersion = 6;
+  UInt32 formatVersion = 9;
   Library[] libraries;
   UriSource sourceMap;
   List<CanonicalName> canonicalNames;
@@ -284,13 +284,17 @@ type Class extends Node {
   CanonicalNameReference canonicalName;
   // An absolute path URI to the .dart file from which the class was created.
   UriReference fileUri;
-  FileOffset fileOffset;
+  FileOffset startFileOffset; // Offset of the start of the class including any annotations.
+  FileOffset fileOffset; // Offset of the name of the class.
   FileOffset fileEndOffset;
-  Byte flags (isAbstract, isEnum, xx); // Where xx is index into ClassLevel
+  Byte flags (levelBit0, levelBit1, isAbstract, isEnum, isAnonymousMixin,
+              isEliminatedMixin); // Where level is index into ClassLevel
   StringReference name;
   List<Expression> annotations;
   List<TypeParameter> typeParameters;
   Option<DartType> superClass;
+  // For transformed mixin application classes (isEliminatedMixin),
+  // original mixedInType is pulled into the end of implementedClasses.
   Option<DartType> mixedInType;
   List<DartType> implementedClasses;
   List<Field> fields;
@@ -325,7 +329,8 @@ type Constructor extends Member {
   Byte tag = 5;
   CanonicalNameReference canonicalName;
   UriReference fileUri;
-  FileOffset fileOffset;
+  FileOffset startFileOffset; // Offset of the start of the constructor including any annotations.
+  FileOffset fileOffset; // Offset of the constructor name.
   FileOffset fileEndOffset;
   Byte flags (isConst, isExternal, isSynthetic);
   Name name;
@@ -349,7 +354,8 @@ type Procedure extends Member {
   CanonicalNameReference canonicalName;
   // An absolute path URI to the .dart file from which the class was created.
   UriReference fileUri;
-  FileOffset fileOffset;
+  FileOffset startFileOffset; // Offset of the start of the procedure including any annotations.
+  FileOffset fileOffset; // Offset of the procedure name.
   FileOffset fileEndOffset;
   Byte kind; // Index into the ProcedureKind enum above.
   Byte flags (isStatic, isAbstract, isExternal, isConst, isForwardingStub,
@@ -400,6 +406,7 @@ type FieldInitializer extends Initializer {
 type SuperInitializer extends Initializer {
   Byte tag = 9;
   Byte isSynthetic;
+  FileOffset fileOffset;
   ConstructorReference target;
   Arguments arguments;
 }
@@ -407,6 +414,7 @@ type SuperInitializer extends Initializer {
 type RedirectingInitializer extends Initializer {
   Byte tag = 10;
   Byte isSynthetic;
+  FileOffset fileOffset;
   ConstructorReference target;
   Arguments arguments;
 }
@@ -900,6 +908,7 @@ type ListConstant extends Constant {
 
 type InstanceConstant extends Constant {
   Byte tag = 7;
+  CanonicalNameReference class;
   List<DartType> typeArguments;
   List<[FieldReference, ConstantReference]> values;
 }

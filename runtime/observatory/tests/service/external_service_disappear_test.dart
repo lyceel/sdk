@@ -24,7 +24,7 @@ var tests = <IsolateTest>[
 
     // Avoid to manually encode and decode messages from the stream
     Stream<String> stream = socket.stream.map(jsonEncode);
-    stream.retype<Object>().pipe(_socket);
+    stream.cast<Object>().pipe(_socket);
     dynamic _decoder(dynamic obj) {
       return jsonDecode(obj);
     }
@@ -32,7 +32,7 @@ var tests = <IsolateTest>[
     final client = _socket.map(_decoder).asBroadcastStream();
 
     // Note: keep this in sync with sdk/lib/vmservice.dart
-    const kServiceDisappeared = 111;
+    const kServiceDisappeared = 112;
     const kServiceDisappeared_Msg = 'Service has disappeared';
 
     const serviceName = 'disapearService';

@@ -14,7 +14,7 @@
 #include "vm/class_finalizer.h"
 #include "vm/compiler/aot/precompiler.h"
 #include "vm/compiler/backend/il_printer.h"
-#include "vm/compiler/frontend/kernel_binary_flowgraph.h"
+#include "vm/compiler/frontend/scope_builder.h"
 #include "vm/compiler/jit/compiler.h"
 #include "vm/compiler_stats.h"
 #include "vm/dart_api_impl.h"
@@ -22,7 +22,8 @@
 #include "vm/growable_array.h"
 #include "vm/handles.h"
 #include "vm/hash_table.h"
-#include "vm/heap.h"
+#include "vm/heap/heap.h"
+#include "vm/heap/safepoint.h"
 #include "vm/isolate.h"
 #include "vm/longjump.h"
 #include "vm/native_arguments.h"
@@ -32,7 +33,6 @@
 #include "vm/os.h"
 #include "vm/regexp_assembler.h"
 #include "vm/resolver.h"
-#include "vm/safepoint.h"
 #include "vm/scanner.h"
 #include "vm/scopes.h"
 #include "vm/stack_frame.h"
@@ -83,8 +83,8 @@ class TraceParser : public ValueObject {
         intptr_t line, column;
         script.GetTokenLocation(token_pos, &line, &column);
         PrintIndent();
-        OS::Print("%s (line %" Pd ", col %" Pd ", token %" Pd ")\n", msg, line,
-                  column, token_pos.value());
+        OS::PrintErr("%s (line %" Pd ", col %" Pd ", token %" Pd ")\n", msg,
+                     line, column, token_pos.value());
       }
       (*indent_)++;
     }
@@ -99,7 +99,7 @@ class TraceParser : public ValueObject {
  private:
   void PrintIndent() {
     for (intptr_t i = 0; i < *indent_; i++) {
-      OS::Print(". ");
+      OS::PrintErr(". ");
     }
   }
   intptr_t* indent_;
@@ -184,7 +184,7 @@ ParsedFunction::ParsedFunction(Thread* thread, const Function& function)
       guarded_fields_(new ZoneGrowableArray<const Field*>()),
       default_parameter_values_(NULL),
       raw_type_arguments_var_(NULL),
-      first_parameter_index_(0),
+      first_parameter_index_(),
       num_stack_locals_(0),
       have_seen_await_expr_(false),
       kernel_scopes_(NULL) {
@@ -253,7 +253,7 @@ void ParsedFunction::Bailout(const char* origin, const char* reason) const {
 
 kernel::ScopeBuildingResult* ParsedFunction::EnsureKernelScopes() {
   if (kernel_scopes_ == NULL) {
-    kernel::StreamingScopeBuilder builder(this);
+    kernel::ScopeBuilder builder(this);
     kernel_scopes_ = builder.BuildScopes();
   }
   return kernel_scopes_;
@@ -320,7 +320,7 @@ void ParsedFunction::AllocateVariables() {
   const intptr_t num_opt_params = function().NumOptionalParameters();
   const intptr_t num_params = num_fixed_params + num_opt_params;
 
-  // Before we start allocating frame indices to variables, we'll setup the
+  // Before we start allocating indices to variables, we'll setup the
   // parameters array, which can be used to access the raw parameters (i.e. not
   // the potentially variables which are in the context)
 
@@ -349,8 +349,8 @@ void ParsedFunction::AllocateVariables() {
         raw_parameter->set_is_captured_parameter(true);
 
       } else {
-        raw_parameter->set_index(kParamEndSlotFromFp +
-                                 function().NumParameters() - param);
+        raw_parameter->set_index(
+            VariableIndex(function().NumParameters() - param));
       }
     }
     raw_parameters_.Add(raw_parameter);
@@ -375,41 +375,36 @@ void ParsedFunction::AllocateVariables() {
 
   // The copy parameters implementation will still write to local variables
   // which we assign indices as with the old CopyParams implementation.
-  intptr_t parameter_frame_index_start;
-  intptr_t reamining_local_variables_start;
+  VariableIndex parameter_index_start;
+  VariableIndex reamining_local_variables_start;
   {
     // Compute start indices to parameters and locals, and the number of
     // parameters to copy.
     if (num_opt_params == 0) {
-      // Parameter i will be at fp[kParamEndSlotFromFp + num_params - i] and
-      // local variable j will be at fp[kFirstLocalSlotFromFp - j].
-      parameter_frame_index_start = first_parameter_index_ =
-          kParamEndSlotFromFp + num_params;
-      reamining_local_variables_start = kFirstLocalSlotFromFp;
+      parameter_index_start = first_parameter_index_ =
+          VariableIndex(num_params);
+      reamining_local_variables_start = VariableIndex(0);
     } else {
-      // Parameter i will be at fp[kFirstLocalSlotFromFp - i] and local variable
-      // j will be at fp[kFirstLocalSlotFromFp - num_params - j].
-      parameter_frame_index_start = first_parameter_index_ =
-          kFirstLocalSlotFromFp;
-      reamining_local_variables_start = first_parameter_index_ - num_params;
+      parameter_index_start = first_parameter_index_ = VariableIndex(0);
+      reamining_local_variables_start = VariableIndex(-num_params);
     }
   }
 
   if (function_type_arguments_ != NULL && num_opt_params > 0) {
-    reamining_local_variables_start--;
+    reamining_local_variables_start =
+        VariableIndex(reamining_local_variables_start.value() - 1);
   }
 
   // Allocate parameters and local variables, either in the local frame or
   // in the context(s).
   bool found_captured_variables = false;
-  int next_free_frame_index = scope->AllocateVariables(
-      parameter_frame_index_start, num_params,
-      parameter_frame_index_start > 0 ? kFirstLocalSlotFromFp
-                                      : kFirstLocalSlotFromFp - num_params,
-      NULL, &found_captured_variables);
+  VariableIndex first_local_index =
+      VariableIndex(parameter_index_start.value() > 0 ? 0 : -num_params);
+  VariableIndex next_free_index = scope->AllocateVariables(
+      parameter_index_start, num_params, first_local_index, NULL,
+      &found_captured_variables);
 
-  // Frame indices are relative to the frame pointer and are decreasing.
-  num_stack_locals_ = -(next_free_frame_index - kFirstLocalSlotFromFp);
+  num_stack_locals_ = -next_free_index.value();
 }
 
 struct CatchParamDesc {
@@ -431,9 +426,7 @@ void ParsedFunction::AllocateIrregexpVariables(intptr_t num_stack_locals) {
   ASSERT(num_params == RegExpMacroAssembler::kParamCount);
   // Compute start indices to parameters and locals, and the number of
   // parameters to copy.
-  // Parameter i will be at fp[kParamEndSlotFromFp + num_params - i] and
-  // local variable j will be at fp[kFirstLocalSlotFromFp - j].
-  first_parameter_index_ = kParamEndSlotFromFp + num_params;
+  first_parameter_index_ = VariableIndex(num_params);
 
   // Frame indices are relative to the frame pointer and are decreasing.
   num_stack_locals_ = num_stack_locals;
@@ -1368,7 +1361,7 @@ RawArray* Parser::EvaluateMetadata() {
 
 SequenceNode* Parser::ParseStaticInitializer() {
   ExpectIdentifier("field name expected");
-  CheckToken(Token::kASSIGN, "field initialier expected");
+  CheckToken(Token::kASSIGN, "field initializer expected");
   ConsumeToken();
   OpenFunctionBlock(parsed_function()->function());
   TokenPosition expr_pos = TokenPos();
@@ -4773,7 +4766,7 @@ void Parser::ParseEnumDeclaration(const GrowableObjectArray& pending_classes,
   String* enum_name =
       ExpectUserDefinedTypeIdentifier("enum type name expected");
   if (FLAG_trace_parser) {
-    OS::Print("TopLevel parsing enum '%s'\n", enum_name->ToCString());
+    OS::PrintErr("TopLevel parsing enum '%s'\n", enum_name->ToCString());
   }
   ExpectToken(Token::kLBRACE);
   if (!IsIdentifier()) {
@@ -4830,7 +4823,7 @@ void Parser::ParseClassDeclaration(const GrowableObjectArray& pending_classes,
   const TokenPosition classname_pos = TokenPos();
   String& class_name = *ExpectUserDefinedTypeIdentifier("class name expected");
   if (FLAG_trace_parser) {
-    OS::Print("TopLevel parsing class '%s'\n", class_name.ToCString());
+    OS::PrintErr("TopLevel parsing class '%s'\n", class_name.ToCString());
   }
   Class& cls = Class::Handle(Z);
   TypeArguments& orig_type_parameters = TypeArguments::Handle(Z);
@@ -5363,8 +5356,8 @@ void Parser::ParseMixinAppAlias(const GrowableObjectArray& pending_classes,
   const TokenPosition classname_pos = TokenPos();
   String& class_name = *ExpectUserDefinedTypeIdentifier("class name expected");
   if (FLAG_trace_parser) {
-    OS::Print("toplevel parsing mixin application alias class '%s'\n",
-              class_name.ToCString());
+    OS::PrintErr("toplevel parsing mixin application alias class '%s'\n",
+                 class_name.ToCString());
   }
   const Object& obj = Object::Handle(Z, library_.LookupLocalObject(class_name));
   if (!obj.IsNull()) {
@@ -5549,8 +5542,8 @@ void Parser::ParseTypedef(const GrowableObjectArray& pending_classes,
          Type::Cast(function_type).signature());
 
   if (FLAG_trace_parser) {
-    OS::Print("TopLevel parsing function type alias '%s'\n",
-              String::Handle(Z, signature_function.Signature()).ToCString());
+    OS::PrintErr("TopLevel parsing function type alias '%s'\n",
+                 String::Handle(Z, signature_function.Signature()).ToCString());
   }
   // The alias should not be marked as finalized yet, since it needs to be
   // checked in the class finalizer for illegal self references.
@@ -5583,6 +5576,16 @@ bool Parser::IsPatchAnnotation(TokenPosition pos) {
   SetPosition(pos);
   ExpectToken(Token::kAT);
   return IsSymbol(Symbols::Patch());
+}
+
+bool Parser::IsPragmaAnnotation(TokenPosition pos) {
+  if (pos == TokenPosition::kNoSource) {
+    return false;
+  }
+  TokenPosScope saved_pos(this);
+  SetPosition(pos);
+  ExpectToken(Token::kAT);
+  return IsSymbol(Symbols::Pragma());
 }
 
 TokenPosition Parser::SkipMetadata() {
@@ -5966,6 +5969,8 @@ void Parser::ParseTopLevelFunction(TopLevel* top_level,
     ConsumeToken();
     is_external = true;
   }
+  const bool has_pragma = IsPragmaAnnotation(metadata_pos);
+
   // Parse optional result type.
   if (IsFunctionReturnType()) {
     // It is too early to resolve the type here, since it can be a result type
@@ -5999,7 +6004,7 @@ void Parser::ParseTopLevelFunction(TopLevel* top_level,
                        /* is_abstract = */ false, is_external,
                        /* is_native = */ false,  // May change.
                        owner, decl_begin_pos));
-
+  func.set_has_pragma(has_pragma);
   ASSERT(innermost_function().IsNull());
   innermost_function_ = func.raw();
 
@@ -7588,7 +7593,7 @@ SequenceNode* Parser::CloseAsyncFunction(const Function& closure,
   const TokenPosition token_pos = ST(closure_body->token_pos());
 
   Function& completer_constructor = Function::ZoneHandle(Z);
-  if (FLAG_sync_async) {
+  if (I->sync_async()) {
     const Class& completer_class = Class::Handle(
         Z, async_lib.LookupClassAllowPrivate(Symbols::_AsyncAwaitCompleter()));
     ASSERT(!completer_class.IsNull());
@@ -7698,7 +7703,7 @@ SequenceNode* Parser::CloseAsyncFunction(const Function& closure,
 
   current_block_->statements->Add(store_async_catch_error_callback);
 
-  if (FLAG_sync_async) {
+  if (I->sync_async()) {
     // Add to AST:
     //   :async_completer.start(:async_op);
     ArgumentListNode* arguments = new (Z) ArgumentListNode(token_pos);
@@ -9285,7 +9290,7 @@ AstNode* Parser::ParseAwaitForStatement(String* label_name) {
   // Build creation of implicit StreamIterator.
   // var :for-in-iter = new StreamIterator(stream_expr).
   const Class& stream_iterator_cls =
-      Class::ZoneHandle(Z, I->object_store()->stream_iterator_class());
+      Class::ZoneHandle(Z, async_lib.LookupClass(Symbols::StreamIterator()));
   ASSERT(!stream_iterator_cls.IsNull());
   const Function& iterator_ctor = Function::ZoneHandle(
       Z,

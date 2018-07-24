@@ -12,14 +12,13 @@ import '../../elements/entities.dart';
 import '../../js/js.dart' as jsAst;
 import '../../js/js.dart' show js;
 import '../../js_backend/js_backend.dart' show CompoundName, Namer;
-import '../../universe/selector.dart' show Selector;
-import '../../world.dart' show ClosedWorld;
+import '../../world.dart' show JClosedWorld;
 import '../js_emitter.dart' hide Emitter, EmitterFactory;
 import '../model.dart';
 import 'emitter.dart';
 
 class ClassEmitter extends CodeEmitterHelper {
-  final ClosedWorld closedWorld;
+  final JClosedWorld closedWorld;
 
   ClassEmitter(this.closedWorld);
 
@@ -94,7 +93,7 @@ class ClassEmitter extends CodeEmitterHelper {
 
     jsAst.Name constructorName = namer.className(classElement);
     OutputUnit outputUnit =
-        compiler.backend.outputUnitData.outputUnitForEntity(classElement);
+        compiler.backend.outputUnitData.outputUnitForClass(classElement);
     emitter.assemblePrecompiledConstructor(
         outputUnit, constructorName, constructorAst, fieldNames);
   }
@@ -117,8 +116,6 @@ class ClassEmitter extends CodeEmitterHelper {
       fields = container.staticFieldsForReflection;
     }
 
-    var fieldMetadata = <jsAst.Expression>[];
-    bool hasMetadata = false;
     bool fieldsAdded = false;
 
     for (Field field in fields) {
@@ -136,9 +133,10 @@ class ClassEmitter extends CodeEmitterHelper {
       // accessors at runtime.
       bool needsFieldsForConstructor = !emitStatics && !classIsNative;
       if (needsFieldsForConstructor || needsAccessor) {
-        dynamic metadata = new jsAst.LiteralNull();
-        fieldMetadata.add(metadata);
         List<jsAst.Literal> fieldNameParts = <jsAst.Literal>[];
+        if (field.nullInitializerInAllocator) {
+          fieldNameParts.add(js.stringPart('0'));
+        }
         if (!needsAccessor) {
           // Emit field for constructor generation.
           assert(!classIsNative);
@@ -179,9 +177,6 @@ class ClassEmitter extends CodeEmitterHelper {
       }
     }
 
-    if (hasMetadata) {
-      builder.fieldMetadata = fieldMetadata;
-    }
     return fieldsAdded;
   }
 
@@ -196,8 +191,6 @@ class ClassEmitter extends CodeEmitterHelper {
       jsAst.Name setterName = method.name;
       compiler.dumpInfoTask
           .registerEntityAst(member, builder.addProperty(setterName, code));
-      generateReflectionDataForFieldGetterOrSetter(member, setterName, builder,
-          isGetter: false);
     }
   }
 
@@ -327,7 +320,7 @@ class ClassEmitter extends CodeEmitterHelper {
     ClassEntity cls = member.enclosingClass;
     jsAst.Name className = namer.className(cls);
     OutputUnit outputUnit =
-        compiler.backend.outputUnitData.outputUnitForEntity(member);
+        compiler.backend.outputUnitData.outputUnitForMember(member);
     emitter
         .cspPrecompiledFunctionFor(outputUnit)
         .add(js('#.prototype.# = #', [className, getterName, function]));
@@ -342,22 +335,9 @@ class ClassEmitter extends CodeEmitterHelper {
     ClassEntity cls = member.enclosingClass;
     jsAst.Name className = namer.className(cls);
     OutputUnit outputUnit =
-        compiler.backend.outputUnitData.outputUnitForEntity(member);
+        compiler.backend.outputUnitData.outputUnitForMember(member);
     emitter
         .cspPrecompiledFunctionFor(outputUnit)
         .add(js('#.prototype.# = #', [className, setterName, function]));
-  }
-
-  void generateReflectionDataForFieldGetterOrSetter(
-      MemberEntity member, jsAst.Name name, ClassBuilder builder,
-      {bool isGetter}) {
-    Selector selector = isGetter
-        ? new Selector.getter(member.memberName.getter)
-        : new Selector.setter(member.memberName.setter);
-    String reflectionName = emitter.getReflectionSelectorName(selector, name);
-    if (reflectionName != null) {
-      var reflectable = js('0');
-      builder.addPropertyByName('+$reflectionName', reflectable);
-    }
   }
 }

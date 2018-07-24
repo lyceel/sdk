@@ -57,14 +57,22 @@ type ConstantArgDesc extends ConstantPoolEntry {
   List<StringReference> names;
 }
 
+enum InvocationKind {
+  method, // x.foo(...) or foo(...)
+  getter, // x.foo
+  setter  // x.foo = ...
+}
+
 type ConstantICData extends ConstantPoolEntry {
   Byte tag = 7;
-  StringReference targetName;
+  Byte invocationKind; // Index in InvocationKind enum.
+  Name targetName;
   ConstantIndex argDesc;
 }
 
 type ConstantStaticICData extends ConstantPoolEntry {
   Byte tag = 8;
+  Byte invocationKind; // Index in InvocationKind enum.
   CanonicalNameReference target;
   ConstantIndex argDesc;
 }
@@ -125,7 +133,7 @@ type ConstantSymbol extends ConstantPoolEntry {
 type ConstantTypeArgumentsForInstanceAllocation extends ConstantPoolEntry {
   Byte tag = 19;
   CanonicalNameReference instantiatingClass;
-  ConstantIndex typeArguments;
+  List<DartType> types;
 }
 
 type ConstantContextOffset extends ConstantPoolEntry {
@@ -143,6 +151,15 @@ type ConstantClosureFunction extends ConstantPoolEntry {
 
 type ConstantEndClosureFunctionScope extends ConstantPoolEntry {
   Byte tag = 22;
+}
+
+type ConstantNativeEntry extends ConstantPoolEntry {
+  Byte tag = 23;
+  StringReference nativeName;
+}
+
+type ConstantSubtypeTestCache extends ConstantPoolEntry {
+  Byte tag = 24;
 }
 
 */
@@ -171,6 +188,8 @@ enum ConstantTag {
   kContextOffset,
   kClosureFunction,
   kEndClosureFunctionScope,
+  kNativeEntry,
+  kSubtypeTestCache,
 }
 
 abstract class ConstantPoolEntry {
@@ -235,6 +254,10 @@ abstract class ConstantPoolEntry {
         return new ConstantClosureFunction.readFromBinary(source);
       case ConstantTag.kEndClosureFunctionScope:
         return new ConstantEndClosureFunctionScope.readFromBinary(source);
+      case ConstantTag.kNativeEntry:
+        return new ConstantNativeEntry.readFromBinary(source);
+      case ConstantTag.kSubtypeTestCache:
+        return new ConstantSubtypeTestCache.readFromBinary(source);
     }
     throw 'Unexpected constant tag $tag';
   }
@@ -397,9 +420,18 @@ class ConstantArgDesc extends ConstantPoolEntry {
   ConstantArgDesc(this.numArguments,
       {this.numTypeArgs = 0, this.argNames = const <String>[]});
 
-  ConstantArgDesc.fromArguments(Arguments args, {bool hasReceiver: false})
-      : this(args.positional.length + args.named.length + (hasReceiver ? 1 : 0),
-            numTypeArgs: args.types.length,
+  ConstantArgDesc.fromArguments(Arguments args,
+      {bool hasReceiver: false, bool isFactory: false})
+      : this(
+            args.positional.length +
+                args.named.length +
+                (hasReceiver ? 1 : 0) +
+                // VM expects that type arguments vector passed to a factory
+                // constructor is counted in numArguments, and not counted in
+                // numTypeArgs.
+                // TODO(alexmarkov): Clean this up.
+                (isFactory ? 1 : 0),
+            numTypeArgs: isFactory ? 0 : args.types.length,
             argNames: new List<String>.from(args.named.map((ne) => ne.name)));
 
   @override
@@ -435,28 +467,46 @@ class ConstantArgDesc extends ConstantPoolEntry {
       listEquals(this.argNames, other.argNames);
 }
 
+enum InvocationKind { method, getter, setter }
+
+String _invocationKindToString(InvocationKind kind) {
+  switch (kind) {
+    case InvocationKind.method:
+      return '';
+    case InvocationKind.getter:
+      return 'get ';
+    case InvocationKind.setter:
+      return 'set ';
+  }
+  throw 'Unexpected InvocationKind $kind';
+}
+
 class ConstantICData extends ConstantPoolEntry {
-  final String targetName;
+  final InvocationKind invocationKind;
+  final Name targetName;
   final int argDescConstantIndex;
 
-  ConstantICData(this.targetName, this.argDescConstantIndex);
+  ConstantICData(
+      this.invocationKind, this.targetName, this.argDescConstantIndex);
 
   @override
   ConstantTag get tag => ConstantTag.kICData;
 
   @override
   void writeValueToBinary(BinarySink sink) {
-    sink.writeStringReference(targetName);
+    sink.writeByte(invocationKind.index);
+    sink.writeName(targetName);
     sink.writeUInt30(argDescConstantIndex);
   }
 
   ConstantICData.readFromBinary(BinarySource source)
-      : targetName = source.readStringReference(),
+      : invocationKind = InvocationKind.values[source.readByte()],
+        targetName = source.readName(),
         argDescConstantIndex = source.readUInt();
 
   @override
-  String toString() =>
-      'ICData target-name \'$targetName\', arg-desc CP#$argDescConstantIndex';
+  String toString() => 'ICData ${_invocationKindToString(invocationKind)}'
+      'target-name \'$targetName\', arg-desc CP#$argDescConstantIndex';
 
   // ConstantICData entries are created per call site and should not be merged,
   // so ConstantICData class uses identity [hashCode] and [operator ==].
@@ -469,12 +519,17 @@ class ConstantICData extends ConstantPoolEntry {
 }
 
 class ConstantStaticICData extends ConstantPoolEntry {
+  final InvocationKind invocationKind;
   final Reference _reference;
   final int argDescConstantIndex;
 
-  ConstantStaticICData(Member member, int argDescConstantIndex)
-      : this.byReference(member.reference, argDescConstantIndex);
-  ConstantStaticICData.byReference(this._reference, this.argDescConstantIndex);
+  ConstantStaticICData(
+      InvocationKind invocationKind, Member member, int argDescConstantIndex)
+      : this.byReference(
+            invocationKind, member.reference, argDescConstantIndex);
+
+  ConstantStaticICData.byReference(
+      this.invocationKind, this._reference, this.argDescConstantIndex);
 
   Member get target => _reference.asMember;
 
@@ -483,17 +538,19 @@ class ConstantStaticICData extends ConstantPoolEntry {
 
   @override
   void writeValueToBinary(BinarySink sink) {
+    sink.writeByte(invocationKind.index);
     sink.writeCanonicalNameReference(getCanonicalNameOfMember(target));
     sink.writeUInt30(argDescConstantIndex);
   }
 
   ConstantStaticICData.readFromBinary(BinarySource source)
-      : _reference = source.readCanonicalNameReference().getReference(),
+      : invocationKind = InvocationKind.values[source.readByte()],
+        _reference = source.readCanonicalNameReference().getReference(),
         argDescConstantIndex = source.readUInt();
 
   @override
-  String toString() =>
-      'StaticICData target \'$target\', arg-desc CP#$argDescConstantIndex';
+  String toString() => 'StaticICData ${_invocationKindToString(invocationKind)}'
+      'target \'$target\', arg-desc CP#$argDescConstantIndex';
 
   // ConstantStaticICData entries are created per call site and should not be
   // merged, so ConstantStaticICData class uses identity [hashCode] and
@@ -839,16 +896,15 @@ class ConstantSymbol extends ConstantPoolEntry {
 
 class ConstantTypeArgumentsForInstanceAllocation extends ConstantPoolEntry {
   final Reference _instantiatingClassRef;
-  final int _typeArgumentsConstantIndex;
+  final List<DartType> typeArgs;
 
   Class get instantiatingClass => _instantiatingClassRef.asClass;
 
   ConstantTypeArgumentsForInstanceAllocation(
-      Class instantiatingClass, int typeArgumentsConstantIndex)
-      : this.byReference(
-            instantiatingClass.reference, typeArgumentsConstantIndex);
+      Class instantiatingClass, List<DartType> typeArgs)
+      : this.byReference(instantiatingClass.reference, typeArgs);
   ConstantTypeArgumentsForInstanceAllocation.byReference(
-      this._instantiatingClassRef, this._typeArgumentsConstantIndex);
+      this._instantiatingClassRef, this.typeArgs);
 
   @override
   ConstantTag get tag => ConstantTag.kTypeArgumentsForInstanceAllocation;
@@ -857,27 +913,29 @@ class ConstantTypeArgumentsForInstanceAllocation extends ConstantPoolEntry {
   void writeValueToBinary(BinarySink sink) {
     sink.writeCanonicalNameReference(
         getCanonicalNameOfClass(instantiatingClass));
-    sink.writeUInt30(_typeArgumentsConstantIndex);
+    sink.writeUInt30(typeArgs.length);
+    typeArgs.forEach(sink.writeDartType);
   }
 
   ConstantTypeArgumentsForInstanceAllocation.readFromBinary(BinarySource source)
       : _instantiatingClassRef =
             source.readCanonicalNameReference().getReference(),
-        _typeArgumentsConstantIndex = source.readUInt();
+        typeArgs = new List<DartType>.generate(
+            source.readUInt(), (_) => source.readDartType());
 
   @override
   String toString() =>
-      'TypeArgumentsForInstanceAllocation $instantiatingClass type-args CP#$_typeArgumentsConstantIndex';
+      'TypeArgumentsForInstanceAllocation $instantiatingClass $typeArgs';
 
   @override
   int get hashCode =>
-      _combineHashes(instantiatingClass.hashCode, _typeArgumentsConstantIndex);
+      _combineHashes(instantiatingClass.hashCode, listHashCode(typeArgs));
 
   @override
   bool operator ==(other) =>
       other is ConstantTypeArgumentsForInstanceAllocation &&
       this.instantiatingClass == other.instantiatingClass &&
-      this._typeArgumentsConstantIndex == other._typeArgumentsConstantIndex;
+      listEquals(this.typeArgs, other.typeArgs);
 }
 
 class ConstantContextOffset extends ConstantPoolEntry {
@@ -962,6 +1020,58 @@ class ConstantEndClosureFunctionScope extends ConstantPoolEntry {
   // ConstantEndClosureFunctionScope entries are created per closure and should
   // not be merged, so ConstantEndClosureFunctionScope class uses identity
   // [hashCode] and [operator ==].
+}
+
+class ConstantNativeEntry extends ConstantPoolEntry {
+  final String nativeName;
+
+  ConstantNativeEntry(this.nativeName);
+
+  @override
+  ConstantTag get tag => ConstantTag.kNativeEntry;
+
+  @override
+  void writeValueToBinary(BinarySink sink) {
+    sink.writeStringReference(nativeName);
+  }
+
+  ConstantNativeEntry.readFromBinary(BinarySource source)
+      : nativeName = source.readStringReference();
+
+  @override
+  String toString() => 'NativeEntry $nativeName';
+
+  @override
+  int get hashCode => nativeName.hashCode;
+
+  @override
+  bool operator ==(other) =>
+      other is ConstantNativeEntry && this.nativeName == other.nativeName;
+}
+
+class ConstantSubtypeTestCache extends ConstantPoolEntry {
+  ConstantSubtypeTestCache();
+
+  @override
+  ConstantTag get tag => ConstantTag.kSubtypeTestCache;
+
+  @override
+  void writeValueToBinary(BinarySink sink) {}
+
+  ConstantSubtypeTestCache.readFromBinary(BinarySource source);
+
+  @override
+  String toString() => 'SubtypeTestCache';
+
+  // ConstantSubtypeTestCache entries are created per subtype test site and
+  // should not be merged, so ConstantSubtypeTestCache class uses identity
+  // [hashCode] and [operator ==].
+
+  @override
+  int get hashCode => identityHashCode(this);
+
+  @override
+  bool operator ==(other) => identical(this, other);
 }
 
 class ConstantPool {

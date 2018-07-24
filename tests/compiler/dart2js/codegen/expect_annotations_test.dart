@@ -4,15 +4,17 @@
 
 import 'package:expect/expect.dart';
 import 'package:async_helper/async_helper.dart';
+import 'package:compiler/src/commandline_options.dart';
 import 'package:compiler/src/compiler.dart';
 import 'package:compiler/src/elements/entities.dart';
+import 'package:compiler/src/inferrer/typemasks/masks.dart';
 import 'package:compiler/src/js_backend/annotations.dart' as optimizerHints;
 import 'package:compiler/src/types/types.dart';
-import 'package:compiler/src/world.dart' show ClosedWorld;
+import 'package:compiler/src/world.dart' show JClosedWorld;
 import '../inference/type_mask_test_helper.dart';
 import '../memory_compiler.dart';
 
-const Map MEMORY_SOURCE_FILES = const {
+const Map<String, String> MEMORY_SOURCE_FILES = const {
   'main.dart': r"""
 import 'package:expect/expect.dart';
 
@@ -55,10 +57,10 @@ main() {
 }
 
 runTest() async {
-  CompilationResult result =
-      await runCompiler(memorySourceFiles: MEMORY_SOURCE_FILES);
+  CompilationResult result = await runCompiler(
+      memorySourceFiles: MEMORY_SOURCE_FILES, options: [Flags.noPreviewDart2]);
   Compiler compiler = result.compiler;
-  ClosedWorld closedWorld = compiler.backendClosedWorldForTesting;
+  JClosedWorld closedWorld = compiler.backendClosedWorldForTesting;
   Expect.isFalse(compiler.compilationFailed, 'Unsuccessful compilation');
   Expect.isNotNull(closedWorld.commonElements.expectNoInlineClass,
       'NoInlineClass is unresolved.');

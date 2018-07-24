@@ -17,6 +17,7 @@ async_helper:pkg/async_helper/lib
 barback:third_party/pkg/barback/lib
 bazel_worker:third_party/pkg/bazel_worker/lib
 boolean_selector:third_party/pkg/boolean_selector/lib
+build_integration:pkg/build_integration/lib
 charcode:third_party/pkg/charcode/lib
 charted:third_party/observatory_pub_packages/packages/charted/lib
 cli_util:third_party/pkg/cli_util/lib
@@ -34,7 +35,6 @@ dart_style:third_party/pkg_tested/dart_style/lib
 dartdoc:third_party/pkg/dartdoc/lib
 dev_compiler:pkg/dev_compiler/lib
 expect:pkg/expect/lib
-fasta:pkg/fasta/lib
 fixnum:third_party/pkg/fixnum/lib
 front_end:pkg/front_end/lib
 func:third_party/pkg/func/lib
@@ -82,6 +82,7 @@ shelf:third_party/pkg/shelf/lib
 shelf_packages_handler:third_party/pkg/shelf_packages_handler/lib
 shelf_static:third_party/pkg/shelf_static/lib
 shelf_web_socket:third_party/pkg/shelf_web_socket/lib
+smith:pkg/smith/lib
 source_map_stack_trace:third_party/pkg/source_map_stack_trace/lib
 sourcemap_testing:pkg/sourcemap_testing/lib
 source_maps:third_party/pkg/source_maps/lib

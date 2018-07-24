@@ -13,7 +13,6 @@
 #include "vm/compiler/assembler/assembler.h"
 #include "vm/compiler/assembler/disassembler_kbc.h"
 #include "vm/compiler/jit/compiler.h"
-#include "vm/constants_kbc.h"
 #include "vm/cpu.h"
 #include "vm/dart_entry.h"
 #include "vm/debugger.h"
@@ -144,10 +143,6 @@ class InterpreterHelpers {
           case kMintCid:
             return (static_cast<RawMint*>(lhs)->ptr()->value_ ==
                     static_cast<RawMint*>(rhs)->ptr()->value_);
-
-          case kBigintCid:
-            return (DLRT_BigintCompare(static_cast<RawBigint*>(lhs),
-                                       static_cast<RawBigint*>(rhs)) == 0);
         }
       }
     }
@@ -627,6 +622,7 @@ void Interpreter::Exit(Thread* thread,
   thread->set_top_exit_frame_info(reinterpret_cast<uword>(fp_));
 #if defined(DEBUG)
   if (IsTracingExecution()) {
+    THR_Print("%" Pu64 " ", icount_);
     THR_Print("Exiting interpreter 0x%" Px " at fp_ 0x%" Px "\n",
               reinterpret_cast<uword>(this), reinterpret_cast<uword>(fp_));
   }
@@ -844,62 +840,18 @@ DART_FORCE_INLINE static void LeaveSyntheticFrame(RawObject*** FP,
   *SP = fp - kKBCDartFrameFixedSize;
 }
 
-DART_NOINLINE bool Interpreter::InvokeCompiled(Thread* thread,
-                                               RawFunction* function,
-                                               RawArray* argdesc,
-                                               RawObject** call_base,
-                                               RawObject** call_top,
-                                               uint32_t** pc,
-                                               RawObject*** FP,
-                                               RawObject*** SP) {
-  InterpreterSetjmpBuffer buffer(this);
+// Note: functions below are marked DART_NOINLINE to recover performance on
+// ARM where inlining these functions into the interpreter loop seemed to cause
+// some code quality issues.
+static DART_NOINLINE bool InvokeRuntime(Thread* thread,
+                                        Interpreter* interpreter,
+                                        RuntimeFunction drt,
+                                        const NativeArguments& args) {
+  InterpreterSetjmpBuffer buffer(interpreter);
   if (!setjmp(buffer.buffer_)) {
-#if defined(USING_SIMULATOR) || defined(TARGET_ARCH_DBC)
-    // TODO(regis): Revisit.
-    UNIMPLEMENTED();
-#endif
-    ASSERT(thread->vm_tag() == VMTag::kDartTagId);
-    ASSERT(thread->execution_state() == Thread::kThreadInGenerated);
-    if (!Function::HasCode(function)) {
-      ASSERT(!Function::HasBytecode(function));
-      call_top[1] = 0;  // Code result.
-      call_top[2] = function;
-      CallRuntime(thread, *FP, call_top + 3, *pc, 1, call_top + 2, call_top + 1,
-                  reinterpret_cast<uword>(DRT_CompileFunction));
-    }
-    if (Function::HasCode(function)) {
-      RawCode* code = function->ptr()->code_;
-      ASSERT(code != StubCode::LazyCompile_entry()->code());
-      // TODO(regis): Do we really need a stub? Try to invoke directly.
-
-      // On success, returns a RawInstance.  On failure, a RawError.
-      typedef RawObject* (*invokestub)(RawCode * code, RawArray * argdesc,
-                                       RawObject * *arg0, Thread * thread);
-      invokestub entrypoint = reinterpret_cast<invokestub>(
-          StubCode::InvokeDartCodeFromBytecode_entry()->EntryPoint());
-      *call_base = entrypoint(code, argdesc, call_base, thread);
-      // Result is at call_base;
-      *SP = call_base;
-    } else {
-      ASSERT(Function::HasBytecode(function));
-      // Bytecode was loaded in the above compilation step.
-      // Stay in interpreter.
-      RawCode* bytecode = function->ptr()->bytecode_;
-      RawObject** callee_fp = call_top + kKBCDartFrameFixedSize;
-      callee_fp[kKBCPcMarkerSlotFromFp] = bytecode;
-      callee_fp[kKBCSavedCallerPcSlotFromFp] =
-          reinterpret_cast<RawObject*>(*pc);
-      callee_fp[kKBCSavedCallerFpSlotFromFp] =
-          reinterpret_cast<RawObject*>(*FP);
-      pp_ = bytecode->ptr()->object_pool_;
-      *pc = reinterpret_cast<uint32_t*>(bytecode->ptr()->entry_point_);
-      pc_ = reinterpret_cast<uword>(*pc);  // For the profiler.
-      *FP = callee_fp;
-      *SP = *FP - 1;
-      // Dispatch will interpret function.
-    }
-    ASSERT(thread->vm_tag() == VMTag::kDartTagId);
-    ASSERT(thread->execution_state() == Thread::kThreadInGenerated);
+    thread->set_vm_tag(reinterpret_cast<uword>(drt));
+    drt(args);
+    thread->set_vm_tag(VMTag::kDartTagId);
     thread->set_top_exit_frame_info(0);
     return true;
   } else {
@@ -907,7 +859,245 @@ DART_NOINLINE bool Interpreter::InvokeCompiled(Thread* thread,
   }
 }
 
-DART_FORCE_INLINE void Interpreter::Invoke(Thread* thread,
+static DART_NOINLINE bool InvokeNative(Thread* thread,
+                                       Interpreter* interpreter,
+                                       NativeFunctionWrapper wrapper,
+                                       Dart_NativeFunction function,
+                                       Dart_NativeArguments args) {
+  InterpreterSetjmpBuffer buffer(interpreter);
+  if (!setjmp(buffer.buffer_)) {
+    thread->set_vm_tag(reinterpret_cast<uword>(function));
+    wrapper(args, function);
+    thread->set_vm_tag(VMTag::kDartTagId);
+    thread->set_top_exit_frame_info(0);
+    return true;
+  } else {
+    return false;
+  }
+}
+
+DART_NOINLINE bool Interpreter::InvokeCompiled(Thread* thread,
+                                               RawFunction* function,
+                                               RawObject** call_base,
+                                               RawObject** call_top,
+                                               uint32_t** pc,
+                                               RawObject*** FP,
+                                               RawObject*** SP) {
+#if defined(USING_SIMULATOR) || defined(TARGET_ARCH_DBC)
+  // TODO(regis): Revisit.
+  UNIMPLEMENTED();
+#endif
+  ASSERT(Function::HasCode(function));
+  RawCode* code = function->ptr()->code_;
+  ASSERT(code != StubCode::LazyCompile_entry()->code());
+  // TODO(regis): Once we share the same stack, try to invoke directly.
+#if defined(DEBUG)
+  if (IsTracingExecution()) {
+    THR_Print("%" Pu64 " ", icount_);
+    THR_Print("invoking compiled %s\n", Function::Handle(function).ToCString());
+  }
+#endif
+  // On success, returns a RawInstance.  On failure, a RawError.
+  typedef RawObject* (*invokestub)(RawCode * code, RawArray * argdesc,
+                                   RawObject * *arg0, Thread * thread);
+  invokestub entrypoint = reinterpret_cast<invokestub>(
+      StubCode::InvokeDartCodeFromBytecode_entry()->EntryPoint());
+  RawObject* result;
+  Exit(thread, *FP, call_top + 1, *pc);
+  {
+    InterpreterSetjmpBuffer buffer(this);
+    if (!setjmp(buffer.buffer_)) {
+      thread->set_vm_tag(reinterpret_cast<uword>(entrypoint));
+      result = entrypoint(code, argdesc_, call_base, thread);
+      thread->set_vm_tag(VMTag::kDartTagId);
+      thread->set_top_exit_frame_info(0);
+      ASSERT(thread->execution_state() == Thread::kThreadInGenerated);
+    } else {
+      return false;
+    }
+  }
+  // Pop args and push result.
+  *SP = call_base;
+  **SP = result;
+  pp_ = InterpreterHelpers::FrameCode(*FP)->ptr()->object_pool_;
+
+  // It is legit to call the constructor of an error object, however a
+  // result of class UnhandledException must be propagated.
+  if (result->IsHeapObject() &&
+      result->GetClassId() == kUnhandledExceptionCid) {
+    (*SP)[0] = UnhandledException::RawCast(result)->ptr()->exception_;
+    (*SP)[1] = UnhandledException::RawCast(result)->ptr()->stacktrace_;
+    (*SP)[2] = 0;  // Space for result.
+    Exit(thread, *FP, *SP + 3, *pc);
+    NativeArguments args(thread, 2, *SP, *SP + 2);
+    if (!InvokeRuntime(thread, this, DRT_ReThrow, args)) {
+      return false;
+    }
+    UNREACHABLE();
+  }
+  return true;
+}
+
+DART_NOINLINE bool Interpreter::ProcessInvocation(bool* invoked,
+                                                  Thread* thread,
+                                                  RawFunction* function,
+                                                  RawObject** call_base,
+                                                  RawObject** call_top,
+                                                  uint32_t** pc,
+                                                  RawObject*** FP,
+                                                  RawObject*** SP) {
+  ASSERT(!Function::HasCode(function) && !Function::HasBytecode(function));
+  // If the function is an implicit getter or setter, process its invocation
+  // here without code or bytecode.
+  RawFunction::Kind kind = Function::kind(function);
+  switch (kind) {
+    case RawFunction::kImplicitGetter: {
+      // Field object is cached in function's data_.
+      RawInstance* instance = reinterpret_cast<RawInstance*>(*call_base);
+      RawField* field = reinterpret_cast<RawField*>(function->ptr()->data_);
+      intptr_t offset_in_words = Smi::Value(field->ptr()->value_.offset_);
+      *SP = call_base;
+      **SP = reinterpret_cast<RawObject**>(instance->ptr())[offset_in_words];
+      *invoked = true;
+      return true;
+    }
+    case RawFunction::kImplicitSetter: {
+      // Field object is cached in function's data_.
+      RawInstance* instance = reinterpret_cast<RawInstance*>(*call_base);
+      RawField* field = reinterpret_cast<RawField*>(function->ptr()->data_);
+      intptr_t offset_in_words = Smi::Value(field->ptr()->value_.offset_);
+      RawAbstractType* field_type = field->ptr()->type_;
+      const classid_t cid =
+          field_type->GetClassId() == kTypeCid
+              ? Smi::Value(reinterpret_cast<RawSmi*>(
+                    Type::RawCast(field_type)->ptr()->type_class_id_))
+              : kIllegalCid;  // Not really illegal, but not a Type to skip.
+      // Perform type test of value if field type is not one of dynamic, object,
+      // or void, and if the value is not null.
+      RawObject* null_value = Object::null();
+      RawObject* value = *(call_base + 1);
+      if (cid != kDynamicCid && cid != kInstanceCid && cid != kVoidCid &&
+          value != null_value) {
+        RawSubtypeTestCache* cache = field->ptr()->type_test_cache_;
+        if (cache->GetClassId() != kSubtypeTestCacheCid) {
+          // Allocate new cache.
+          call_top[1] = null_value;  // Result.
+          Exit(thread, *FP, call_top + 2, *pc);
+          NativeArguments native_args(thread, 0, call_top + 1, call_top + 1);
+          if (!InvokeRuntime(thread, this, DRT_AllocateSubtypeTestCache,
+                             native_args)) {
+            *invoked = true;
+            return false;
+          }
+          cache = reinterpret_cast<RawSubtypeTestCache*>(call_top[1]);
+          field->ptr()->type_test_cache_ = cache;
+        }
+        // Push arguments of type test.
+        // Type checked value is at call_base + 1.
+        // Provide type arguments of instance as instantiator.
+        RawClass* instance_class = thread->isolate()->class_table()->At(
+            InterpreterHelpers::GetClassId(instance));
+        call_base[2] =
+            instance_class->ptr()->num_type_arguments_ > 0
+                ? reinterpret_cast<RawObject**>(
+                      instance
+                          ->ptr())[instance_class->ptr()
+                                       ->type_arguments_field_offset_in_words_]
+                : null_value;
+        call_base[3] = null_value;  // Implicit setters cannot be generic.
+        call_base[4] = field_type;
+        call_base[5] = field->ptr()->name_;
+        if (!AssertAssignable(thread, *pc, *FP, call_base + 5, call_base + 1,
+                              cache)) {
+          *invoked = true;
+          return false;
+        }
+      }
+      // Check value cid according to field.guarded_cid().
+      // The interpreter should never see a cloned field.
+      ASSERT(field->ptr()->owner_->GetClassId() != kFieldCid);
+      const classid_t field_guarded_cid = field->ptr()->guarded_cid_;
+      const classid_t field_nullability_cid = field->ptr()->is_nullable_;
+      const classid_t value_cid = InterpreterHelpers::GetClassId(value);
+      if (value_cid != field_guarded_cid &&
+          value_cid != field_nullability_cid) {
+        if (Smi::Value(field->ptr()->guarded_list_length_) <
+                Field::kUnknownFixedLength &&
+            field_guarded_cid == kIllegalCid) {
+          field->ptr()->guarded_cid_ = value_cid;
+          field->ptr()->is_nullable_ = value_cid;
+        } else if (field_guarded_cid != kDynamicCid) {
+          call_top[1] = 0;  // Unused result of runtime call.
+          call_top[2] = field;
+          call_top[3] = value;
+          Exit(thread, *FP, call_top + 4, *pc);
+          NativeArguments native_args(thread, 2, call_top + 2, call_top + 1);
+          if (!InvokeRuntime(thread, this, DRT_UpdateFieldCid, native_args)) {
+            *invoked = true;
+            return false;
+          }
+        }
+      }
+      reinterpret_cast<RawObject**>(instance->ptr())[offset_in_words] = value;
+      *SP = call_base;
+      **SP = null_value;
+      *invoked = true;
+      return true;
+    }
+    case RawFunction::kImplicitStaticFinalGetter: {
+      // Field object is cached in function's data_.
+      RawField* field = reinterpret_cast<RawField*>(function->ptr()->data_);
+      RawInstance* value = field->ptr()->value_.static_value_;
+      if (value == Object::sentinel().raw() ||
+          value == Object::transition_sentinel().raw()) {
+        call_top[1] = 0;  // Unused result of invoking the initializer.
+        call_top[2] = field;
+        Exit(thread, *FP, call_top + 3, *pc);
+        NativeArguments native_args(thread, 1, call_top + 2, call_top + 1);
+        if (!InvokeRuntime(thread, this, DRT_InitStaticField, native_args)) {
+          *invoked = true;
+          return false;
+        }
+        pp_ = InterpreterHelpers::FrameCode(*FP)->ptr()->object_pool_;
+        // The field is initialized by the runtime call, but not returned.
+        value = field->ptr()->value_.static_value_;
+      }
+      // Field was initialized. Return its value.
+      *SP = call_base;
+      **SP = value;
+      *invoked = true;
+      return true;
+    }
+    case RawFunction::kNoSuchMethodDispatcher:
+    case RawFunction::kInvokeFieldDispatcher:
+    case RawFunction::kMethodExtractor:
+      // TODO(regis): Implement. For now, use jitted version.
+      break;
+    default:
+      break;
+  }
+  // Compile the function to either generate code or load bytecode.
+  call_top[1] = 0;  // Code result.
+  call_top[2] = function;
+  Exit(thread, *FP, call_top + 3, *pc);
+  NativeArguments native_args(thread, 1, call_top + 2, call_top + 1);
+  if (!InvokeRuntime(thread, this, DRT_CompileFunction, native_args)) {
+    return false;
+  }
+  if (Function::HasCode(function)) {
+    *invoked = true;
+    return InvokeCompiled(thread, function, call_base, call_top, pc, FP, SP);
+  }
+  ASSERT(Function::HasBytecode(function));
+  // Bytecode was loaded in the above compilation step.
+  // The caller will dispatch to the function's bytecode.
+  *invoked = false;
+  ASSERT(thread->vm_tag() == VMTag::kDartTagId);
+  ASSERT(thread->top_exit_frame_info() == 0);
+  return true;
+}
+
+DART_FORCE_INLINE bool Interpreter::Invoke(Thread* thread,
                                            RawObject** call_base,
                                            RawObject** call_top,
                                            uint32_t** pc,
@@ -916,27 +1106,34 @@ DART_FORCE_INLINE void Interpreter::Invoke(Thread* thread,
   RawObject** callee_fp = call_top + kKBCDartFrameFixedSize;
 
   RawFunction* function = FrameFunction(callee_fp);
-  if (Function::HasCode(function) || !Function::HasBytecode(function)) {
-    // TODO(regis): If the function is a dispatcher, execute the dispatch here.
-    if (!InvokeCompiled(thread, function, argdesc_, call_base, call_top, pc, FP,
-                        SP)) {
-      // Handle exception
-      *FP = reinterpret_cast<RawObject**>(fp_);
-      *pc = reinterpret_cast<uint32_t*>(pc_);
-      pp_ = InterpreterHelpers::FrameCode(*FP)->ptr()->object_pool_;
-      *SP = *FP - 1;
-    }
-  } else {
-    RawCode* bytecode = function->ptr()->bytecode_;
-    callee_fp[kKBCPcMarkerSlotFromFp] = bytecode;
-    callee_fp[kKBCSavedCallerPcSlotFromFp] = reinterpret_cast<RawObject*>(*pc);
-    callee_fp[kKBCSavedCallerFpSlotFromFp] = reinterpret_cast<RawObject*>(*FP);
-    pp_ = bytecode->ptr()->object_pool_;
-    *pc = reinterpret_cast<uint32_t*>(bytecode->ptr()->entry_point_);
-    pc_ = reinterpret_cast<uword>(*pc);  // For the profiler.
-    *FP = callee_fp;
-    *SP = *FP - 1;
+  if (Function::HasCode(function)) {
+    return InvokeCompiled(thread, function, call_base, call_top, pc, FP, SP);
   }
+  if (!Function::HasBytecode(function)) {
+    bool invoked = false;
+    bool result = ProcessInvocation(&invoked, thread, function, call_base,
+                                    call_top, pc, FP, SP);
+    if (invoked || !result) {
+      return result;
+    }
+    ASSERT(Function::HasBytecode(function));
+  }
+#if defined(DEBUG)
+  if (IsTracingExecution()) {
+    THR_Print("%" Pu64 " ", icount_);
+    THR_Print("invoking %s\n", Function::Handle(function).ToCString());
+  }
+#endif
+  RawCode* bytecode = function->ptr()->bytecode_;
+  callee_fp[kKBCPcMarkerSlotFromFp] = bytecode;
+  callee_fp[kKBCSavedCallerPcSlotFromFp] = reinterpret_cast<RawObject*>(*pc);
+  callee_fp[kKBCSavedCallerFpSlotFromFp] = reinterpret_cast<RawObject*>(*FP);
+  pp_ = bytecode->ptr()->object_pool_;
+  *pc = reinterpret_cast<uint32_t*>(bytecode->ptr()->entry_point_);
+  pc_ = reinterpret_cast<uword>(*pc);  // For the profiler.
+  *FP = callee_fp;
+  *SP = *FP - 1;
+  return true;
 }
 
 void Interpreter::InlineCacheMiss(int checked_args,
@@ -973,7 +1170,7 @@ void Interpreter::InlineCacheMiss(int checked_args,
               result, reinterpret_cast<uword>(handler));
 }
 
-DART_FORCE_INLINE void Interpreter::InstanceCall1(Thread* thread,
+DART_FORCE_INLINE bool Interpreter::InstanceCall1(Thread* thread,
                                                   RawICData* icdata,
                                                   RawObject** call_base,
                                                   RawObject** top,
@@ -1015,10 +1212,10 @@ DART_FORCE_INLINE void Interpreter::InstanceCall1(Thread* thread,
                     *pc, *FP, *SP);
   }
 
-  Invoke(thread, call_base, top, pc, FP, SP);
+  return Invoke(thread, call_base, top, pc, FP, SP);
 }
 
-DART_FORCE_INLINE void Interpreter::InstanceCall2(Thread* thread,
+DART_FORCE_INLINE bool Interpreter::InstanceCall2(Thread* thread,
                                                   RawICData* icdata,
                                                   RawObject** call_base,
                                                   RawObject** top,
@@ -1063,7 +1260,7 @@ DART_FORCE_INLINE void Interpreter::InstanceCall2(Thread* thread,
                     *pc, *FP, *SP);
   }
 
-  Invoke(thread, call_base, top, pc, FP, SP);
+  return Invoke(thread, call_base, top, pc, FP, SP);
 }
 
 DART_FORCE_INLINE void Interpreter::PrepareForTailCall(
@@ -1082,42 +1279,6 @@ DART_FORCE_INLINE void Interpreter::PrepareForTailCall(
   pc_ = reinterpret_cast<uword>(pc);  // For the profiler.
   pp_ = code->ptr()->object_pool_;
   argdesc_ = args_desc;
-}
-
-// Note: functions below are marked DART_NOINLINE to recover performance on
-// ARM where inlining these functions into the interpreter loop seemed to cause
-// some code quality issues.
-static DART_NOINLINE bool InvokeRuntime(Thread* thread,
-                                        Interpreter* interpreter,
-                                        RuntimeFunction drt,
-                                        const NativeArguments& args) {
-  InterpreterSetjmpBuffer buffer(interpreter);
-  if (!setjmp(buffer.buffer_)) {
-    thread->set_vm_tag(reinterpret_cast<uword>(drt));
-    drt(args);
-    thread->set_vm_tag(VMTag::kDartTagId);
-    thread->set_top_exit_frame_info(0);
-    return true;
-  } else {
-    return false;
-  }
-}
-
-static DART_NOINLINE bool InvokeNative(Thread* thread,
-                                       Interpreter* interpreter,
-                                       NativeFunctionWrapper wrapper,
-                                       Dart_NativeFunction function,
-                                       Dart_NativeArguments args) {
-  InterpreterSetjmpBuffer buffer(interpreter);
-  if (!setjmp(buffer.buffer_)) {
-    thread->set_vm_tag(reinterpret_cast<uword>(function));
-    wrapper(args, function);
-    thread->set_vm_tag(VMTag::kDartTagId);
-    thread->set_top_exit_frame_info(0);
-    return true;
-  } else {
-    return false;
-  }
 }
 
 // Note:
@@ -1254,16 +1415,18 @@ static DART_NOINLINE bool InvokeNative(Thread* thread,
     FP = reinterpret_cast<RawObject**>(fp_);                                   \
     pc = reinterpret_cast<uint32_t*>(pc_);                                     \
     if ((reinterpret_cast<uword>(pc) & 2) != 0) { /* Entry frame? */           \
-      fp_ = reinterpret_cast<RawObject**>(fp_[0]);                             \
-      thread->set_top_exit_frame_info(reinterpret_cast<uword>(fp_));           \
+      uword exit_fp = reinterpret_cast<uword>(fp_[0]);                         \
+      thread->set_top_exit_frame_info(exit_fp);                                \
       thread->set_top_resource(top_resource);                                  \
       thread->set_vm_tag(vm_tag);                                              \
       if (IsTracingExecution()) {                                              \
+        THR_Print("%" Pu64 " ", icount_);                                      \
         THR_Print("Returning exception from interpreter 0x%" Px                \
-                  " at fp_ 0x%" Px "\n",                                       \
-                  reinterpret_cast<uword>(this),                               \
-                  reinterpret_cast<uword>(fp_));                               \
+                  " at fp_ 0x%" Px " exit 0x%" Px "\n",                        \
+                  reinterpret_cast<uword>(this), reinterpret_cast<uword>(fp_), \
+                  exit_fp);                                                    \
       }                                                                        \
+      ASSERT(reinterpret_cast<uword>(fp_) < stack_limit());                    \
       return special_[kExceptionSpecialIndex];                                 \
     }                                                                          \
     pp_ = InterpreterHelpers::FrameCode(FP)->ptr()->object_pool_;              \
@@ -1277,8 +1440,8 @@ static DART_NOINLINE bool InvokeNative(Thread* thread,
     FP = reinterpret_cast<RawObject**>(fp_);                                   \
     pc = reinterpret_cast<uint32_t*>(pc_);                                     \
     if ((reinterpret_cast<uword>(pc) & 2) != 0) { /* Entry frame? */           \
-      fp_ = reinterpret_cast<RawObject**>(fp_[0]);                             \
-      thread->set_top_exit_frame_info(reinterpret_cast<uword>(fp_));           \
+      uword exit_fp = reinterpret_cast<uword>(fp_[0]);                         \
+      thread->set_top_exit_frame_info(exit_fp);                                \
       thread->set_top_resource(top_resource);                                  \
       thread->set_vm_tag(vm_tag);                                              \
       return special_[kExceptionSpecialIndex];                                 \
@@ -1366,9 +1529,93 @@ DART_FORCE_INLINE bool Interpreter::Deoptimize(Thread* thread,
   return true;
 }
 
-RawObject* Interpreter::Call(const Code& code,
+bool Interpreter::AssertAssignable(Thread* thread,
+                                   uint32_t* pc,
+                                   RawObject** FP,
+                                   RawObject** call_top,
+                                   RawObject** args,
+                                   RawSubtypeTestCache* cache) {
+  RawObject* null_value = Object::null();
+  if (cache != null_value) {
+    RawInstance* instance = static_cast<RawInstance*>(args[0]);
+    RawTypeArguments* instantiator_type_arguments =
+        static_cast<RawTypeArguments*>(args[1]);
+    RawTypeArguments* function_type_arguments =
+        static_cast<RawTypeArguments*>(args[2]);
+
+    const intptr_t cid = InterpreterHelpers::GetClassId(instance);
+
+    RawTypeArguments* instance_type_arguments =
+        static_cast<RawTypeArguments*>(null_value);
+    RawObject* instance_cid_or_function;
+    if (cid == kClosureCid) {
+      RawClosure* closure = static_cast<RawClosure*>(instance);
+      if (closure->ptr()->function_type_arguments_ != TypeArguments::null()) {
+        // Cache cannot be used for generic closures.
+        goto AssertAssignableCallRuntime;
+      }
+      instance_type_arguments = closure->ptr()->instantiator_type_arguments_;
+      instance_cid_or_function = closure->ptr()->function_;
+    } else {
+      instance_cid_or_function = Smi::New(cid);
+
+      RawClass* instance_class = thread->isolate()->class_table()->At(cid);
+      if (instance_class->ptr()->num_type_arguments_ < 0) {
+        goto AssertAssignableCallRuntime;
+      } else if (instance_class->ptr()->num_type_arguments_ > 0) {
+        instance_type_arguments = reinterpret_cast<RawTypeArguments**>(
+            instance->ptr())[instance_class->ptr()
+                                 ->type_arguments_field_offset_in_words_];
+      }
+    }
+
+    for (RawObject** entries = cache->ptr()->cache_->ptr()->data();
+         entries[0] != null_value;
+         entries += SubtypeTestCache::kTestEntryLength) {
+      if ((entries[SubtypeTestCache::kInstanceClassIdOrFunction] ==
+           instance_cid_or_function) &&
+          (entries[SubtypeTestCache::kInstanceTypeArguments] ==
+           instance_type_arguments) &&
+          (entries[SubtypeTestCache::kInstantiatorTypeArguments] ==
+           instantiator_type_arguments) &&
+          (entries[SubtypeTestCache::kFunctionTypeArguments] ==
+           function_type_arguments)) {
+        if (Bool::True().raw() == entries[SubtypeTestCache::kTestResult]) {
+          return true;
+        } else {
+          break;
+        }
+      }
+    }
+  }
+
+AssertAssignableCallRuntime:
+  // TODO(regis): Modify AssertAssignable bytecode to expect arguments in same
+  // order as the TypeCheck runtime call, so this copying can be avoided.
+  call_top[1] = args[0];  // instance
+  call_top[2] = args[3];  // type
+  call_top[3] = args[1];  // instantiator type args
+  call_top[4] = args[2];  // function type args
+  call_top[5] = args[4];  // name
+  call_top[6] = cache;
+  call_top[7] = Smi::New(kTypeCheckFromInline);
+  Exit(thread, FP, call_top + 8, pc);
+  NativeArguments native_args(thread, 7, call_top + 1, call_top + 1);
+  return InvokeRuntime(thread, this, DRT_TypeCheck, native_args);
+}
+
+RawObject* Interpreter::Call(const Function& function,
                              const Array& arguments_descriptor,
                              const Array& arguments,
+                             Thread* thread) {
+  return Call(function.raw(), arguments_descriptor.raw(), arguments.Length(),
+              arguments.raw_ptr()->data(), thread);
+}
+
+RawObject* Interpreter::Call(RawFunction* function,
+                             RawArray* argdesc,
+                             intptr_t argc,
+                             RawObject* const* argv,
                              Thread* thread) {
   // Dispatch used to interpret bytecode. Contains addresses of
   // labels of bytecode handlers. Handlers themselves are defined below.
@@ -1388,13 +1635,16 @@ RawObject* Interpreter::Call(const Code& code,
 
   bool reentering = fp_ != NULL;
   if (!reentering) {
-    fp_ = reinterpret_cast<RawObject**>(stack_);
+    fp_ = reinterpret_cast<RawObject**>(stack_base_);
   }
 #if defined(DEBUG)
   if (IsTracingExecution()) {
-    THR_Print("%s interpreter 0x%" Px " at fp_ 0x%" Px "\n",
+    THR_Print("%" Pu64 " ", icount_);
+    THR_Print("%s interpreter 0x%" Px " at fp_ 0x%" Px " exit 0x%" Px " %s\n",
               reentering ? "Re-entering" : "Entering",
-              reinterpret_cast<uword>(this), reinterpret_cast<uword>(fp_));
+              reinterpret_cast<uword>(this), reinterpret_cast<uword>(fp_),
+              thread->top_exit_frame_info(),
+              Function::Handle(function).ToCString());
   }
 #endif
 
@@ -1420,13 +1670,15 @@ RawObject* Interpreter::Call(const Code& code,
   //       | arg 1       | -+
   //       | function    | -+
   //       | code        |  |
-  //       | callee PC   | ---> special fake PC marking an entry frame
+  //       | caller PC   | ---> special fake PC marking an entry frame
   //  SP > | fp_         |  |
   //  FP > | ........... |   > normal Dart frame (see stack_frame_kbc.h)
   //                        |
   //                        v
   //
-  FP = fp_ + 1 + arguments.Length() + kKBCDartFrameFixedSize;
+  // A negative argc indicates reverse memory order of arguments.
+  const intptr_t arg_count = argc < 0 ? -argc : argc;
+  FP = fp_ + 1 + arg_count + kKBCDartFrameFixedSize;
   SP = FP - 1;
 
   // Save outer top_exit_frame_info.
@@ -1434,25 +1686,25 @@ RawObject* Interpreter::Call(const Code& code,
   thread->set_top_exit_frame_info(0);
 
   // Copy arguments and setup the Dart frame.
-  const intptr_t argc = arguments.Length();
-  for (intptr_t i = 0; i < argc; i++) {
-    fp_[1 + i] = arguments.At(i);
+  for (intptr_t i = 0; i < arg_count; i++) {
+    fp_[1 + i] = argv[argc < 0 ? -i : i];
   }
 
-  FP[kKBCFunctionSlotFromFp] = code.function();
-  FP[kKBCPcMarkerSlotFromFp] = code.raw();
+  RawCode* bytecode = function->ptr()->bytecode_;
+  FP[kKBCFunctionSlotFromFp] = function;
+  FP[kKBCPcMarkerSlotFromFp] = bytecode;
   FP[kKBCSavedCallerPcSlotFromFp] =
-      reinterpret_cast<RawObject*>((argc << 2) | 2);
+      reinterpret_cast<RawObject*>((arg_count << 2) | 2);
   FP[kKBCSavedCallerFpSlotFromFp] = reinterpret_cast<RawObject*>(fp_);
 
   // Load argument descriptor.
-  argdesc_ = arguments_descriptor.raw();
+  argdesc_ = argdesc;
 
   // Ready to start executing bytecode. Load entry point and corresponding
   // object pool.
-  pc = reinterpret_cast<uint32_t*>(code.raw()->ptr()->entry_point_);
+  pc = reinterpret_cast<uint32_t*>(bytecode->ptr()->entry_point_);
   pc_ = reinterpret_cast<uword>(pc);  // For the profiler.
-  pp_ = code.object_pool();
+  pp_ = bytecode->ptr()->object_pool_;
 
   // Cache some frequently used values in the frame.
   RawBool* true_value = Bool::True().raw();
@@ -1705,14 +1957,12 @@ RawObject* Interpreter::Call(const Code& code,
   {
     BYTECODE(CheckStack, A);
     {
-      // TODO(regis): Support a second stack limit or can we share the DBC one?
-#if 0
-      if (reinterpret_cast<uword>(SP) >= thread->stack_limit()) {
+      // Using the interpreter stack limit and not the thread stack limit.
+      if (reinterpret_cast<uword>(SP) >= stack_limit()) {
         Exit(thread, FP, SP + 1, pc);
         NativeArguments args(thread, 0, NULL, NULL);
         INVOKE_RUNTIME(DRT_StackOverflow, args);
       }
-#endif
     }
     DISPATCH();
   }
@@ -1958,7 +2208,9 @@ RawObject* Interpreter::Call(const Code& code,
       RawObject** call_base = SP - argc;
       RawObject** call_top = SP;  // *SP contains function
       argdesc_ = static_cast<RawArray*>(LOAD_CONSTANT(rD));
-      Invoke(thread, call_base, call_top, &pc, &FP, &SP);
+      if (!Invoke(thread, call_base, call_top, &pc, &FP, &SP)) {
+        HANDLE_EXCEPTION;
+      }
     }
 
     DISPATCH();
@@ -1970,7 +2222,9 @@ RawObject* Interpreter::Call(const Code& code,
     RawObject** call_base = SP - argc;
     RawObject** call_top = SP;  // *SP contains function
     argdesc_ = static_cast<RawArray*>(LOAD_CONSTANT(rD));
-    Invoke(thread, call_base, call_top, &pc, &FP, &SP);
+    if (!Invoke(thread, call_base, call_top, &pc, &FP, &SP)) {
+      HANDLE_EXCEPTION;
+    }
     DISPATCH();
   }
 
@@ -1994,8 +2248,10 @@ RawObject* Interpreter::Call(const Code& code,
       RawICData* icdata = RAW_CAST(ICData, LOAD_CONSTANT(kidx));
       InterpreterHelpers::IncrementUsageCounter(
           RAW_CAST(Function, icdata->ptr()->owner_));
-      InstanceCall1(thread, icdata, call_base, call_top, &pc, &FP, &SP,
-                    false /* optimized */);
+      if (!InstanceCall1(thread, icdata, call_base, call_top, &pc, &FP, &SP,
+                         false /* optimized */)) {
+        HANDLE_EXCEPTION;
+      }
     }
 
     DISPATCH();
@@ -2019,8 +2275,10 @@ RawObject* Interpreter::Call(const Code& code,
       RawICData* icdata = RAW_CAST(ICData, LOAD_CONSTANT(kidx));
       InterpreterHelpers::IncrementUsageCounter(
           RAW_CAST(Function, icdata->ptr()->owner_));
-      InstanceCall2(thread, icdata, call_base, call_top, &pc, &FP, &SP,
-                    false /* optimized */);
+      if (!InstanceCall2(thread, icdata, call_base, call_top, &pc, &FP, &SP,
+                         false /* optimized */)) {
+        HANDLE_EXCEPTION;
+      }
     }
 
     DISPATCH();
@@ -2038,8 +2296,10 @@ RawObject* Interpreter::Call(const Code& code,
 
       RawICData* icdata = RAW_CAST(ICData, LOAD_CONSTANT(kidx));
       InterpreterHelpers::IncrementUsageCounter(FrameFunction(FP));
-      InstanceCall1(thread, icdata, call_base, call_top, &pc, &FP, &SP,
-                    true /* optimized */);
+      if (!InstanceCall1(thread, icdata, call_base, call_top, &pc, &FP, &SP,
+                         true /* optimized */)) {
+        HANDLE_EXCEPTION;
+      }
     }
 
     DISPATCH();
@@ -2057,8 +2317,10 @@ RawObject* Interpreter::Call(const Code& code,
 
       RawICData* icdata = RAW_CAST(ICData, LOAD_CONSTANT(kidx));
       InterpreterHelpers::IncrementUsageCounter(FrameFunction(FP));
-      InstanceCall2(thread, icdata, call_base, call_top, &pc, &FP, &SP,
-                    true /* optimized */);
+      if (!InstanceCall2(thread, icdata, call_base, call_top, &pc, &FP, &SP,
+                         true /* optimized */)) {
+        HANDLE_EXCEPTION;
+      }
     }
 
     DISPATCH();
@@ -2107,25 +2369,172 @@ RawObject* Interpreter::Call(const Code& code,
   }
 
   {
-    BYTECODE(NativeCall, A_B_C);
-    NativeFunctionWrapper trampoline =
-        reinterpret_cast<NativeFunctionWrapper>(LOAD_CONSTANT(rA));
-    Dart_NativeFunction function =
-        reinterpret_cast<Dart_NativeFunction>(LOAD_CONSTANT(rB));
-    intptr_t argc_tag = reinterpret_cast<intptr_t>(LOAD_CONSTANT(rC));
-    const intptr_t num_arguments = NativeArguments::ArgcBits::decode(argc_tag);
+    BYTECODE(NativeCall, __D);
+    RawTypedData* native_entry = static_cast<RawTypedData*>(LOAD_CONSTANT(rD));
+    // TODO(regis): Introduce a new VM class subclassing Object and containing
+    // the four untagged values currently stored as TypeData array elements.
+    MethodRecognizer::Kind kind =
+        static_cast<MethodRecognizer::Kind>(*(reinterpret_cast<uintptr_t*>(
+            native_entry->ptr()->data() + (0 << kWordSizeLog2))));
+    switch (kind) {
+      case MethodRecognizer::kObjectEquals: {
+        SP[-1] = SP[-1] == SP[0] ? Bool::True().raw() : Bool::False().raw();
+        SP--;
+      } break;
+      case MethodRecognizer::kStringBaseLength:
+      case MethodRecognizer::kStringBaseIsEmpty: {
+        RawInstance* instance = reinterpret_cast<RawInstance*>(SP[0]);
+        SP[0] = reinterpret_cast<RawObject**>(
+            instance->ptr())[String::length_offset() / kWordSize];
+        if (kind == MethodRecognizer::kStringBaseIsEmpty) {
+          SP[0] =
+              SP[0] == Smi::New(0) ? Bool::True().raw() : Bool::False().raw();
+        }
+      } break;
+      case MethodRecognizer::kGrowableArrayLength: {
+        RawInstance* instance = reinterpret_cast<RawInstance*>(SP[0]);
+        SP[0] = reinterpret_cast<RawObject**>(
+            instance->ptr())[GrowableObjectArray::length_offset() / kWordSize];
+      } break;
+      case MethodRecognizer::kObjectArrayLength:
+      case MethodRecognizer::kImmutableArrayLength: {
+        RawInstance* instance = reinterpret_cast<RawInstance*>(SP[0]);
+        SP[0] = reinterpret_cast<RawObject**>(
+            instance->ptr())[Array::length_offset() / kWordSize];
+      } break;
+      case MethodRecognizer::kTypedDataLength: {
+        RawInstance* instance = reinterpret_cast<RawInstance*>(SP[0]);
+        SP[0] = reinterpret_cast<RawObject**>(
+            instance->ptr())[TypedData::length_offset() / kWordSize];
+      } break;
+      case MethodRecognizer::kClassIDgetID: {
+        SP[0] = InterpreterHelpers::GetClassIdAsSmi(SP[0]);
+      } break;
+      case MethodRecognizer::kGrowableArrayCapacity: {
+        RawInstance* instance = reinterpret_cast<RawInstance*>(SP[0]);
+        instance = reinterpret_cast<RawInstance**>(
+            instance->ptr())[GrowableObjectArray::data_offset() / kWordSize];
+        SP[0] = reinterpret_cast<RawObject**>(
+            instance->ptr())[Array::length_offset() / kWordSize];
+      } break;
+      case MethodRecognizer::kListFactory: {
+        // factory List<E>([int length]) {
+        //   return (:arg_desc.positional_count == 2) ? new _List<E>(length)
+        //                                            : new _GrowableList<E>(0);
+        // }
+        if (InterpreterHelpers::ArgDescPosCount(argdesc_) == 2) {
+          SP[1] = SP[0];   // length
+          SP[2] = SP[-1];  // type
+          Exit(thread, FP, SP + 3, pc);
+          NativeArguments native_args(thread, 2, SP + 1, SP - 1);
+          INVOKE_RUNTIME(DRT_AllocateArray, native_args);
+          SP -= 1;  // Result is in SP - 1.
+        } else {
+          // SP[0] is type.
+          *++SP = Smi::New(0);  // len
+          *++SP = thread->isolate()->object_store()->growable_list_factory();
+          // Change the ArgumentsDescriptor of the call with a new cached one.
+          argdesc_ = ArgumentsDescriptor::New(
+              0, KernelBytecode::kNativeCallToGrowableListArgc);
+          // Note the special handling of the return of this call in DecodeArgc.
+          if (!Invoke(thread, SP - 2, SP, &pc, &FP, &SP)) {
+            HANDLE_EXCEPTION;
+          }
+        }
+      } break;
+      case MethodRecognizer::kObjectArrayAllocate: {
+        SP[1] = SP[0];   // length
+        SP[2] = SP[-1];  // type
+        Exit(thread, FP, SP + 3, pc);
+        NativeArguments native_args(thread, 2, SP + 1, SP - 1);
+        INVOKE_RUNTIME(DRT_AllocateArray, native_args);
+        SP -= 1;  // Result is in SP - 1.
+      } break;
+      case MethodRecognizer::kLinkedHashMap_getIndex: {
+        RawInstance* instance = reinterpret_cast<RawInstance*>(SP[0]);
+        SP[0] = reinterpret_cast<RawObject**>(
+            instance->ptr())[LinkedHashMap::index_offset() / kWordSize];
+      } break;
+      case MethodRecognizer::kLinkedHashMap_setIndex: {
+        RawInstance* instance = reinterpret_cast<RawInstance*>(SP[-1]);
+        reinterpret_cast<RawObject**>(
+            instance->ptr())[LinkedHashMap::index_offset() / kWordSize] = SP[0];
+        *--SP = null_value;
+      } break;
+      case MethodRecognizer::kLinkedHashMap_getData: {
+        RawInstance* instance = reinterpret_cast<RawInstance*>(SP[0]);
+        SP[0] = reinterpret_cast<RawObject**>(
+            instance->ptr())[LinkedHashMap::data_offset() / kWordSize];
+      } break;
+      case MethodRecognizer::kLinkedHashMap_setData: {
+        RawInstance* instance = reinterpret_cast<RawInstance*>(SP[-1]);
+        reinterpret_cast<RawObject**>(
+            instance->ptr())[LinkedHashMap::data_offset() / kWordSize] = SP[0];
+        *--SP = null_value;
+      } break;
+      case MethodRecognizer::kLinkedHashMap_getHashMask: {
+        RawInstance* instance = reinterpret_cast<RawInstance*>(SP[0]);
+        SP[0] = reinterpret_cast<RawObject**>(
+            instance->ptr())[LinkedHashMap::hash_mask_offset() / kWordSize];
+      } break;
+      case MethodRecognizer::kLinkedHashMap_setHashMask: {
+        RawInstance* instance = reinterpret_cast<RawInstance*>(SP[-1]);
+        reinterpret_cast<RawObject**>(
+            instance->ptr())[LinkedHashMap::hash_mask_offset() / kWordSize] =
+            SP[0];
+        *--SP = null_value;
+      } break;
+      case MethodRecognizer::kLinkedHashMap_getUsedData: {
+        RawInstance* instance = reinterpret_cast<RawInstance*>(SP[0]);
+        SP[0] = reinterpret_cast<RawObject**>(
+            instance->ptr())[LinkedHashMap::used_data_offset() / kWordSize];
+      } break;
+      case MethodRecognizer::kLinkedHashMap_setUsedData: {
+        RawInstance* instance = reinterpret_cast<RawInstance*>(SP[-1]);
+        reinterpret_cast<RawObject**>(
+            instance->ptr())[LinkedHashMap::used_data_offset() / kWordSize] =
+            SP[0];
+        *--SP = null_value;
+      } break;
+      case MethodRecognizer::kLinkedHashMap_getDeletedKeys: {
+        RawInstance* instance = reinterpret_cast<RawInstance*>(SP[0]);
+        SP[0] = reinterpret_cast<RawObject**>(
+            instance->ptr())[LinkedHashMap::deleted_keys_offset() / kWordSize];
+      } break;
+      case MethodRecognizer::kLinkedHashMap_setDeletedKeys: {
+        RawInstance* instance = reinterpret_cast<RawInstance*>(SP[-1]);
+        reinterpret_cast<RawObject**>(
+            instance->ptr())[LinkedHashMap::deleted_keys_offset() / kWordSize] =
+            SP[0];
+        *--SP = null_value;
+      } break;
+      default: {
+        NativeFunctionWrapper trampoline =
+            reinterpret_cast<NativeFunctionWrapper>(
+                *(reinterpret_cast<uintptr_t*>(native_entry->ptr()->data() +
+                                               (1 << kWordSizeLog2))));
+        Dart_NativeFunction function = reinterpret_cast<Dart_NativeFunction>(
+            *(reinterpret_cast<uintptr_t*>(native_entry->ptr()->data() +
+                                           (2 << kWordSizeLog2))));
+        intptr_t argc_tag =
+            static_cast<intptr_t>(*(reinterpret_cast<uintptr_t*>(
+                native_entry->ptr()->data() + (3 << kWordSizeLog2))));
+        const intptr_t num_arguments =
+            NativeArguments::ArgcBits::decode(argc_tag);
 
-    *++SP = null_value;  // Result slot.
+        *++SP = null_value;  // Result slot.
 
-    RawObject** incoming_args = SP - num_arguments;
-    RawObject** return_slot = SP;
-    Exit(thread, FP, SP, pc);
-    NativeArguments args(thread, argc_tag, incoming_args, return_slot);
-    INVOKE_NATIVE(trampoline, function,
-                  reinterpret_cast<Dart_NativeArguments>(&args));
+        RawObject** incoming_args = SP - num_arguments;
+        RawObject** return_slot = SP;
+        Exit(thread, FP, SP, pc);
+        NativeArguments args(thread, argc_tag, incoming_args, return_slot);
+        INVOKE_NATIVE(trampoline, function,
+                      reinterpret_cast<Dart_NativeArguments>(&args));
 
-    *(SP - num_arguments) = *return_slot;
-    SP -= num_arguments;
+        *(SP - num_arguments) = *return_slot;
+        SP -= num_arguments;
+      }
+    }
     DISPATCH();
   }
 
@@ -2908,16 +3317,27 @@ RawObject* Interpreter::Call(const Code& code,
 
     // Check if it is a fake PC marking the entry frame.
     if ((reinterpret_cast<uword>(pc) & 2) != 0) {
-      const intptr_t argc = reinterpret_cast<uword>(pc) >> 2;
-      fp_ = reinterpret_cast<RawObject**>(FrameArguments(FP, argc + 1)[0]);
-      thread->set_top_exit_frame_info(reinterpret_cast<uword>(fp_));
+      // Pop entry frame.
+      fp_ = SavedCallerFP(FP);
+      // Restore exit frame info saved in entry frame.
+      uword exit_fp = reinterpret_cast<uword>(fp_[0]);
+      thread->set_top_exit_frame_info(exit_fp);
       thread->set_top_resource(top_resource);
       thread->set_vm_tag(vm_tag);
 #if defined(DEBUG)
       if (IsTracingExecution()) {
-        THR_Print("Returning from interpreter 0x%" Px " at fp_ 0x%" Px "\n",
-                  reinterpret_cast<uword>(this), reinterpret_cast<uword>(fp_));
+        THR_Print("%" Pu64 " ", icount_);
+        THR_Print("Returning from interpreter 0x%" Px " at fp_ 0x%" Px
+                  " exit 0x%" Px "\n",
+                  reinterpret_cast<uword>(this), reinterpret_cast<uword>(fp_),
+                  exit_fp);
       }
+      ASSERT(reinterpret_cast<uword>(fp_) < stack_limit());
+      const intptr_t argc = reinterpret_cast<uword>(pc) >> 2;
+      ASSERT(fp_ == FrameArguments(FP, argc + 1));
+      // Exception propagation should have been done.
+      ASSERT(!result->IsHeapObject() ||
+             result->GetClassId() != kUnhandledExceptionCid);
 #endif
       return result;
     }
@@ -2977,7 +3397,7 @@ RawObject* Interpreter::Call(const Code& code,
   }
 
   {
-    BYTECODE(StoreFieldTOS, A_D);
+    BYTECODE(StoreFieldTOS, __D);
     const uword offset_in_words =
         static_cast<uword>(Smi::Value(RAW_CAST(Smi, LOAD_CONSTANT(rD))));
     RawInstance* instance = reinterpret_cast<RawInstance*>(SP[-1]);
@@ -3029,6 +3449,7 @@ RawObject* Interpreter::Call(const Code& code,
 
   {
     BYTECODE(InitStaticTOS, 0);
+    UNREACHABLE();  // Not used. TODO(regis): Remove this bytecode.
     RawField* field = static_cast<RawField*>(*SP--);
     RawObject* value = field->ptr()->value_.static_value_;
     if ((value == Object::sentinel().raw()) ||
@@ -3306,75 +3727,11 @@ RawObject* Interpreter::Call(const Code& code,
     if (!smi_ok && (args[0] != null_value)) {
       RawSubtypeTestCache* cache =
           static_cast<RawSubtypeTestCache*>(LOAD_CONSTANT(rD));
-      if (cache != null_value) {
-        RawInstance* instance = static_cast<RawInstance*>(args[0]);
-        RawTypeArguments* instantiator_type_arguments =
-            static_cast<RawTypeArguments*>(args[1]);
-        RawTypeArguments* function_type_arguments =
-            static_cast<RawTypeArguments*>(args[2]);
 
-        const intptr_t cid = InterpreterHelpers::GetClassId(instance);
-
-        RawTypeArguments* instance_type_arguments =
-            static_cast<RawTypeArguments*>(null_value);
-        RawObject* instance_cid_or_function;
-        if (cid == kClosureCid) {
-          RawClosure* closure = static_cast<RawClosure*>(instance);
-          if (closure->ptr()->function_type_arguments_ !=
-              TypeArguments::null()) {
-            // Cache cannot be used for generic closures.
-            goto AssertAssignableCallRuntime;
-          }
-          instance_type_arguments =
-              closure->ptr()->instantiator_type_arguments_;
-          instance_cid_or_function = closure->ptr()->function_;
-        } else {
-          instance_cid_or_function = Smi::New(cid);
-
-          RawClass* instance_class = thread->isolate()->class_table()->At(cid);
-          if (instance_class->ptr()->num_type_arguments_ < 0) {
-            goto AssertAssignableCallRuntime;
-          } else if (instance_class->ptr()->num_type_arguments_ > 0) {
-            instance_type_arguments = reinterpret_cast<RawTypeArguments**>(
-                instance->ptr())[instance_class->ptr()
-                                     ->type_arguments_field_offset_in_words_];
-          }
-        }
-
-        for (RawObject** entries = cache->ptr()->cache_->ptr()->data();
-             entries[0] != null_value;
-             entries += SubtypeTestCache::kTestEntryLength) {
-          if ((entries[SubtypeTestCache::kInstanceClassIdOrFunction] ==
-               instance_cid_or_function) &&
-              (entries[SubtypeTestCache::kInstanceTypeArguments] ==
-               instance_type_arguments) &&
-              (entries[SubtypeTestCache::kInstantiatorTypeArguments] ==
-               instantiator_type_arguments) &&
-              (entries[SubtypeTestCache::kFunctionTypeArguments] ==
-               function_type_arguments)) {
-            if (true_value == entries[SubtypeTestCache::kTestResult]) {
-              goto AssertAssignableOk;
-            } else {
-              break;
-            }
-          }
-        }
-      }
-
-    AssertAssignableCallRuntime:
-      SP[1] = args[0];  // instance
-      SP[2] = args[3];  // type
-      SP[3] = args[1];  // instantiator type args
-      SP[4] = args[2];  // function type args
-      SP[5] = args[4];  // name
-      SP[6] = cache;
-      Exit(thread, FP, SP + 7, pc);
-      NativeArguments native_args(thread, 6, SP + 1, SP - 4);
-      INVOKE_RUNTIME(DRT_TypeCheck, native_args);
+      AssertAssignable(thread, pc, FP, SP, args, cache);
     }
 
-  AssertAssignableOk:
-    SP -= 4;
+    SP -= 4;  // Instance remains on stack.
     DISPATCH();
   }
 
@@ -3897,6 +4254,15 @@ RawObject* Interpreter::Call(const Code& code,
   }
 
   {
+    BYTECODE(JumpIfNoAsserts, 0);
+    if (!thread->isolate()->asserts()) {
+      const int32_t target = static_cast<int32_t>(op) >> 8;
+      pc += (target - 1);
+    }
+    DISPATCH();
+  }
+
+  {
     BYTECODE(LoadClassId, A_D);
     const uint16_t object_reg = rD;
     RawObject* obj = static_cast<RawObject*>(FP[object_reg]);
@@ -4258,6 +4624,8 @@ void Interpreter::JumpToFrame(uword pc, uword sp, uword fp, Thread* thread) {
     RawObject* raw_exception = thread->active_exception();
     RawObject* raw_stacktrace = thread->active_stacktrace();
     ASSERT(raw_exception != Object::null());
+    thread->set_active_exception(Object::null_object());
+    thread->set_active_stacktrace(Object::null_object());
     special_[kExceptionSpecialIndex] = raw_exception;
     special_[kStackTraceSpecialIndex] = raw_stacktrace;
     pc_ = thread->resume_pc();

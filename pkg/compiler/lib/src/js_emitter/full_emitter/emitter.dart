@@ -4,7 +4,6 @@
 
 library dart2js.js_emitter.full_emitter;
 
-import 'dart:collection' show HashMap;
 import 'dart:convert';
 
 import 'package:js_runtime/shared/embedded_names.dart' as embeddedNames;
@@ -18,8 +17,6 @@ import '../../constants/values.dart';
 import '../../common_elements.dart' show CommonElements, ElementEnvironment;
 import '../../deferred_load.dart' show OutputUnit, OutputUnitData;
 import '../../elements/entities.dart';
-import '../../elements/entity_utils.dart' as utils;
-import '../../elements/names.dart';
 import '../../hash/sha1.dart' show Hasher;
 import '../../io/code_output.dart';
 import '../../io/location_provider.dart' show LocationCollector;
@@ -27,13 +24,12 @@ import '../../io/source_map_builder.dart' show SourceMapBuilder;
 import '../../js/js.dart' as jsAst;
 import '../../js/js.dart' show js;
 import '../../js_backend/js_backend.dart'
-    show ConstantEmitter, JavaScriptBackend, Namer, SetterName;
+    show ConstantEmitter, JavaScriptBackend, Namer;
 import '../../js_backend/native_data.dart';
 import '../../universe/call_structure.dart' show CallStructure;
-import '../../universe/selector.dart' show Selector;
 import '../../universe/world_builder.dart' show CodegenWorldBuilder;
 import '../../util/uri_extras.dart' show relativize;
-import '../../world.dart' show ClosedWorld;
+import '../../world.dart' show JClosedWorld;
 import '../constant_ordering.dart' show ConstantOrdering;
 import '../headers.dart';
 import '../js_emitter.dart' hide Emitter, EmitterFactory;
@@ -69,7 +65,7 @@ class EmitterFactory implements js_emitter.EmitterFactory {
 
   @override
   Emitter createEmitter(CodeEmitterTask task, Namer namer,
-      ClosedWorld closedWorld, Sorter sorter) {
+      JClosedWorld closedWorld, Sorter sorter) {
     return new Emitter(
         task.compiler, namer, closedWorld, generateSourceMap, task, sorter);
   }
@@ -78,7 +74,7 @@ class EmitterFactory implements js_emitter.EmitterFactory {
 class Emitter extends js_emitter.EmitterBase {
   final Compiler compiler;
   final CodeEmitterTask task;
-  final ClosedWorld _closedWorld;
+  final JClosedWorld _closedWorld;
 
   // The following fields will be set to copies of the program-builder's
   // collector.
@@ -117,11 +113,6 @@ class Emitter extends js_emitter.EmitterBase {
   Map<OutputUnit, CodeOutput> outputBuffers = new Map<OutputUnit, CodeOutput>();
 
   String classesCollector;
-  final Map<jsAst.Name, String> mangledFieldNames =
-      new HashMap<jsAst.Name, String>();
-  final Map<jsAst.Name, String> mangledGlobalFieldNames =
-      new HashMap<jsAst.Name, String>();
-  final Set<jsAst.Name> recordedMangledNames = new Set<jsAst.Name>();
 
   JavaScriptBackend get backend => compiler.backend;
 
@@ -175,7 +166,7 @@ class Emitter extends js_emitter.EmitterBase {
         compiler.codegenWorldBuilder,
         _closedWorld.rtiNeed,
         compiler.backend.rtiEncoder,
-        namer,
+        _closedWorld.allocatorAnalysis,
         task,
         this.constantReference,
         constantListGenerator);
@@ -407,119 +398,15 @@ class Emitter extends js_emitter.EmitterBase {
   /// An anonymous mixin application has no reflection name.
   ///
   /// This is used by js_mirrors.dart.
+  // TODO(johnniwinther): Do we still need this when js_mirrors is deleted?
   String getReflectionClassName(ClassEntity cls, jsAst.Name mangledName) {
-    String name = cls.name;
-    if ( // Make sure to retain names of common native types.
-        _isNativeTypeNeedingReflectionName(cls)) {
-      // TODO(ahe): Enable the next line when I can tell the difference between
-      // an instance method and a global.  They may have the same mangled name.
-      // if (recordedMangledNames.contains(mangledName)) return null;
-      recordedMangledNames.add(mangledName);
-      if (cls.isClosure) {
-        // Closures are synthesized and their name might conflict with existing
-        // globals. Assign an illegal name, and make sure they don't clash
-        // with each other.
-        return " $name";
-      }
-      if (_elementEnvironment.isUnnamedMixinApplication(cls)) return null;
+    // Make sure to retain names of common native types.
+    if (_isNativeTypeNeedingReflectionName(cls)) {
+      assert(!cls.isClosure);
+      assert(!_elementEnvironment.isUnnamedMixinApplication(cls));
       return cls.name;
     }
     return null;
-  }
-
-  /// Returns the "reflection name" of a [MemberEntity], if needed.
-  ///
-  /// The reflection name of a getter 'foo' is 'foo'.
-  /// The reflection name of a setter 'foo' is 'foo='.
-  /// The reflection name of a method 'foo' is 'foo:N:M:O', where N is the
-  /// number of required arguments, M is the number of optional arguments, and
-  /// O is the named arguments.
-  /// The reflection name of a constructor is similar to a regular method but
-  /// starts with 'new '.
-  ///
-  /// This is used by js_mirrors.dart.
-  String getReflectionMemberName(MemberEntity member, jsAst.Name mangledName) {
-    return null;
-  }
-
-  String getReflectionMemberNameInternal(
-      MemberEntity member, jsAst.Name mangledName) {
-    if (member is ConstructorBodyEntity) {
-      return null;
-    }
-    if (member.isGetter) {
-      return _getReflectionGetterName(member.memberName);
-    } else if (member.isSetter) {
-      return _getReflectionSetterName(member.memberName, mangledName);
-    } else if (member.isConstructor) {
-      ConstructorEntity constructor = member;
-      String name = utils.reconstructConstructorName(constructor);
-      return _getReflectionCallStructureName(
-          name, constructor.parameterStructure.callStructure);
-    } else if (member.isFunction) {
-      FunctionEntity function = member;
-      return _getReflectionFunctionName(
-          member.memberName, function.parameterStructure.callStructure);
-    }
-    throw reporter.internalError(
-        member, 'Do not know how to reflect on this $member.');
-  }
-
-  /// Returns the "reflection name" of a [Selector], if needed.
-  ///
-  /// The reflection name of a getter 'foo' is 'foo'.
-  /// The reflection name of a setter 'foo' is 'foo='.
-  /// The reflection name of a method 'foo' is 'foo:N:M:O', where N is the
-  /// number of required arguments, M is the number of optional arguments, and
-  /// O is the named arguments.
-  ///
-  /// This is used by js_mirrors.dart.
-  String getReflectionSelectorName(Selector selector, jsAst.Name mangledName) {
-    return null;
-  }
-
-  /// Returns the "reflection name" of a [TypedefEntity], if needed.
-  ///
-  /// The reflection name of typedef 'F' is 'F'.
-  ///
-  /// This is used by js_mirrors.dart.
-  String getReflectionTypedefName(
-      TypedefEntity typedef, jsAst.Name mangledName) {
-    return null;
-  }
-
-  String _getReflectionGetterName(Name memberName) {
-    return namer.privateName(memberName);
-  }
-
-  String _getReflectionSetterName(Name memberName, jsAst.Name mangledName) {
-    String name = namer.privateName(memberName);
-    if (mangledName is! SetterName) return '$name=';
-    SetterName setterName = mangledName;
-    jsAst.Name base = setterName.base;
-    jsAst.Name getter = namer.deriveGetterName(base);
-    mangledFieldNames.putIfAbsent(getter, () => name);
-    assert(mangledFieldNames[getter] == name);
-    recordedMangledNames.add(getter);
-    // TODO(karlklose,ahe): we do not actually need to store information
-    // about the name of this setter in the output, but it is needed for
-    // marking the function as invokable by reflection.
-    return '$name=';
-  }
-
-  String _getReflectionFunctionName(
-      Name memberName, CallStructure callStructure) {
-    String name = namer.privateName(memberName);
-    return _getReflectionCallStructureName(name, callStructure);
-  }
-
-  String _getReflectionCallStructureName(
-      String name, CallStructure callStructure,
-      {bool isConstructor: false}) {
-    int positionalParameterCount = callStructure.positionalArgumentCount;
-    String namedArguments = namedParametersAsReflectionNames(callStructure);
-    String suffix = '$name:$positionalParameterCount$namedArguments';
-    return isConstructor ? 'new $suffix' : suffix;
   }
 
   String namedParametersAsReflectionNames(CallStructure structure) {
@@ -768,8 +655,8 @@ class Emitter extends js_emitter.EmitterBase {
   buildMain(jsAst.Statement invokeMain) {
     List<jsAst.Statement> parts = <jsAst.Statement>[];
 
-    if (NativeGenerator
-        .needsIsolateAffinityTagInitialization(_closedWorld.backendUsage)) {
+    if (NativeGenerator.needsIsolateAffinityTagInitialization(
+        _closedWorld.backendUsage)) {
       parts.add(NativeGenerator.generateIsolateAffinityTagInitialization(
           _closedWorld.backendUsage, generateEmbeddedGlobalAccess, js("""
         // On V8, the 'intern' function converts a string to a symbol, which
@@ -1157,39 +1044,6 @@ class Emitter extends js_emitter.EmitterBase {
     return new jsAst.Block(parts);
   }
 
-  jsAst.Statement buildMangledNames() {
-    List<jsAst.Statement> parts = <jsAst.Statement>[];
-
-    if (!mangledFieldNames.isEmpty) {
-      List<jsAst.Name> keys = mangledFieldNames.keys.toList()..sort();
-      var properties = [];
-      for (jsAst.Name key in keys) {
-        var value = js.string(mangledFieldNames[key]);
-        properties.add(new jsAst.Property(key, value));
-      }
-
-      jsAst.Expression mangledNamesAccess =
-          generateEmbeddedGlobalAccess(embeddedNames.MANGLED_NAMES);
-      var map = new jsAst.ObjectInitializer(properties);
-      parts.add(js.statement('# = #', [mangledNamesAccess, map]));
-    }
-
-    if (!mangledGlobalFieldNames.isEmpty) {
-      List<jsAst.Name> keys = mangledGlobalFieldNames.keys.toList()..sort();
-      List<jsAst.Property> properties = <jsAst.Property>[];
-      for (jsAst.Name key in keys) {
-        jsAst.Literal value = js.string(mangledGlobalFieldNames[key]);
-        properties.add(new jsAst.Property(js.quoteName(key), value));
-      }
-      jsAst.Expression mangledGlobalNamesAccess =
-          generateEmbeddedGlobalAccess(embeddedNames.MANGLED_GLOBAL_NAMES);
-      jsAst.ObjectInitializer map = new jsAst.ObjectInitializer(properties);
-      parts.add(js.statement('# = #', [mangledGlobalNamesAccess, map]));
-    }
-
-    return new jsAst.Block(parts);
-  }
-
   void checkEverythingEmitted(
       Map<ClassEntity, ClassBuilder> pendingClassBuilders) {
     if (pendingClassBuilders == null) return;
@@ -1320,8 +1174,6 @@ class Emitter extends js_emitter.EmitterBase {
 
        init();
 
-       #mangledNames;
-
        #cspPrecompiledFunctions;
 
        #setupProgram;
@@ -1389,7 +1241,6 @@ class Emitter extends js_emitter.EmitterBase {
       "isolatePropertiesName": js(isolatePropertiesName),
       "initName": initName,
       "functionThatReturnsNull": buildFunctionThatReturnsNull(),
-      "mangledNames": buildMangledNames(),
       "setupProgram": buildSetupProgram(
           program, compiler, backend, namer, this, _closedWorld),
       "setupProgramName": setupProgramName,
@@ -1453,6 +1304,8 @@ class Emitter extends js_emitter.EmitterBase {
       SourceMapBuilder.outputSourceMap(
           mainOutput,
           locationCollector,
+          namer.createMinifiedGlobalNameMap(),
+          namer.createMinifiedInstanceNameMap(),
           '',
           compiler.options.sourceMapUri,
           compiler.options.outputUri,
@@ -1826,8 +1679,15 @@ class Emitter extends js_emitter.EmitterBase {
 
         output.add(SourceMapBuilder.generateSourceMapTag(mapUri, partUri));
         output.close();
-        SourceMapBuilder.outputSourceMap(output, locationCollector, partName,
-            mapUri, partUri, compiler.outputProvider);
+        SourceMapBuilder.outputSourceMap(
+            output,
+            locationCollector,
+            namer.createMinifiedGlobalNameMap(),
+            namer.createMinifiedInstanceNameMap(),
+            partName,
+            mapUri,
+            partUri,
+            compiler.outputProvider);
       } else {
         output.close();
       }
@@ -1844,6 +1704,9 @@ class Emitter extends js_emitter.EmitterBase {
     if (compiler.options.trustPrimitives) flavor.write(', trust primitives');
     if (compiler.options.trustTypeAnnotations) flavor.write(', trust types');
     if (compiler.options.omitImplicitChecks) flavor.write(', omit checks');
+    if (compiler.options.laxRuntimeTypeToString) {
+      flavor.write(', lax runtime type');
+    }
     if (compiler.options.useContentSecurityPolicy) flavor.write(', CSP');
     if (_closedWorld.backendUsage.isMirrorsUsed) flavor.write(', mirrors');
     return new jsAst.Comment(generatedBy(compiler, flavor: '$flavor'));

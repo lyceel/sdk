@@ -8,8 +8,8 @@ import 'dart:async';
 import 'package:expect/expect.dart';
 import 'package:async_helper/async_helper.dart';
 import 'package:compiler/src/elements/entities.dart';
-import 'package:compiler/src/types/types.dart';
-import 'package:compiler/src/world.dart' show ClosedWorld;
+import 'package:compiler/src/inferrer/typemasks/masks.dart';
+import 'package:compiler/src/world.dart' show JClosedWorld;
 import '../type_test_helper.dart';
 
 isCheckedMode() {
@@ -35,7 +35,7 @@ void main() {
   });
 }
 
-checkMasks(ClosedWorld closedWorld, List<ClassEntity> allClasses,
+checkMasks(JClosedWorld closedWorld, List<ClassEntity> allClasses,
     List<FlatTypeMask> masks,
     {FlatTypeMask result,
     List<FlatTypeMask> disjointMasks,
@@ -97,7 +97,7 @@ Future testUnionTypeMaskFlatten() async {
       class C extends A {}
       class D implements A {}
       class E extends B implements A {}
-      """, mainSource: r"""
+
       main() {
         new A();
         new B();
@@ -105,9 +105,9 @@ Future testUnionTypeMaskFlatten() async {
         new D();
         new E();
       }
-      """);
+      """, testBackendWorld: true);
 
-  ClosedWorld closedWorld = env.closedWorld;
+  JClosedWorld closedWorld = env.jClosedWorld;
 
   ClassEntity Object_ = env.getElement("Object");
   ClassEntity A = env.getElement("A");
@@ -209,28 +209,28 @@ Future testUnionTypeMaskFlatten() async {
 }
 
 Future testStringSubtypes() async {
-  TypeEnvironment env = await TypeEnvironment.create('', mainSource: r"""
+  TypeEnvironment env = await TypeEnvironment.create(r"""
       main() {
         '' is String;
       }
-      """);
-  ClosedWorld closedWorld = env.closedWorld;
+      """, testBackendWorld: true);
+  JClosedWorld closedWorld = env.jClosedWorld;
 
   ClassEntity Object_ = env.getElement("Object");
   ClassEntity String_ = env.getElement("String");
   ClassEntity JSString = closedWorld.commonElements.jsStringClass;
 
-  Expect.isFalse(closedWorld.isDirectlyInstantiated(Object_));
-  Expect.isTrue(closedWorld.isIndirectlyInstantiated(Object_));
-  Expect.isTrue(closedWorld.isInstantiated(Object_));
+  Expect.isFalse(closedWorld.classHierarchy.isDirectlyInstantiated(Object_));
+  Expect.isTrue(closedWorld.classHierarchy.isIndirectlyInstantiated(Object_));
+  Expect.isTrue(closedWorld.classHierarchy.isInstantiated(Object_));
 
-  Expect.isFalse(closedWorld.isDirectlyInstantiated(String_));
-  Expect.isFalse(closedWorld.isIndirectlyInstantiated(String_));
-  Expect.isFalse(closedWorld.isInstantiated(String_));
+  Expect.isFalse(closedWorld.classHierarchy.isDirectlyInstantiated(String_));
+  Expect.isFalse(closedWorld.classHierarchy.isIndirectlyInstantiated(String_));
+  Expect.isFalse(closedWorld.classHierarchy.isInstantiated(String_));
 
-  Expect.isTrue(closedWorld.isDirectlyInstantiated(JSString));
-  Expect.isFalse(closedWorld.isIndirectlyInstantiated(JSString));
-  Expect.isTrue(closedWorld.isInstantiated(JSString));
+  Expect.isTrue(closedWorld.classHierarchy.isDirectlyInstantiated(JSString));
+  Expect.isFalse(closedWorld.classHierarchy.isIndirectlyInstantiated(JSString));
+  Expect.isTrue(closedWorld.classHierarchy.isInstantiated(JSString));
 
   TypeMask subtypeString = new TypeMask.nonNullSubtype(String_, closedWorld);
   TypeMask exactJSString = new TypeMask.nonNullExact(JSString, closedWorld);

@@ -1,11 +1,8 @@
-Note: this dev version of the protocol contains not yet released functionality,
-and is subject to change.
-
-# Dart VM Service Protocol 3.8-dev
+# Dart VM Service Protocol 3.10-dev
 
 > Please post feedback to the [observatory-discuss group][discuss-list]
 
-This document describes of _version 3.8-dev_ of the Dart VM Service Protocol. This
+This document describes of _version 3.10-dev_ of the Dart VM Service Protocol. This
 protocol is used to communicate with a running Dart Virtual Machine.
 
 To use the Service Protocol, start the VM with the *--observe* flag.
@@ -27,74 +24,75 @@ The Service Protocol uses [JSON-RPC 2.0][].
 - [Versioning](#versioning)
 - [Private RPCs, Types, and Properties](#private-rpcs-types-and-properties)
 - [Public RPCs](#public-rpcs)
-	- [addBreakpoint](#addbreakpoint)
-	- [addBreakpointWithScriptUri](#addbreakpointwithscripturi)
-	- [addBreakpointAtEntry](#addbreakpointatentry)
-	- [evaluate](#evaluate)
-	- [evaluateInFrame](#evaluateinframe)
-	- [getFlagList](#getflaglist)
-	- [getIsolate](#getisolate)
-	- [getObject](#getobject)
-	- [getSourceReport](#getsourcereport)
-	- [getStack](#getstack)
-	- [getVersion](#getversion)
-	- [getVM](#getvm)
-	- [pause](#pause)
-	- [reloadSources](#reloadsources)
-	- [removeBreakpoint](#removebreakpoint)
-	- [resume](#resume)
-	- [setExceptionPauseMode](#setexceptionpausemode)
-	- [setFlag](#setflag)
-	- [setLibraryDebuggable](#setlibrarydebuggable)
-	- [setName](#setname)
-	- [setVMName](#setvmname)
-	- [streamCancel](#streamcancel)
-	- [streamListen](#streamlisten)
+  - [addBreakpoint](#addbreakpoint)
+  - [addBreakpointWithScriptUri](#addbreakpointwithscripturi)
+  - [addBreakpointAtEntry](#addbreakpointatentry)
+  - [evaluate](#evaluate)
+  - [evaluateInFrame](#evaluateinframe)
+  - [getFlagList](#getflaglist)
+  - [getIsolate](#getisolate)
+  - [getObject](#getobject)
+  - [getSourceReport](#getsourcereport)
+  - [getStack](#getstack)
+  - [getVersion](#getversion)
+  - [getVM](#getvm)
+  - [pause](#pause)
+  - [kill](#kill)
+  - [reloadSources](#reloadsources)
+  - [removeBreakpoint](#removebreakpoint)
+  - [resume](#resume)
+  - [setExceptionPauseMode](#setexceptionpausemode)
+  - [setFlag](#setflag)
+  - [setLibraryDebuggable](#setlibrarydebuggable)
+  - [setName](#setname)
+  - [setVMName](#setvmname)
+  - [streamCancel](#streamcancel)
+  - [streamListen](#streamlisten)
 - [Public Types](#public-types)
-	- [BoundField](#boundfield)
-	- [BoundVariable](#boundvariable)
-	- [Breakpoint](#breakpoint)
-	- [Class](#class)
-	- [ClassList](#classlist)
-	- [Code](#code)
-	- [CodeKind](#codekind)
-	- [Context](#context)
-	- [ContextElement](#contextelement)
-	- [Error](#error)
-	- [ErrorKind](#errorkind)
-	- [Event](#event)
-	- [EventKind](#eventkind)
-	- [ExtensionData](#extensiondata)
-	- [Field](#field)
-	- [Flag](#flag)
-	- [FlagList](#flaglist)
-	- [Frame](#frame)
-	- [Function](#function)
-	- [Instance](#instance)
-	- [Isolate](#isolate)
-	- [Library](#library)
-	- [LibraryDependency](#librarydependency)
-	- [MapAssociation](#mapassociation)
-	- [Message](#message)
-	- [Null](#null)
-	- [Object](#object)
-	- [ReloadReport](#reloadreport)
-	- [Response](#response)
-	- [Sentinel](#sentinel)
-	- [SentinelKind](#sentinelkind)
-	- [Script](#script)
-	- [SourceLocation](#sourcelocation)
-	- [SourceReport](#sourcereport)
-	- [SourceReportCoverage](#sourcereportcoverage)
-	- [SourceReportKind](#sourcereportkind)
-	- [SourceReportRange](#sourcereportrange)
-	- [Stack](#stack)
-	- [StepOption](#stepoption)
-	- [Success](#success)
-	- [TypeArguments](#typearguments)
-	- [UresolvedSourceLocation](#unresolvedsourcelocation)
-	- [Version](#version)
-	- [VM](#vm)
+  - [BoundField](#boundfield)
+  - [BoundVariable](#boundvariable)
+  - [Breakpoint](#breakpoint)
+  - [Class](#class)
+  - [ClassList](#classlist)
+  - [Code](#code)
+  - [CodeKind](#codekind)
+  - [Context](#context)
+  - [ContextElement](#contextelement)
+  - [Error](#error)
+  - [ErrorKind](#errorkind)
+  - [Event](#event)
+  - [EventKind](#eventkind)
+  - [ExtensionData](#extensiondata)
+  - [Field](#field)
+  - [Flag](#flag)
+  - [FlagList](#flaglist)
+  - [Frame](#frame)
+  - [Function](#function)
+  - [Instance](#instance)
+  - [Isolate](#isolate)
+  - [Library](#library)
+  - [LibraryDependency](#librarydependency)
+  - [MapAssociation](#mapassociation)
+  - [Message](#message)
+  - [Null](#null)
+  - [Object](#object)
+  - [ReloadReport](#reloadreport)
+  - [Response](#response)
+  - [Sentinel](#sentinel)
+  - [SentinelKind](#sentinelkind)
+  - [Script](#script)
+  - [SourceLocation](#sourcelocation)
+  - [SourceReport](#sourcereport)
+  - [SourceReportCoverage](#sourcereportcoverage)
+  - [SourceReportKind](#sourcereportkind)
+  - [SourceReportRange](#sourcereportrange)
+  - [Stack](#stack)
+  - [StepOption](#stepoption)
+  - [Success](#success)
+  - [TypeArguments](#typearguments)
+  - [UresolvedSourceLocation](#unresolvedsourcelocation)
+  - [Version](#version)
+  - [VM](#vm)
 - [Revision History](#revision-history)
 
 ## RPCs, Requests, and Responses
@@ -192,6 +190,10 @@ code | message | meaning
 107 | Cannot resume execution | The isolate could not be resumed
 108 | Isolate is reloading | The isolate is currently processing another reload request
 109 | Isolate cannot be reloaded | The isolate has an unhandled exception and can no longer be reloaded
+110 | Isolate must have reloaded | Failed to find differences in last hot reload request
+111 | Service already registered | Service with such name has already been registered by this client
+112 | Service disappeared | Failed to fulfill service request, likely service handler is no longer available
+113 | Expression compilation error | Request to compile expression failed
 
 
 
@@ -496,6 +498,9 @@ which is a child scope of the class or library for instance/class or library
 targets respectively. This means bindings provided in _scope_ may shadow
 instance members, class members and top-level members.
 
+If expression is failed to parse and compile, then [rpc error](#rpc-error) 113
+"Expression compilation error" is returned.
+
 If an error occurs while evaluating the expression, an [@Error](#error)
 reference will be returned.
 
@@ -521,6 +526,9 @@ These bindings will be added to the scope in which the expression is evaluated,
 which is a child scope of the frame's current scope. This means bindings
 provided in _scope_ may shadow instance members, class members, top-level
 members, parameters and locals.
+
+If expression is failed to parse and compile, then [rpc error](#rpc-error) 113
+"Expression compilation error" is returned.
 
 If an error occurs while evaluating the expression, an [@Error](#error)
 reference will be returned.
@@ -670,6 +678,18 @@ Success pause(string isolateId)
 The _pause_ RPC is used to interrupt a running isolate. The RPC enqueues the interrupt request and potentially returns before the isolate is paused.
 
 When the isolate is paused an event will be sent on the _Debug_ stream.
+
+See [Success](#success).
+
+### kill
+
+```
+Success kill(string isolateId)
+```
+
+The _kill_ RPC is used to kill an isolate as if by dart:isolate's `Isolate.kill(IMMEDIATE)`.
+
+The isolate is killed regardless of whether it is paused or running.
 
 See [Success](#success).
 

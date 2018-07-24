@@ -27,7 +27,7 @@ var tests = <IsolateTest>[
 
     // Avoid to manually encode and decode messages from the stream
     Stream<String> socket_stream = socket.stream.map(jsonEncode);
-    socket_stream.retype<Object>().pipe(_socket);
+    socket_stream.cast<Object>().pipe(_socket);
     dynamic _decoder(dynamic obj) {
       return jsonDecode(obj);
     }
@@ -35,7 +35,7 @@ var tests = <IsolateTest>[
     final client = _socket.map(_decoder).asBroadcastStream();
 
     // Note: keep this in sync with sdk/lib/vmservice.dart
-    const kServiceAlreadyRegistered = 110;
+    const kServiceAlreadyRegistered = 111;
     const kServiceAlreadyRegistered_Msg = 'Service already registered';
 
     const serviceName = 'serviceName';

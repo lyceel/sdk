@@ -8,11 +8,11 @@
 #include "vm/class_finalizer.h"
 #include "vm/compiler/jit/compiler.h"
 #include "vm/debugger.h"
+#include "vm/heap/safepoint.h"
 #include "vm/interpreter.h"
 #include "vm/object_store.h"
 #include "vm/resolver.h"
 #include "vm/runtime_entry.h"
-#include "vm/safepoint.h"
 #include "vm/simulator.h"
 #include "vm/stub_code.h"
 #include "vm/symbols.h"
@@ -52,11 +52,15 @@ class ScopedIsolateStackLimits : public ValueObject {
     ASSERT(os_thread != NULL);
     os_thread->RefineStackBoundsFromSP(current_sp);
 
-    // Save the Thread's current stack limit and adjust the stack
-    // limit based on the thread's stack_base.
+    // Save the Thread's current stack limit and adjust the stack limit.
     ASSERT(thread->isolate() == Isolate::Current());
     saved_stack_limit_ = thread->saved_stack_limit();
-    thread->SetStackLimitFromStackBase(os_thread->stack_base());
+#if defined(USING_SIMULATOR)
+    thread->SetStackLimit(Simulator::Current()->stack_limit());
+#else
+    thread->SetStackLimit(OSThread::Current()->stack_limit_with_headroom());
+    // TODO(regis): For now, the interpreter is using its own stack limit.
+#endif
 
 #if defined(USING_SAFE_STACK)
     saved_safestack_limit_ = OSThread::GetCurrentSafestackPointer();
@@ -106,6 +110,15 @@ RawObject* DartEntry::InvokeFunction(const Function& function,
                                      const Array& arguments,
                                      const Array& arguments_descriptor,
                                      uword current_sp) {
+  // We use a kernel2kernel constant evaluator in Dart 2.0 AOT compilation
+  // and never start the VM service isolate. So we should never end up invoking
+  // any dart code in the Dart 2.0 AOT compiler.
+#if !defined(DART_PRECOMPILED_RUNTIME)
+  if (Isolate::Current()->strong() && FLAG_precompiled_mode) {
+    UNREACHABLE();
+  }
+#endif  // !defined(DART_PRECOMPILED_RUNTIME)
+
   // Get the entrypoint corresponding to the function specified, this
   // will result in a compilation of the function if it is not already
   // compiled.
@@ -125,12 +138,10 @@ RawObject* DartEntry::InvokeFunction(const Function& function,
       }
     }
     if (!function.HasCode() && function.HasBytecode()) {
-      const Code& bytecode = Code::Handle(zone, function.Bytecode());
-      ASSERT(!bytecode.IsNull());
       ASSERT(thread->no_callback_scope_depth() == 0);
       SuspendLongJumpScope suspend_long_jump_scope(thread);
       TransitionToGenerated transition(thread);
-      return Interpreter::Current()->Call(bytecode, arguments_descriptor,
+      return Interpreter::Current()->Call(function, arguments_descriptor,
                                           arguments, thread);
     }
 #else
@@ -401,7 +412,11 @@ RawArray* ArgumentsDescriptor::New(intptr_t type_args_len,
 
   // Share the immutable descriptor when possible by canonicalizing it.
   descriptor.MakeImmutable();
-  descriptor ^= descriptor.CheckAndCanonicalize(thread, NULL);
+  const char* error_str = NULL;
+  descriptor ^= descriptor.CheckAndCanonicalize(thread, &error_str);
+  if (error_str != NULL) {
+    FATAL1("Failed to canonicalize: %s", error_str);
+  }
   ASSERT(!descriptor.IsNull());
   return descriptor.raw();
 }
@@ -438,7 +453,7 @@ RawArray* ArgumentsDescriptor::NewNonCached(intptr_t type_args_len,
   descriptor.SetAt(kCountIndex, arg_count);
 
   // Set number of positional arguments.
-  descriptor.SetAt(kPositionalCountIndex, Smi::Handle(Smi::New(num_arguments)));
+  descriptor.SetAt(kPositionalCountIndex, arg_count);
 
   // Set terminating null.
   descriptor.SetAt((descriptor_len - 1), Object::null_object());
@@ -446,7 +461,11 @@ RawArray* ArgumentsDescriptor::NewNonCached(intptr_t type_args_len,
   // Share the immutable descriptor when possible by canonicalizing it.
   descriptor.MakeImmutable();
   if (canonicalize) {
-    descriptor ^= descriptor.CheckAndCanonicalize(thread, NULL);
+    const char* error_str = NULL;
+    descriptor ^= descriptor.CheckAndCanonicalize(thread, &error_str);
+    if (error_str != NULL) {
+      FATAL1("Failed to canonicalize: %s", error_str);
+    }
   }
   ASSERT(!descriptor.IsNull());
   return descriptor.raw();

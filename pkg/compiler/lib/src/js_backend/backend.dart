@@ -17,13 +17,7 @@ import '../deferred_load.dart' show DeferredLoadTask, OutputUnitData;
 import '../dump_info.dart' show DumpInfoTask;
 import '../elements/entities.dart';
 import '../elements/types.dart';
-import '../enqueue.dart'
-    show
-        DirectEnqueuerStrategy,
-        Enqueuer,
-        EnqueueTask,
-        ResolutionEnqueuer,
-        TreeShakingEnqueuerStrategy;
+import '../enqueue.dart' show Enqueuer, EnqueueTask, ResolutionEnqueuer;
 import '../frontend_strategy.dart';
 import '../io/source_information.dart'
     show SourceInformation, SourceInformationStrategy;
@@ -39,7 +33,7 @@ import '../ssa/ssa.dart' show SsaFunctionCompiler;
 import '../tracer.dart';
 import '../types/types.dart';
 import '../universe/call_structure.dart' show CallStructure;
-import '../universe/class_hierarchy_builder.dart'
+import '../universe/class_hierarchy.dart'
     show ClassHierarchyBuilder, ClassQueries;
 import '../universe/selector.dart' show Selector;
 import '../universe/use.dart' show StaticUse;
@@ -47,7 +41,8 @@ import '../universe/world_builder.dart';
 import '../universe/world_impact.dart'
     show ImpactStrategy, ImpactUseCase, WorldImpact, WorldImpactVisitor;
 import '../util/util.dart';
-import '../world.dart' show ClosedWorld, ClosedWorldRefiner;
+import '../world.dart' show JClosedWorld;
+import 'allocator_analysis.dart';
 import 'annotations.dart' as optimizerHints;
 import 'backend_impact.dart';
 import 'backend_usage.dart';
@@ -57,6 +52,7 @@ import 'constant_handler_javascript.dart';
 import 'custom_elements_analysis.dart';
 import 'enqueuer.dart';
 import 'impact_transformer.dart';
+import 'inferred_data.dart';
 import 'interceptor_data.dart';
 import 'js_interop_analysis.dart' show JsInteropAnalysis;
 import 'namer.dart';
@@ -71,7 +67,8 @@ abstract class FunctionCompiler {
   void onCodegenStart();
 
   /// Generates JavaScript code for `work.element`.
-  jsAst.Fun compile(CodegenWorkItem work, ClosedWorld closedWorld);
+  jsAst.Fun compile(CodegenWorkItem work, JClosedWorld closedWorld,
+      GlobalTypeInferenceResults globalInferenceResults);
 
   Iterable get tasks;
 }
@@ -118,15 +115,12 @@ class FunctionInlineCache {
     int decision = _cachedDecisions[element];
 
     if (decision == null) {
-      // These synthetic elements are not yet present when we initially compute
-      // this cache from metadata annotations, so look for their parent.
-      if (element is ConstructorBodyEntity) {
-        ConstructorBodyEntity body = element;
-        decision = _cachedDecisions[body.constructor];
-      }
-      if (decision == null) {
-        decision = _unknown;
-      }
+      // TODO(sra): Have annotations for mustInline / noInline for constructor
+      // bodies. (There used to be some logic here to have constructor bodies,
+      // inherit the settings from annotations on the generative
+      // constructor. This was conflated with the heuristic decisions, leading
+      // to lack of inlining where it was beneficial.)
+      decision = _unknown;
     }
 
     if (insideLoop) {
@@ -364,6 +358,8 @@ class JavaScriptBackend {
   /// constructors for custom elements.
   CustomElementsCodegenAnalysis _customElementsCodegenAnalysis;
 
+  KAllocatorAnalysis _allocatorResolutionAnalysis;
+
   /// Codegen support for typed JavaScript interop.
   JsInteropAnalysis jsInteropAnalysis;
 
@@ -406,7 +402,8 @@ class JavaScriptBackend {
             compiler.backendStrategy.sourceInformationStrategy,
         constantCompilerTask = new JavaScriptConstantTask(compiler) {
     CommonElements commonElements = compiler.frontendStrategy.commonElements;
-    _backendUsageBuilder = new BackendUsageBuilderImpl(commonElements);
+    _backendUsageBuilder =
+        new BackendUsageBuilderImpl(compiler.frontendStrategy);
     _checkedModeHelpers = new CheckedModeHelpers();
     emitter =
         new CodeEmitterTask(compiler, generateSourceMap, useStartupEmitter);
@@ -495,7 +492,7 @@ class JavaScriptBackend {
   }
 
   Namer determineNamer(
-      ClosedWorld closedWorld, CodegenWorldBuilder codegenWorldBuilder) {
+      JClosedWorld closedWorld, CodegenWorldBuilder codegenWorldBuilder) {
     return compiler.options.enableMinification
         ? compiler.options.useFrequencyNamer
             ? new FrequencyBasedNamer(closedWorld, codegenWorldBuilder)
@@ -546,12 +543,6 @@ class JavaScriptBackend {
         frontendStrategy.nativeBasicData, nativeDataBuilder);
   }
 
-  /// Called when the closed world from resolution has been computed.
-  void onResolutionClosedWorld(
-      ClosedWorld closedWorld, ClosedWorldRefiner closedWorldRefiner) {
-    processAnnotations(closedWorldRefiner);
-  }
-
   void onDeferredLoadComplete(OutputUnitData data) {
     _outputUnitData = compiler.backendStrategy.convertOutputUnitData(data);
   }
@@ -579,6 +570,7 @@ class JavaScriptBackend {
         commonElements,
         nativeBasicData,
         _backendUsageBuilder);
+    _allocatorResolutionAnalysis = new KAllocatorAnalysis(elementEnvironment);
     ClassQueries classQueries = compiler.frontendStrategy.createClassQueries();
     ClassHierarchyBuilder classHierarchyBuilder =
         new ClassHierarchyBuilder(commonElements, classQueries);
@@ -600,9 +592,6 @@ class JavaScriptBackend {
         task,
         compiler.options,
         compiler.reporter,
-        compiler.options.analyzeOnly && compiler.options.analyzeMain
-            ? const DirectEnqueuerStrategy()
-            : const TreeShakingEnqueuerStrategy(),
         new ResolutionEnqueuerListener(
             compiler.options,
             elementEnvironment,
@@ -614,6 +603,7 @@ class JavaScriptBackend {
             noSuchMethodRegistry,
             customElementsResolutionAnalysis,
             _nativeResolutionEnqueuer,
+            _allocatorResolutionAnalysis,
             compiler.deferredLoadTask),
         compiler.frontendStrategy.createResolutionWorldBuilder(
             nativeBasicData,
@@ -621,6 +611,7 @@ class JavaScriptBackend {
             interceptorDataBuilder,
             _backendUsageBuilder,
             rtiNeedBuilder,
+            _allocatorResolutionAnalysis,
             _nativeResolutionEnqueuer,
             noSuchMethodRegistry,
             compiler.options.strongMode && useStrongModeWorldStrategy
@@ -637,7 +628,10 @@ class JavaScriptBackend {
 
   /// Creates an [Enqueuer] for code generation specific to this backend.
   CodegenEnqueuer createCodegenEnqueuer(
-      CompilerTask task, Compiler compiler, ClosedWorld closedWorld) {
+      CompilerTask task,
+      Compiler compiler,
+      JClosedWorld closedWorld,
+      GlobalTypeInferenceResults globalInferenceResults) {
     ElementEnvironment elementEnvironment = closedWorld.elementEnvironment;
     CommonElements commonElements = closedWorld.commonElements;
     BackendImpacts impacts =
@@ -658,10 +652,12 @@ class JavaScriptBackend {
     return new CodegenEnqueuer(
         task,
         compiler.options,
-        const TreeShakingEnqueuerStrategy(),
         compiler.backendStrategy.createCodegenWorldBuilder(
-            closedWorld.nativeData, closedWorld, const TypeMaskStrategy()),
-        compiler.backendStrategy.createCodegenWorkItemBuilder(closedWorld),
+            closedWorld.nativeData,
+            closedWorld,
+            compiler.abstractValueStrategy.createSelectorStrategy()),
+        compiler.backendStrategy
+            .createCodegenWorkItemBuilder(closedWorld, globalInferenceResults),
         new CodegenEnqueuerListener(
             elementEnvironment,
             commonElements,
@@ -675,7 +671,8 @@ class JavaScriptBackend {
   static bool cacheCodegenImpactForTesting = false;
   Map<MemberEntity, WorldImpact> codegenImpactsForTesting;
 
-  WorldImpact codegen(CodegenWorkItem work, ClosedWorld closedWorld) {
+  WorldImpact codegen(CodegenWorkItem work, JClosedWorld closedWorld,
+      GlobalTypeInferenceResults globalInferenceResults) {
     MemberEntity element = work.element;
     if (compiler.elementHasCompileTimeError(element)) {
       DiagnosticMessage message =
@@ -696,7 +693,8 @@ class JavaScriptBackend {
       return const WorldImpact();
     }
 
-    jsAst.Fun function = functionCompiler.compile(work, closedWorld);
+    jsAst.Fun function =
+        functionCompiler.compile(work, closedWorld, globalInferenceResults);
     if (function != null) {
       if (function.sourceInformation == null) {
         function = function.withSourceInformation(
@@ -730,8 +728,8 @@ class JavaScriptBackend {
   }
 
   /// Generates the output and returns the total size of the generated code.
-  int assembleProgram(ClosedWorld closedWorld) {
-    int programSize = emitter.assembleProgram(namer, closedWorld);
+  int assembleProgram(JClosedWorld closedWorld, InferredData inferredData) {
+    int programSize = emitter.assembleProgram(namer, closedWorld, inferredData);
     closedWorld.noSuchMethodData.emitDiagnostic(reporter);
     return programSize;
   }
@@ -785,7 +783,7 @@ class JavaScriptBackend {
 
   /// Called when the compiler starts running the codegen enqueuer. The
   /// [WorldImpact] of enabled backend features is returned.
-  WorldImpact onCodegenStart(ClosedWorld closedWorld,
+  WorldImpact onCodegenStart(JClosedWorld closedWorld,
       CodegenWorldBuilder codegenWorldBuilder, Sorter sorter) {
     functionCompiler.onCodegenStart();
     _oneShotInterceptorData = new OneShotInterceptorData(
@@ -797,6 +795,7 @@ class JavaScriptBackend {
         closedWorld.nativeData,
         closedWorld.elementEnvironment,
         closedWorld.commonElements,
+        closedWorld.rtiNeed,
         strongMode: compiler.options.strongMode);
     emitter.createEmitter(namer, closedWorld, codegenWorldBuilder, sorter);
     // TODO(johnniwinther): Share the impact object created in
@@ -842,23 +841,21 @@ class JavaScriptBackend {
   /// Process backend specific annotations.
   // TODO(johnniwinther): Merge this with [AnnotationProcessor] and use
   // [ElementEnvironment.getMemberMetadata] in [AnnotationProcessor].
-  void processAnnotations(ClosedWorldRefiner closedWorldRefiner) {
-    ClosedWorld closedWorld = closedWorldRefiner.closedWorld;
+  void processAnnotations(
+      JClosedWorld closedWorld, InferredDataBuilder inferredDataBuilder) {
     // These methods are overwritten with generated versions.
     inlineCache.markAsNonInlinable(
         closedWorld.commonElements.getInterceptorMethod,
         insideLoop: true);
     for (MemberEntity entity in closedWorld.processedMembers) {
-      _processMemberAnnotations(closedWorld.elementEnvironment,
-          closedWorld.commonElements, entity, closedWorldRefiner);
+      _processMemberAnnotations(closedWorld, inferredDataBuilder, entity);
     }
   }
 
-  void _processMemberAnnotations(
-      ElementEnvironment elementEnvironment,
-      CommonElements commonElements,
-      MemberEntity element,
-      ClosedWorldRefiner closedWorldRefiner) {
+  void _processMemberAnnotations(JClosedWorld closedWorld,
+      InferredDataBuilder inferredDataBuilder, MemberEntity element) {
+    ElementEnvironment elementEnvironment = closedWorld.elementEnvironment;
+    CommonElements commonElements = closedWorld.commonElements;
     bool hasNoInline = false;
     bool hasForceInline = false;
 
@@ -930,14 +927,14 @@ class JavaScriptBackend {
           reporter.reportHintMessage(
               method, MessageKind.GENERIC, {'text': "Cannot throw"});
         }
-        closedWorldRefiner.registerCannotThrow(method);
+        inferredDataBuilder.registerCannotThrow(method);
       } else if (cls == commonElements.noSideEffectsClass) {
         hasNoSideEffects = true;
         if (VERBOSE_OPTIMIZER_HINTS) {
           reporter.reportHintMessage(
               method, MessageKind.GENERIC, {'text': "Has no side effects"});
         }
-        closedWorldRefiner.registerSideEffectsFree(method);
+        inferredDataBuilder.registerSideEffectsFree(method);
       }
     }
     if (hasForceInline && hasNoInline) {
@@ -964,6 +961,7 @@ class JavaScriptBackend {
       CodegenRegistry registry,
       FunctionEntity element,
       jsAst.Expression code,
+      DartType asyncTypeParameter,
       SourceInformation bodySourceInformation,
       SourceInformation exitSourceInformation) {
     if (element.asyncMarker == AsyncMarker.SYNC) return code;
@@ -974,8 +972,8 @@ class JavaScriptBackend {
 
     switch (element.asyncMarker) {
       case AsyncMarker.ASYNC:
-        rewriter = _makeAsyncRewriter(
-            commonElements, elementEnvironment, registry, element, code, name);
+        rewriter = _makeAsyncRewriter(commonElements, elementEnvironment,
+            registry, element, code, asyncTypeParameter, name);
         break;
       case AsyncMarker.SYNC_STAR:
         rewriter = new SyncStarRewriter(reporter, element,
@@ -983,8 +981,7 @@ class JavaScriptBackend {
                 emitter.staticFunctionAccess(commonElements.endOfIteration),
             iterableFactory: emitter
                 .staticFunctionAccess(commonElements.syncStarIterableFactory),
-            iterableFactoryTypeArguments:
-                _fetchItemType(element, elementEnvironment),
+            iterableFactoryTypeArguments: _fetchItemType(asyncTypeParameter),
             yieldStarExpression:
                 emitter.staticFunctionAccess(commonElements.yieldStar),
             uncaughtErrorExpression: emitter
@@ -1006,8 +1003,7 @@ class JavaScriptBackend {
             wrapBody: emitter.staticFunctionAccess(commonElements.wrapBody),
             newController: emitter.staticFunctionAccess(
                 commonElements.asyncStarStreamControllerFactory),
-            newControllerTypeArguments:
-                _fetchItemType(element, elementEnvironment),
+            newControllerTypeArguments: _fetchItemType(asyncTypeParameter),
             safeVariableName: namer.safeVariablePrefixForAsyncRewrite,
             yieldExpression:
                 emitter.staticFunctionAccess(commonElements.yieldSingle),
@@ -1024,22 +1020,15 @@ class JavaScriptBackend {
     return rewriter.rewrite(code, bodySourceInformation, exitSourceInformation);
   }
 
-  /// Returns an optional expression that evaluates the type argument to the
-  /// Future/Stream/Iterable.
-  /// Returns an empty list if the type is not needed.
-  /// Returns `null` if the type expression is determined by
-  /// the outside context and should be added as a function parameter.
-  List<jsAst.Expression> _fetchItemType(
-      FunctionEntity element, ElementEnvironment elementEnvironment) {
-    //DartType type =
-    //  elementEnvironment.getFunctionAsyncOrSyncStarElementType(element);
-
-    //if (!type.containsFreeTypeVariables) {
-    //  var ast = rtiEncoder.getTypeRepresentation(emitter.emitter, type, null);
-    //  return <jsAst.Expression>[ast];
-    //}
-
-    return null;
+  /// Returns an optional expression that evaluates [type].  Returns `null` if
+  /// the type expression is determined by the outside context and should be
+  /// added as a function parameter to the rewritten code.
+  // TODO(sra): We could also return an empty list if the generator takes no
+  // type (e.g. due to rtiNeed optimization).
+  List<jsAst.Expression> _fetchItemType(DartType type) {
+    if (type == null) return null;
+    var ast = rtiEncoder.getTypeRepresentation(emitter.emitter, type, null);
+    return <jsAst.Expression>[ast];
   }
 
   AsyncRewriter _makeAsyncRewriter(
@@ -1048,6 +1037,7 @@ class JavaScriptBackend {
       CodegenRegistry registry,
       FunctionEntity element,
       jsAst.Expression code,
+      DartType elementType,
       jsAst.Name name) {
     bool startAsyncSynchronously = compiler.options.startAsyncSynchronously;
 
@@ -1058,8 +1048,7 @@ class JavaScriptBackend {
         ? commonElements.asyncAwaitCompleterFactory
         : commonElements.syncCompleterFactory;
 
-    List<jsAst.Expression> itemTypeExpression =
-        _fetchItemType(element, elementEnvironment);
+    List<jsAst.Expression> itemTypeExpression = _fetchItemType(elementType);
 
     var rewriter = new AsyncRewriter(reporter, element,
         asyncStart: emitter.staticFunctionAccess(startFunction),

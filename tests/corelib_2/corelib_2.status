@@ -1,12 +1,17 @@
 # Copyright (c) 2017, the Dart project authors.  Please see the AUTHORS file
 # for details. All rights reserved. Use of this source code is governed by a
 # BSD-style license that can be found in the LICENSE file.
-iterable_where_type_test: RuntimeError # Disabled.  Issue 32463
 maps_test: Skip # Maps class no longer exists
 
+[ $compiler == app_jitk ]
+symbol_operator_test/03: RuntimeError
+symbol_reserved_word_test/06: RuntimeError
+symbol_reserved_word_test/09: RuntimeError
+symbol_reserved_word_test/12: RuntimeError
+symbol_test/none: RuntimeError
+unicode_test: RuntimeError
+
 [ $compiler == dart2analyzer ]
-bigint_from_test: CompileTimeError # Issue 32585
-compare_to2_test: CompileTimeError # invalid test
 int_parse_radix_bad_handler_test: MissingCompileTimeError
 iterable_element_at_test/static: Pass
 num_sign_test: Crash, Pass # Issue 31768
@@ -14,22 +19,19 @@ num_sign_test: Crash, Pass # Issue 31768
 [ $compiler == dart2js ]
 bigint_from_test: RuntimeError # Issue 32589
 date_time11_test: RuntimeError, Pass # Fails when US is on winter time, issue 31285.
-iterable_where_type_test: RuntimeError # issue 31718
 list_unmodifiable_test: Pass, RuntimeError # Issue 28712
-apply_generic_function_test: RuntimeError # Issue 32691
 
 [ $compiler != dartdevc ]
 error_stack_trace_test/static: MissingCompileTimeError
 
 [ $compiler == dartdevk ]
-bigint_from_test: RuntimeError # Issue 32589
 bool_from_environment2_test/03: Crash
 int_modulo_arith_test/modPow: RuntimeError
 int_modulo_arith_test/none: RuntimeError
-null_test: RuntimeError # Issue 32194
 string_from_environment3_test/03: Crash
 
 [ $compiler == precompiler ]
+bigint_test: Pass, Timeout # --no_intrinsify
 int_parse_radix_test: Pass, Timeout # --no_intrinsify
 integer_parsed_mul_div_vm_test: Pass, Timeout # --no_intrinsify
 regexp/stack-overflow_test: RuntimeError, OK # Smaller limit with irregex interpreter
@@ -59,6 +61,7 @@ from_environment_const_type_test/15: Fail # Flutter Issue 9111
 from_environment_const_type_test/16: MissingCompileTimeError # Flutter Issue 9111
 from_environment_const_type_test/none: Fail # Flutter Issue 9111
 int_from_environment2_test: Fail # Flutter Issue 9111
+int_from_environment_int64_test: Fail # Flutter Issue 9111
 int_from_environment_test: Fail # Flutter Issue 9111
 main_test: RuntimeError # Flutter Issue 9111
 string_from_environment2_test: Fail # Flutter Issue 9111
@@ -85,6 +88,8 @@ symbol_test/03: MissingCompileTimeError
 
 [ !$strong ]
 cast_test: SkipByDesign # Uses generic method parameters.
+iterable_where_type_test: SkipByDesign
+regress_33166_test: SkipByDesign # Not a Dart 1 test
 
 [ $arch == simarmv5te && ($runtime == dart_precompiled || $runtime == vm) ]
 int_parse_radix_test/*: Pass, Slow
@@ -93,53 +98,29 @@ integer_parsed_mul_div_vm_test: Pass, Slow
 [ $arch == x64 && $system == windows ]
 stopwatch_test: Skip # Flaky test due to expected performance behaviour.
 
-[ $arch == simarm || $arch == simarm64 || $arch == simdbc64 ]
-bigint_parse_radix_test: Pass, Slow # Bigint computations are slow on simulated architectures.
-bigint_test: Pass, Slow # Bigint computations are slow on simulated architectures.
-
-[ $compiler == dart2analyzer && !$checked && !$strong ]
-from_environment_const_type_test/02: MissingCompileTimeError
-from_environment_const_type_test/03: MissingCompileTimeError
-from_environment_const_type_test/04: MissingCompileTimeError
-from_environment_const_type_test/06: MissingCompileTimeError
-from_environment_const_type_test/07: MissingCompileTimeError
-from_environment_const_type_test/08: MissingCompileTimeError
-from_environment_const_type_test/09: MissingCompileTimeError
-from_environment_const_type_test/11: MissingCompileTimeError
-from_environment_const_type_test/12: MissingCompileTimeError
-from_environment_const_type_test/13: MissingCompileTimeError
-from_environment_const_type_test/14: MissingCompileTimeError
-from_environment_const_type_test/16: MissingCompileTimeError
-from_environment_const_type_undefined_test/02: MissingCompileTimeError
-from_environment_const_type_undefined_test/03: MissingCompileTimeError
-from_environment_const_type_undefined_test/04: MissingCompileTimeError
-from_environment_const_type_undefined_test/06: MissingCompileTimeError
-from_environment_const_type_undefined_test/07: MissingCompileTimeError
-from_environment_const_type_undefined_test/08: MissingCompileTimeError
-from_environment_const_type_undefined_test/09: MissingCompileTimeError
-from_environment_const_type_undefined_test/11: MissingCompileTimeError
-from_environment_const_type_undefined_test/12: MissingCompileTimeError
-from_environment_const_type_undefined_test/13: MissingCompileTimeError
-from_environment_const_type_undefined_test/14: MissingCompileTimeError
-from_environment_const_type_undefined_test/16: MissingCompileTimeError
-
-[ $compiler == dart2analyzer && $strong ]
-int_parse_radix_bad_handler_test: Pass
-
-[ $compiler == dart2analyzer && !$strong ]
-symbol_reserved_word_test/05: MissingCompileTimeError # Issue 30245
-
-[ $compiler != dart2analyzer && $compiler != dart2js && $compiler != dartdevc && $compiler != dartdevk ]
-bigint_js_test: SkipByDesign # JavaScript-specific test
-
 # All static_tests have expected compile-time errors.
-[ $compiler != dart2analyzer && $compiler != dart2js && $compiler != dartdevc && $compiler != dartdevk && $compiler != dartk && $compiler != dartkp && $compiler != fasta && $strong ]
+[ $compiler != app_jitk && $compiler != dart2analyzer && $compiler != dart2js && $compiler != dartdevc && $compiler != dartdevk && $compiler != dartk && $compiler != dartkp && $compiler != fasta && $strong ]
 core_runtime_types_static_test: MissingCompileTimeError
 splay_tree_test/01: MissingCompileTimeError
 splay_tree_test/02: MissingCompileTimeError
 string_base_vm_static_test: MissingCompileTimeError
 string_replace_static_test: MissingCompileTimeError
 string_static_test: MissingCompileTimeError
+
+[ $compiler != app_jitk && $compiler != dart2js && $compiler != dartdevc && $compiler != dartdevk && $compiler != dartk && $compiler != dartkp && $compiler != fasta ]
+iterable_element_at_test/static: MissingCompileTimeError
+
+[ $compiler != app_jitk && $compiler != dart2js && $compiler != dartdevc && $compiler != dartdevk && $compiler != dartk && $compiler != dartkp && $compiler != fasta && ($compiler != dart2analyzer || !$strong) ]
+iterable_mapping_test/01: MissingCompileTimeError
+
+[ $compiler != app_jitk && $compiler != dart2js && $compiler != dartdevc && $compiler != dartdevk && $compiler != dartk && $compiler != dartkp && $runtime != none ]
+map_keys2_test: RuntimeError # needs Dart 2 is checks
+
+[ $compiler == dart2analyzer && $strong ]
+int_parse_radix_bad_handler_test: Pass
+
+[ $compiler != dart2analyzer && $compiler != dart2js && $compiler != dartdevc && $compiler != dartdevk ]
+bigint_js_test: SkipByDesign # JavaScript-specific test
 
 [ $compiler == dart2js && $runtime == chromeOnAndroid ]
 list_as_map_test: Pass, Slow # TODO(kasperl): Please triage.
@@ -159,6 +140,9 @@ map_of_test: RuntimeError # Strong mode test
 regexp/lookahead_test: RuntimeError
 regexp/no-extensions_test: RuntimeError
 regexp/overflow_test: RuntimeError
+
+[ $compiler == dart2js && $runtime == safari && $strong ]
+regexp/no-extensions_test: Pass, RuntimeError
 
 [ $compiler == dart2js && !$browser ]
 package_resource_test: RuntimeError # Issue 26842
@@ -195,16 +179,9 @@ list_test/none: Crash # Unsupported operation: Unsupported type parameter type n
 map_test: Crash # tests/corelib_2/map_test.dart:903:7: Internal problem: Unhandled Null in installDefaultConstructor.
 symbol_reserved_word_test/03: RuntimeError # Issue 19972, new Symbol('void') should be allowed.
 
-[ $compiler == dart2js && $fast_startup ]
-apply3_test: RuntimeError
-dynamic_nosuchmethod_test: RuntimeError
-
 [ $compiler == dart2js && $fast_startup && $fasta && $strong ]
-cast_test: RuntimeError
 error_stack_trace1_test: RuntimeError
 growable_list_test: RuntimeError
-int_parse_radix_test/01: RuntimeError
-int_parse_radix_test/02: RuntimeError
 integer_to_radix_string_test/01: RuntimeError
 integer_to_radix_string_test/02: RuntimeError
 integer_to_radix_string_test/none: RuntimeError
@@ -213,46 +190,44 @@ iterable_return_type_test/02: RuntimeError # Dart2js does not support Uint64*.
 list_concurrent_modify_test: RuntimeError
 main_test: RuntimeError
 nan_infinity_test/01: RuntimeError
-string_split_test/checkedstore: RuntimeError
 symbol_reserved_word_test/03: RuntimeError # Issue 19972, new Symbol('void') should be allowed.
-uri_base_test: Crash # RangeError (index): Invalid value: Valid value range is empty: 0
-uri_parameters_all_test: RuntimeError
-uri_test: RuntimeError
 
 [ $compiler == dart2js && $fasta ]
-int_from_environment_test: Pass # Issue 31762
-int_parse_radix_test/none: Pass # Issue 31762
-
-[ $compiler == dart2js && $fasta && $host_checked && $strong ]
-cast_test: RuntimeError
-error_stack_trace1_test: RuntimeError # Issue 12399
-growable_list_test: RuntimeError # Concurrent modifications test always runs
+bigint_test: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+bit_twiddling_test/int64: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+compare_to2_test: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+date_time_test: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+double_ceil_test/int64: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+double_floor_test/int64: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+double_round_test/int64: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+double_truncate_test/int64: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+growable_list_test: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+int_ceil_test: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+int_ceil_to_double_test: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+int_floor_test: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+int_floor_to_double_test: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+int_from_environment_int64_test: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+int_parse_radix_int64_test/01: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+int_parse_radix_int64_test/02: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+int_parse_radix_int64_test/none: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
 int_parse_radix_test/01: RuntimeError
-int_parse_radix_test/02: RuntimeError
-integer_to_radix_string_test/01: RuntimeError
-integer_to_radix_string_test/02: RuntimeError
-integer_to_radix_string_test/none: RuntimeError
-integer_to_string_test/01: RuntimeError
-iterable_return_type_test/02: RuntimeError # Dart2js does not support Uint64*.
-list_concurrent_modify_test: RuntimeError # dart2js does not fully implement these
-list_unmodifiable_test: RuntimeError
-main_test: RuntimeError
-nan_infinity_test/01: RuntimeError
-regexp/pcre_test: RuntimeError
-string_split_test/checkedstore: RuntimeError # Issue 30548: does not check stores into List<String>
-symbol_reserved_word_test/03: RuntimeError # Issue 19972, new Symbol('void') should be allowed.
-uri_base_test: RuntimeError
-uri_parameters_all_test: RuntimeError
-uri_test: RuntimeError
+int_round_test: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+int_round_to_double_test: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+int_to_int_test: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+int_truncate_test: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+int_truncate_to_double_test: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+integer_arith_vm_test/modPow: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+integer_arith_vm_test/none: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+integer_to_string_test/01: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+num_parse_test/01: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+num_parse_test/none: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+num_sign_test: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
 
 [ $compiler == dart2js && $fasta && $minified && $strong ]
-cast_test: RuntimeError
 dynamic_nosuchmethod_test: RuntimeError
 error_stack_trace1_test: RuntimeError # Issue 12399
 growable_list_test: RuntimeError # Concurrent modifications test always runs
 hash_set_test/01: Crash # Assertion failure: Cannot find value Instance of 'ThisLocal' in (local(_CustomHashSet.#x), local(_CustomHashSet.#)) for j:closure_call(_CustomHashSet__CustomHashSet_closure.call).
-int_parse_radix_test/01: RuntimeError
-int_parse_radix_test/02: RuntimeError
 integer_to_radix_string_test/01: RuntimeError
 integer_to_radix_string_test/02: RuntimeError
 integer_to_radix_string_test/none: RuntimeError
@@ -264,13 +239,10 @@ main_test: RuntimeError
 nan_infinity_test/01: RuntimeError
 nsm_invocation_test: RuntimeError # Symbols don't match due to minifiaction.
 regexp/pcre_test: RuntimeError
-string_split_test/checkedstore: RuntimeError # Issue 30548: does not check stores into List<String>
 symbol_operator_test/03: RuntimeError
 symbol_operator_test/none: RuntimeError
 symbol_reserved_word_test/03: RuntimeError # Issue 19972, new Symbol('void') should be allowed.
 uri_base_test: RuntimeError
-uri_parameters_all_test: RuntimeError
-uri_test: RuntimeError
 
 [ $compiler == dart2js && $fasta && !$strong ]
 *: SkipByDesign
@@ -278,21 +250,26 @@ uri_test: RuntimeError
 [ $compiler == dart2js && !$fasta ]
 *: SkipByDesign
 
-[ $compiler != dart2js && $compiler != dartdevc && $compiler != dartdevk && $compiler != dartk && $compiler != dartkp && $compiler != fasta ]
-iterable_element_at_test/static: MissingCompileTimeError
-
-[ $compiler != dart2js && $compiler != dartdevc && $compiler != dartdevk && $compiler != dartk && $compiler != dartkp && $compiler != fasta && ($compiler != dart2analyzer || !$strong) ]
-iterable_mapping_test/01: MissingCompileTimeError
-
-[ $compiler != dart2js && $compiler != dartdevc && $compiler != dartdevk && $compiler != dartk && $compiler != dartkp && $runtime != none ]
-map_keys2_test: RuntimeError # needs Dart 2 is checks
+[ $compiler == dart2js && $strong ]
+error_stack_trace1_test: RuntimeError # Issue 12399
+growable_list_test: RuntimeError # Concurrent modifications test always runs
+integer_to_radix_string_test/01: RuntimeError
+integer_to_radix_string_test/02: RuntimeError
+integer_to_radix_string_test/none: RuntimeError
+integer_to_string_test/01: RuntimeError
+iterable_return_type_test/02: RuntimeError # Dart2js does not support Uint64*.
+list_concurrent_modify_test: RuntimeError # dart2js does not fully implement these
+list_unmodifiable_test: RuntimeError
+main_test: RuntimeError
+nan_infinity_test/01: RuntimeError
+regexp/pcre_test: RuntimeError
+symbol_reserved_word_test/03: RuntimeError # Issue 19972, new Symbol('void') should be allowed.
 
 [ $compiler != dart2js && $fasta ]
 bool_from_environment2_test/03: MissingCompileTimeError
 string_from_environment3_test/03: MissingCompileTimeError
 
 [ $compiler == dartdevc && $runtime != none ]
-bigint_from_test: CompileTimeError # Issue 32585
 compare_to2_test: CompileTimeError # invalid test
 symbol_operator_test: RuntimeError # Issue 29921
 
@@ -304,9 +281,11 @@ string_base_vm_static_test: MissingCompileTimeError
 string_replace_static_test: MissingCompileTimeError
 string_static_test: MissingCompileTimeError
 
+[ ($compiler == dartk || $compiler == dartkb) && $mode == release && $hot_reload ]
+bigint_parse_radix_test: Crash
+
 # ===== dartk + vm status lines =====
-[ $compiler == dartk && $runtime == vm && $strong ]
-apply_generic_function_test: RuntimeError
+[ ($compiler == dartk || $compiler == dartkb) && $runtime == vm && $strong ]
 iterable_fold_test/02: RuntimeError
 iterable_reduce_test/01: CompileTimeError # Issue 31533
 iterable_reduce_test/none: RuntimeError
@@ -321,7 +300,7 @@ unicode_test: RuntimeError # Issue 18061: German double S.
 apply_test/01: RuntimeError
 
 [ $compiler == dartkp && $runtime == dart_precompiled && $strong ]
-apply_generic_function_test: RuntimeError
+bigint_test: Pass, Timeout # --no_intrinsify
 iterable_fold_test/02: RuntimeError
 iterable_reduce_test/01: CompileTimeError # Issue 31533
 iterable_reduce_test/none: RuntimeError
@@ -395,80 +374,13 @@ double_round_test/int64: RuntimeError, OK # Requires fixed-size int64 support.
 double_truncate_test/int64: RuntimeError, OK # Requires fixed-size int64 support.
 hash_set_test/01: RuntimeError # non JS number semantics - Issue 11551
 int_modulo_arith_test/modPow: RuntimeError # Issue 29921
-int_parse_with_limited_ints_test: Skip # dart2js and dartdevc don't know about --limit-ints-to-64-bits
+int_parse_with_limited_ints_test: Skip # Requires fixed-size int64 support.
 integer_arith_vm_test/modPow: RuntimeError # Issues 10245, 30170
 integer_parsed_arith_vm_test: RuntimeError # Issues 10245, 29921
 integer_parsed_div_rem_vm_test: RuntimeError # Issue 29921
 integer_parsed_mul_div_vm_test: RuntimeError # Issue 29921
 regress_r21715_test: RuntimeError # Requires fixed-size int64 support.
-typed_data_with_limited_ints_test: Skip # dart2js and dartdevc don't know about --limit-ints-to-64-bits
-
-[ $runtime != none && ($compiler == dartdevc || $compiler == dartdevk) ]
-bigint_test: Pass, Slow
-compare_to2_test: RuntimeError # Issue 30170
-date_time10_test: RuntimeError # Issue 29921
-error_stack_trace_test/nullThrown: RuntimeError # .stackTrace not present for exception caught from 'throw null;'
-hash_set_test/01: RuntimeError # Issue 29921
-int_modulo_arith_test/none: RuntimeError # Issue 29921
-int_parse_radix_test/01: RuntimeError # Issue 29921
-int_parse_radix_test/02: RuntimeError # Issue 29921
-int_parse_with_limited_ints_test: Skip # dartdevc doesn't know about --limit-ints-to-64-bits
-integer_arith_vm_test/modPow: RuntimeError # Issue 30170
-integer_parsed_arith_vm_test: RuntimeError # Issue 29921
-integer_to_radix_string_test: RuntimeError # Issue 29921
-integer_to_string_test/01: RuntimeError # Issue 29921
-iterable_return_type_test/02: RuntimeError # Issue 29921
-list_concurrent_modify_test: RuntimeError # DDC uses ES6 array iterators so it does not issue this
-list_removeat_test: RuntimeError # Issue 29921
-main_test: RuntimeError # Issue 29921
-nan_infinity_test/01: RuntimeError # Issue 29921
-regexp/alternative-length-miscalculation_test: RuntimeError # Issue 29921
-regexp/ascii-regexp-subject_test: RuntimeError # Issue 29921
-regexp/bol-with-multiline_test: RuntimeError # Issue 29921
-regexp/capture-3_test: RuntimeError # Issue 29921
-regexp/char-insensitive_test: RuntimeError # Issue 29921
-regexp/character-match-out-of-order_test: RuntimeError # Issue 29921
-regexp/compile-crash_test: RuntimeError # Issue 29921
-regexp/default_arguments_test: RuntimeError # Issue 29921
-regexp/early-acid3-86_test: RuntimeError # Issue 29921
-regexp/ecma-regex-examples_test: RuntimeError # Issue 29921
-regexp/extended-characters-match_test: RuntimeError # Issue 29921
-regexp/extended-characters-more_test: RuntimeError # Issue 29921
-regexp/find-first-asserted_test: RuntimeError # Issue 29921
-regexp/invalid-range-in-class_test: RuntimeError # Issue 29921
-regexp/look-ahead_test: RuntimeError # Issue 29921
-regexp/loop-capture_test: RuntimeError # Issue 29921
-regexp/malformed-escapes_test: RuntimeError # Issue 29921
-regexp/many-brackets_test: RuntimeError # Issue 29921
-regexp/negative-special-characters_test: RuntimeError # Issue 29921
-regexp/no-extensions_test: RuntimeError # Issue 29921
-regexp/non-bmp_test: RuntimeError # Issue 29921
-regexp/non-capturing-backtracking_test: RuntimeError # Issue 29921
-regexp/non-capturing-groups_test: RuntimeError # Issue 29921
-regexp/non-character_test: RuntimeError # Issue 29921
-regexp/non-greedy-parentheses_test: RuntimeError # Issue 29921
-regexp/pcre-test-4_test: RuntimeError # Issue 29921
-regexp/quantified-assertions_test: RuntimeError # Issue 29921
-regexp/range-bound-ffff_test: RuntimeError # Issue 29921
-regexp/range-out-of-order_test: RuntimeError # Issue 29921
-regexp/ranges-and-escaped-hyphens_test: RuntimeError # Issue 29921
-regexp/regress-6-9-regexp_test: RuntimeError # Issue 29921
-regexp/regress-regexp-codeflush_test: RuntimeError # Issue 29921
-regexp/regress-regexp-construct-result_test: RuntimeError # Issue 29921
-regexp/repeat-match-waldemar_test: RuntimeError # Issue 29921
-regexp/results-cache_test: RuntimeError # Issue 29921
-regexp/stack-overflow2_test: RuntimeError # Issue 29921
-regexp/stack-overflow_test: RuntimeError # Issue 29921
-regexp/unicode-handling_test: RuntimeError # Issue 29921
-regexp/zero-length-alternatives_test: RuntimeError # Issue 29921
-regress_r21715_test: RuntimeError # Issue 29921
-string_operations_with_null_test: RuntimeError # Issue 29921
-symbol_operator_test/03: RuntimeError # Issue 29921
-symbol_reserved_word_test/06: RuntimeError # Issue 29921
-symbol_reserved_word_test/09: RuntimeError # Issue 29921
-symbol_reserved_word_test/12: RuntimeError # Issue 29921
-symbol_test/none: RuntimeError # Issue 29921
-typed_data_with_limited_ints_test: Skip # dartdevc doesn't know about --limit-ints-to-64-bits
+typed_data_with_limited_ints_test: Skip # Requires fixed-size int64 support.
 
 [ $runtime == vm && !$strong ]
 collection_of_test: RuntimeError
@@ -534,11 +446,15 @@ symbol_test/01: MissingCompileTimeError
 # a section you need, please reach out to sigmund@ to see the best way to add
 # them.
 # ===== Skip dartk and darkp in !$strong mode ====
-[ !$strong && ($compiler == dartk || $compiler == dartkp) ]
+[ !$strong && ($compiler == dartk || $compiler == dartkb || $compiler == dartkp) ]
 *: SkipByDesign
 
 [ !$strong && ($runtime == dart_precompiled || $runtime == vm) ]
 list_test/*: RuntimeError # VM doesn't implement strong mode covariance checks
+
+[ $arch == simarm || $arch == simarm64 || $arch == simdbc64 ]
+bigint_parse_radix_test: Pass, Slow # Bigint computations are slow on simulated architectures.
+bigint_test: Pass, Slow, Timeout # Bigint computations are slow on simulated architectures.
 
 [ $arch == simdbc || $arch == simdbc64 ]
 regexp/stack-overflow_test: RuntimeError, OK # Smaller limit with irregex interpreter
@@ -584,6 +500,102 @@ from_environment_const_type_undefined_test/14: MissingCompileTimeError
 from_environment_const_type_undefined_test/16: MissingCompileTimeError
 iterable_to_set_test: RuntimeError # is-checks do not implement strong mode type system
 
+[ $compiler == dartdevc || $compiler == dartdevk ]
+bigint_from_test: RuntimeError # Issue 32589
+bigint_test: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+bit_twiddling_test/int64: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+compare_to2_test: RuntimeError # Issue 30170
+compare_to2_test: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+date_time10_test: RuntimeError # Issue 29921
+date_time_test: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+double_ceil_test/int64: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+double_floor_test/int64: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+double_round_test/int64: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+double_truncate_test/int64: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+error_stack_trace_test/nullThrown: RuntimeError # .stackTrace not present for exception caught from 'throw null;'
+growable_list_test: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+hash_set_test/01: RuntimeError # Issue 29921
+int_ceil_test: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+int_ceil_to_double_test: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+int_floor_test: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+int_floor_to_double_test: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+int_from_environment_int64_test: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+int_modulo_arith_test/none: RuntimeError # Issue 29921
+int_parse_radix_int64_test/01: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+int_parse_radix_int64_test/02: RuntimeError
+int_parse_radix_int64_test/02: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+int_parse_radix_int64_test/none: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+int_parse_radix_test/01: RuntimeError # Issue 29921
+int_parse_with_limited_ints_test: Skip # Requires fixed-size int64 support.
+int_round_test: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+int_round_to_double_test: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+int_to_int_test: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+int_truncate_test: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+int_truncate_to_double_test: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+integer_arith_vm_test/modPow: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+integer_arith_vm_test/modPow: RuntimeError # Issue 30170
+integer_arith_vm_test/none: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+integer_parsed_arith_vm_test: RuntimeError # Issue 29921
+integer_to_radix_string_test: RuntimeError # Issue 29921
+integer_to_string_test/01: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+integer_to_string_test/01: RuntimeError # Issue 29921
+iterable_return_type_test/02: RuntimeError # Issue 29921
+list_concurrent_modify_test: RuntimeError # DDC uses ES6 array iterators so it does not issue this
+list_removeat_test: RuntimeError # Issue 29921
+main_test: RuntimeError # Issue 29921
+nan_infinity_test/01: RuntimeError # Issue 29921
+num_parse_test/01: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+num_parse_test/none: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+num_sign_test: CompileTimeError, OK # Error if web int literal cannot be represented exactly, see http://dartbug.com/33351
+regexp/alternative-length-miscalculation_test: RuntimeError # Issue 29921
+regexp/ascii-regexp-subject_test: RuntimeError # Issue 29921
+regexp/bol-with-multiline_test: RuntimeError # Issue 29921
+regexp/capture-3_test: RuntimeError # Issue 29921
+regexp/char-insensitive_test: RuntimeError # Issue 29921
+regexp/character-match-out-of-order_test: RuntimeError # Issue 29921
+regexp/compile-crash_test: RuntimeError # Issue 29921
+regexp/default_arguments_test: RuntimeError # Issue 29921
+regexp/early-acid3-86_test: RuntimeError # Issue 29921
+regexp/ecma-regex-examples_test: RuntimeError # Issue 29921
+regexp/extended-characters-match_test: RuntimeError # Issue 29921
+regexp/extended-characters-more_test: RuntimeError # Issue 29921
+regexp/find-first-asserted_test: RuntimeError # Issue 29921
+regexp/invalid-range-in-class_test: RuntimeError # Issue 29921
+regexp/look-ahead_test: RuntimeError # Issue 29921
+regexp/loop-capture_test: RuntimeError # Issue 29921
+regexp/malformed-escapes_test: RuntimeError # Issue 29921
+regexp/many-brackets_test: RuntimeError # Issue 29921
+regexp/negative-special-characters_test: RuntimeError # Issue 29921
+regexp/no-extensions_test: RuntimeError # Issue 29921
+regexp/non-bmp_test: RuntimeError # Issue 29921
+regexp/non-capturing-backtracking_test: RuntimeError # Issue 29921
+regexp/non-capturing-groups_test: RuntimeError # Issue 29921
+regexp/non-character_test: RuntimeError # Issue 29921
+regexp/non-greedy-parentheses_test: RuntimeError # Issue 29921
+regexp/pcre-test-4_test: RuntimeError # Issue 29921
+regexp/quantified-assertions_test: RuntimeError # Issue 29921
+regexp/range-bound-ffff_test: RuntimeError # Issue 29921
+regexp/range-out-of-order_test: RuntimeError # Issue 29921
+regexp/ranges-and-escaped-hyphens_test: RuntimeError # Issue 29921
+regexp/regress-6-9-regexp_test: RuntimeError # Issue 29921
+regexp/regress-regexp-codeflush_test: RuntimeError # Issue 29921
+regexp/regress-regexp-construct-result_test: RuntimeError # Issue 29921
+regexp/repeat-match-waldemar_test: RuntimeError # Issue 29921
+regexp/results-cache_test: RuntimeError # Issue 29921
+regexp/stack-overflow2_test: RuntimeError # Issue 29921
+regexp/stack-overflow_test: RuntimeError # Issue 29921
+regexp/unicode-handling_test: RuntimeError # Issue 29921
+regexp/zero-length-alternatives_test: RuntimeError # Issue 29921
+regress_r21715_test: RuntimeError # Issue 29921
+string_operations_with_null_test: RuntimeError # Issue 29921
+symbol_operator_test/03: RuntimeError # Issue 29921
+symbol_reserved_word_test/06: RuntimeError # Issue 29921
+symbol_reserved_word_test/09: RuntimeError # Issue 29921
+symbol_reserved_word_test/12: RuntimeError # Issue 29921
+symbol_test/none: RuntimeError # Issue 29921
+typed_data_with_limited_ints_test: Skip # Requires fixed-size int64 support.
+uri_parse_test: Pass, Slow
+
 [ $compiler == precompiler || $runtime == vm && !$checked && !$strong ]
 int_parse_radix_test/badTypes: RuntimeError # wrong exception returned
 
@@ -598,10 +610,11 @@ regexp/pcre_test: Pass, Slow, Timeout
 string_case_test/01: RuntimeError # Issue 18061: German double S.
 
 [ $runtime == ff || $runtime == jsshell ]
-double_parse_test/02: Fail, OK # Issue 30468
+double_parse_test: Fail, OK # Issue 30468
+double_try_parse_test: Fail, OK # Issue 30468
 regexp/UC16_test: RuntimeError
 
 [ $hot_reload || $hot_reload_rollback ]
 bigint_parse_radix_test: Pass, Timeout # Issue 31659
-bigint_test: Pass, Crash # Issue 31660
+bigint_test: Pass, Timeout # Issue 31659
 integer_parsed_mul_div_vm_test: Pass, Slow # Slow

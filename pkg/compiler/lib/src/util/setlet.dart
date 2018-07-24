@@ -30,10 +30,6 @@ class Setlet<E> extends SetBase<E> {
   static Set<R> _newSet<R>() => new Setlet<R>();
 
   Set<R> cast<R>() => Set.castFrom<E, R>(this, newSet: _newSet);
-
-  @Deprecated("Use cast instead.")
-  Set<R> retype<R>() => cast<R>();
-
   Iterator<E> get iterator {
     if (_extra == null) {
       return new _SetletSingleIterator<E>(_contents);
@@ -138,7 +134,7 @@ class Setlet<E> extends SetBase<E> {
         while (copyTo < CAPACITY) _contents[copyTo++] = null;
       } else {
         _contents = new Set<E>()
-          ..addAll(_contents)
+          ..addAll((_contents as List).cast<E>())
           ..add(element);
         _extra = _MARKER;
       }

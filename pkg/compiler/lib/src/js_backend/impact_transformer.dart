@@ -4,7 +4,7 @@
 
 library js_backend.backend.impact_transformer;
 
-import '../universe/class_hierarchy_builder.dart' show ClassHierarchyBuilder;
+import '../universe/class_hierarchy.dart' show ClassHierarchyBuilder;
 
 import '../common.dart';
 import '../common_elements.dart';
@@ -104,10 +104,6 @@ class JavaScriptImpactTransformer extends ImpactTransformer {
               new TypeUse.instantiation(_commonElements.nullType));
           registerImpact(_impacts.nullLiteral);
           break;
-        case Feature.GENERIC_INSTANTIATION:
-          registerImpact(_impacts.genericInstantiation);
-          _backendUsageBuilder.isGenericInstantiationUsed = true;
-          break;
         case Feature.LAZY_FIELD:
           registerImpact(_impacts.lazyField);
           break;
@@ -159,7 +155,6 @@ class JavaScriptImpactTransformer extends ImpactTransformer {
       DartType type = typeUse.type;
       switch (typeUse.kind) {
         case TypeUseKind.INSTANTIATION:
-        case TypeUseKind.MIRROR_INSTANTIATION:
         case TypeUseKind.NATIVE_INSTANTIATION:
           break;
         case TypeUseKind.IS_CHECK:
@@ -206,6 +201,10 @@ class JavaScriptImpactTransformer extends ImpactTransformer {
           }
           hasTypeLiteral = true;
           break;
+        case TypeUseKind.RTI_VALUE:
+        case TypeUseKind.TYPE_ARGUMENT:
+          failedAt(CURRENT_ELEMENT_SPANNABLE, "Unexpected type use: $typeUse.");
+          break;
       }
     }
 
@@ -235,6 +234,14 @@ class JavaScriptImpactTransformer extends ImpactTransformer {
       // factory constructors are registered directly.
       transformed
           .registerTypeUse(new TypeUse.instantiation(listLiteralUse.type));
+    }
+
+    for (RuntimeTypeUse runtimeTypeUse in worldImpact.runtimeTypeUses) {
+      // Enable runtime type support if we discover a getter called
+      // runtimeType. We have to enable runtime type before hitting the
+      // codegen, so that constructors know whether they need to generate code
+      // for runtime type.
+      _backendUsageBuilder.registerRuntimeTypeUse(runtimeTypeUse);
     }
 
     if (worldImpact.constSymbolNames.isNotEmpty) {
@@ -290,6 +297,15 @@ class JavaScriptImpactTransformer extends ImpactTransformer {
 
     for (ClassEntity classEntity in worldImpact.seenClasses) {
       _classHierarchyBuilder.registerClass(classEntity);
+    }
+
+    if (worldImpact.genericInstantiations.isNotEmpty) {
+      for (GenericInstantiation instantiation
+          in worldImpact.genericInstantiations) {
+        registerImpact(_impacts
+            .getGenericInstantiation(instantiation.typeArguments.length));
+        _rtiNeedBuilder.registerGenericInstantiation(instantiation);
+      }
     }
 
     return transformed;
@@ -458,6 +474,10 @@ class CodegenImpactTransformer {
               .registerImpact(transformed, _elementEnvironment);
           break;
       }
+    }
+
+    for (GenericInstantiation instantiation in impact.genericInstantiations) {
+      _rtiChecksBuilder.registerGenericInstantiation(instantiation);
     }
 
     // TODO(johnniwinther): Remove eager registration.

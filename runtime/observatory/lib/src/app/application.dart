@@ -20,7 +20,7 @@ class ObservatoryApplication {
   VM _vm;
   VM get vm => _vm;
 
-  static bool isConnectedVMTarget(WebSocketVMTarget target) {
+  static bool isConnectedVMTarget(M.Target target) {
     if (app._vm is CommonWebSocketVM) {
       if ((app._vm as CommonWebSocketVM).target == target) {
         return app._vm.isConnected;
@@ -200,7 +200,7 @@ class ObservatoryApplication {
         return;
       }
     }
-    throw new FallThroughError();
+    throw new ArgumentError.value(uri, 'uri');
   }
 
   /// Set the Observatory application page.

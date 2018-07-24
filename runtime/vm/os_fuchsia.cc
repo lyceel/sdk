@@ -8,15 +8,15 @@
 #include "vm/os.h"
 
 #include <errno.h>
-#include <fdio/util.h>
+#include <lib/fdio/util.h>
 #include <zircon/process.h>
 #include <zircon/syscalls.h>
 #include <zircon/syscalls/object.h>
 #include <zircon/types.h>
 
-#include <time_zone/cpp/fidl.h>
+#include <fuchsia/timezone/cpp/fidl.h>
 
-#include "lib/app/cpp/environment_services.h"
+#include "lib/component/cpp/environment_services.h"
 
 #include "platform/assert.h"
 #include "vm/zone.h"
@@ -43,11 +43,13 @@ intptr_t OS::ProcessId() {
 static zx_status_t GetLocalAndDstOffsetInSeconds(int64_t seconds_since_epoch,
                                                  int32_t* local_offset,
                                                  int32_t* dst_offset) {
-  time_zone::TimezoneSyncPtr time_svc;
-  component::ConnectToEnvironmentService(time_svc.NewRequest());
-  if (!time_svc->GetTimezoneOffsetMinutes(seconds_since_epoch * 1000,
-                                          local_offset, dst_offset))
-    return ZX_ERR_UNAVAILABLE;
+  fuchsia::timezone::TimezoneSyncPtr tz;
+  component::ConnectToEnvironmentService(tz.NewRequest());
+  zx_status_t status = tz->GetTimezoneOffsetMinutes(seconds_since_epoch * 1000,
+                                                    local_offset, dst_offset);
+  if (status != ZX_OK) {
+    return status;
+  }
   *local_offset *= 60;
   *dst_offset *= 60;
   return ZX_OK;
@@ -56,10 +58,10 @@ static zx_status_t GetLocalAndDstOffsetInSeconds(int64_t seconds_since_epoch,
 const char* OS::GetTimeZoneName(int64_t seconds_since_epoch) {
   // TODO(abarth): Handle time zone changes.
   static const auto* tz_name = new std::string([] {
-    time_zone::TimezoneSyncPtr time_svc;
-    component::ConnectToEnvironmentService(time_svc.NewRequest());
+    fuchsia::timezone::TimezoneSyncPtr tz;
+    component::ConnectToEnvironmentService(tz.NewRequest());
     fidl::StringPtr result;
-    time_svc->GetTimezoneId(&result);
+    tz->GetTimezoneId(&result);
     return *result;
   }());
   return tz_name->c_str();
@@ -221,7 +223,7 @@ bool OS::StringToInt64(const char* str, int64_t* value) {
     base = 16;
   }
   errno = 0;
-  if (FLAG_limit_ints_to_64_bits && (base == 16)) {
+  if (base == 16) {
     // Unsigned 64-bit hexadecimal integer literals are allowed but
     // immediately interpreted as signed 64-bit integers.
     *value = static_cast<int64_t>(strtoull(str, &endptr, base));

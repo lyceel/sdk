@@ -641,8 +641,8 @@ class ForwardingListener implements Listener {
   }
 
   @override
-  void endFunctionTypedFormalParameter() {
-    listener?.endFunctionTypedFormalParameter();
+  void endFunctionTypedFormalParameter(Token nameToken) {
+    listener?.endFunctionTypedFormalParameter(nameToken);
   }
 
   @override
@@ -842,13 +842,13 @@ class ForwardingListener implements Listener {
   }
 
   @override
-  void endTypeVariable(Token token, Token extendsOrSuper) {
-    listener?.endTypeVariable(token, extendsOrSuper);
+  void endTypeVariable(Token token, int index, Token extendsOrSuper) {
+    listener?.endTypeVariable(token, index, extendsOrSuper);
   }
 
   @override
-  void endTypeVariables(int count, Token beginToken, Token endToken) {
-    listener?.endTypeVariables(count, beginToken, endToken);
+  void endTypeVariables(Token beginToken, Token endToken) {
+    listener?.endTypeVariables(beginToken, endToken);
   }
 
   @override
@@ -877,8 +877,8 @@ class ForwardingListener implements Listener {
   }
 
   @override
-  void handleAsOperator(Token operator, Token endToken) {
-    listener?.handleAsOperator(operator, endToken);
+  void handleAsOperator(Token operator) {
+    listener?.handleAsOperator(operator);
   }
 
   @override
@@ -1059,8 +1059,8 @@ class ForwardingListener implements Listener {
   }
 
   @override
-  void handleIsOperator(Token operator, Token not, Token endToken) {
-    listener?.handleIsOperator(operator, not, endToken);
+  void handleIsOperator(Token isOperator, Token not) {
+    listener?.handleIsOperator(isOperator, not);
   }
 
   @override
@@ -1249,6 +1249,12 @@ class ForwardingListener implements Listener {
   }
 
   @override
+  void handleUnescapeError(
+      Message message, Token location, int offset, int length) {
+    listener?.handleUnescapeError(message, location, offset, length);
+  }
+
+  @override
   void handleStringPart(Token token) {
     listener?.handleStringPart(token);
   }
@@ -1279,6 +1285,11 @@ class ForwardingListener implements Listener {
   }
 
   @override
+  void handleTypeVariablesDefined(Token token, int count) {
+    listener?.handleTypeVariablesDefined(token, count);
+  }
+
+  @override
   void handleUnaryPostfixAssignmentExpression(Token token) {
     listener?.handleUnaryPostfixAssignmentExpression(token);
   }
@@ -1291,11 +1302,6 @@ class ForwardingListener implements Listener {
   @override
   void handleUnaryPrefixExpression(Token token) {
     listener?.handleUnaryPrefixExpression(token);
-  }
-
-  @override
-  Token handleUnrecoverableError(Token token, Message message) {
-    return listener?.handleUnrecoverableError(token, message);
   }
 
   @override
@@ -1322,14 +1328,6 @@ class ForwardingListener implements Listener {
   void logEvent(String name) {
     listener?.logEvent(name);
   }
-
-  @override
-  Token newSyntheticToken(Token next) {
-    return listener?.newSyntheticToken(next);
-  }
-
-  @override
-  List<ParserError> get recoverableErrors => listener?.recoverableErrors;
 
   @override
   set suppressParseErrors(bool value) {

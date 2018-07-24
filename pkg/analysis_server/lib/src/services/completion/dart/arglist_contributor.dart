@@ -22,7 +22,7 @@ int _argCount(DartCompletionRequest request) {
   if (node is ArgumentList) {
     if (request.target.entity == node.rightParenthesis) {
       // Parser ignores trailing commas
-      if (node.rightParenthesis.previous?.lexeme == ',') {
+      if (node.findPrevious(node.rightParenthesis)?.lexeme == ',') {
         return node.arguments.length + 1;
       }
     }
@@ -179,6 +179,8 @@ class ArgListContributor extends DartCompletionContributor {
   @override
   Future<List<CompletionSuggestion>> computeSuggestions(
       DartCompletionRequest request) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     this.request = request;
     this.suggestions = <CompletionSuggestion>[];
 
@@ -188,7 +190,7 @@ class ArgListContributor extends DartCompletionContributor {
     if (targetId == null) {
       return EMPTY_LIST;
     }
-    Element elem = targetId.bestElement;
+    Element elem = targetId.staticElement;
     if (elem == null) {
       return EMPTY_LIST;
     }

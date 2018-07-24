@@ -246,6 +246,8 @@ abstract class PluginInfo {
    * used to interact with the plugin, or `null` if the plugin could not be run.
    */
   Future<PluginSession> start(String byteStorePath, String sdkPath) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (currentSession != null) {
       throw new StateError('Cannot start a plugin that is already running.');
     }
@@ -378,6 +380,8 @@ class PluginManager {
    */
   Future<Null> addPluginToContextRoot(
       analyzer.ContextRoot contextRoot, String path) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     PluginInfo plugin = _pluginMap[path];
     bool isNew = plugin == null;
     if (isNew) {
@@ -447,6 +451,8 @@ class PluginManager {
    */
   Future<List<Future<Response>>> broadcastWatchEvent(
       watcher.WatchEvent watchEvent) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     String filePath = watchEvent.path;
 
     /**
@@ -572,6 +578,8 @@ class PluginManager {
    * Restart all currently running plugins.
    */
   Future<Null> restartPlugins() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     for (PluginInfo plugin in _pluginMap.values.toList()) {
       if (plugin.currentSession != null) {
         //
@@ -979,7 +987,8 @@ class PluginSession {
   /**
    * Handle the fact that an unhandled error has occurred in the plugin.
    */
-  void handleOnError(List<String> errorPair) {
+  void handleOnError(dynamic error) {
+    List<String> errorPair = (error as List).cast<String>();
     StackTrace stackTrace = new StackTrace.fromString(errorPair[1]);
     info.exception =
         new CaughtException(new PluginException(errorPair[0]), stackTrace);
@@ -1044,6 +1053,8 @@ class PluginSession {
    * running.
    */
   Future<bool> start(String byteStorePath, String sdkPath) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (channel != null) {
       throw new StateError('Cannot start a plugin that is already running.');
     }
@@ -1061,8 +1072,10 @@ class PluginSession {
       return false;
     }
     channel = info._createChannel();
-    await channel.listen(handleResponse, handleNotification,
-        onDone: handleOnDone, onError: handleOnError);
+    // TODO(brianwilkerson) Determine if await is necessary, if so, change the
+    // return type of `channel.listen` to `Future<void>`.
+    await (channel.listen(handleResponse, handleNotification,
+        onDone: handleOnDone, onError: handleOnError) as dynamic);
     if (channel == null) {
       // If there is an error when starting the isolate, the channel will invoke
       // handleOnDone, which will cause `channel` to be set to `null`.

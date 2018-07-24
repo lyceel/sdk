@@ -22,6 +22,7 @@ namespace dart {
 // Forward declarations.
 class RuntimeEntry;
 class StubEntry;
+class RegisterSet;
 
 class Immediate : public ValueObject {
  public:
@@ -255,8 +256,7 @@ class Address : public ValueObject {
         return kUnsignedWord;
       case kTypedDataInt64ArrayCid:
       case kTypedDataUint64ArrayCid:
-        UNREACHABLE();
-        return kByte;
+        return kDWord;
       case kTypedDataFloat32ArrayCid:
         return kSWord;
       case kTypedDataFloat64ArrayCid:
@@ -430,6 +430,9 @@ class Assembler : public ValueObject {
 
   void PushRegister(Register r) { Push(r); }
   void PopRegister(Register r) { Pop(r); }
+
+  void PushRegisters(const RegisterSet& registers);
+  void PopRegisters(const RegisterSet& registers);
 
   void Drop(intptr_t stack_elements) {
     add(SP, SP, Operand(stack_elements * kWordSize));
@@ -1380,6 +1383,8 @@ class Assembler : public ValueObject {
   void BranchLinkPatchable(const StubEntry& stub_entry);
   void BranchLinkToRuntime();
 
+  void CallNullErrorShared(bool save_fpu_registers);
+
   // Emit a call that shares its object pool entries with other calls
   // that have the same equivalence marker.
   void BranchLinkWithEquivalence(const StubEntry& stub_entry,
@@ -1492,6 +1497,10 @@ class Assembler : public ValueObject {
   void LoadImmediateFixed(Register reg, int64_t imm);
   void LoadImmediate(Register reg, int64_t imm);
   void LoadDImmediate(VRegister reg, double immd);
+
+  // Load word from pool from the given offset using encoding that
+  // InstructionPattern::DecodeLoadWordFromPool can decode.
+  void LoadWordFromPoolOffset(Register dst, uint32_t offset, Register pp = PP);
 
   void PushObject(const Object& object) {
     LoadObject(TMP, object);
@@ -1618,7 +1627,6 @@ class Assembler : public ValueObject {
 
   bool constant_pool_allowed_;
 
-  void LoadWordFromPoolOffset(Register dst, uint32_t offset, Register pp = PP);
   void LoadWordFromPoolOffsetFixed(Register dst, uint32_t offset);
 
   void LoadObjectHelper(Register dst, const Object& obj, bool is_unique);

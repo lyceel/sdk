@@ -13,6 +13,8 @@ typedef bool _BoolLookUpFunction(Configuration configuration);
 // consider adding support for "!" to status expressions.
 final _variables = {
   "analyzer": new _Variable.bool((c) => c.compiler == Compiler.dart2analyzer),
+  "analyzer_use_fasta_parser":
+      new _Variable.bool((c) => c.useAnalyzerFastaParser),
   "arch": new _Variable((c) => c.architecture.name, Architecture.names),
   "browser": new _Variable.bool((c) => c.runtime.isBrowser),
   "builder_tag": new _Variable((c) => c.builderTag ?? "", const []),
@@ -33,10 +35,10 @@ final _variables = {
   "minified": new _Variable.bool((c) => c.isMinified),
   "mode": new _Variable((c) => c.mode.name, Mode.names),
   "no_preview_dart_2": new _Variable.bool((c) => c.noPreviewDart2),
-  "preview_dart_2": new _Variable.bool((c) => c.previewDart2),
+  "preview_dart_2": new _Variable.bool((c) => !c.noPreviewDart2),
   "runtime": new _Variable(_runtimeName, Runtime.names),
   "spec_parser": new _Variable.bool((c) => c.compiler == Compiler.specParser),
-  "strong": new _Variable.bool((c) => c.isStrong),
+  "strong": new _Variable.bool((c) => !c.noPreviewDart2),
   "system": new _Variable((c) => c.system.name, System.names),
   "use_sdk": new _Variable.bool((c) => c.useSdk)
 };

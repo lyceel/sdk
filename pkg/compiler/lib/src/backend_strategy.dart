@@ -11,6 +11,7 @@ import 'deferred_load.dart' show OutputUnitData;
 import 'enqueue.dart';
 import 'elements/entities.dart';
 import 'io/source_information.dart';
+import 'js_backend/inferred_data.dart';
 import 'js_backend/js_backend.dart';
 import 'js_backend/native_data.dart';
 import 'js_emitter/sorter.dart';
@@ -22,8 +23,8 @@ import 'world.dart';
 /// Strategy pattern that defines the element model used in type inference
 /// and code generation.
 abstract class BackendStrategy {
-  /// Create the [ClosedWorldRefiner] for [closedWorld].
-  ClosedWorldRefiner createClosedWorldRefiner(ClosedWorld closedWorld);
+  /// Create the [JClosedWorld] from [closedWorld].
+  JClosedWorld createJClosedWorld(KClosedWorld closedWorld);
 
   /// Converts [data] to use backend entities instead of frontend entities.
   OutputUnitData convertOutputUnitData(OutputUnitData data);
@@ -38,11 +39,12 @@ abstract class BackendStrategy {
   /// Creates the [CodegenWorldBuilder] used by the codegen enqueuer.
   CodegenWorldBuilder createCodegenWorldBuilder(
       NativeBasicData nativeBasicData,
-      ClosedWorld closedWorld,
+      JClosedWorld closedWorld,
       SelectorConstraintsStrategy selectorConstraintsStrategy);
 
   /// Creates the [WorkItemBuilder] used by the codegen enqueuer.
-  WorkItemBuilder createCodegenWorkItemBuilder(ClosedWorld closedWorld);
+  WorkItemBuilder createCodegenWorkItemBuilder(JClosedWorld closedWorld,
+      GlobalTypeInferenceResults globalInferenceResults);
 
   /// Creates the [SsaBuilder] used for the element model.
   SsaBuilder createSsaBuilder(CompilerTask task, JavaScriptBackend backend,
@@ -55,6 +57,7 @@ abstract class BackendStrategy {
   SourceSpan spanFromSpannable(Spannable spannable, Entity currentElement);
 
   /// Creates the [TypesInferrer] used by this strategy.
-  TypesInferrer createTypesInferrer(ClosedWorldRefiner closedWorldRefiner,
+  TypesInferrer createTypesInferrer(
+      JClosedWorld closedWorld, InferredDataBuilder inferredDataBuilder,
       {bool disableTypeInference: false});
 }

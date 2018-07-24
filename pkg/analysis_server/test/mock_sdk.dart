@@ -128,6 +128,7 @@ class Iterator<E> {
 abstract class Iterable<E> {
   Iterator<E> get iterator;
   bool get isEmpty;
+  void forEach(void f(E element));
   Iterable<T> map<T>(T f(E e)) => null;
   T fold<T>(T initialValue, T combine(T previousValue, E element));
   List<E> toList({bool growable: true});
@@ -411,9 +412,7 @@ const Map<String, LibraryInfo> libraries = const {
     List<Source> librarySources = sdkLibraries
         .map((SdkLibrary library) => mapDartUri(library.shortName))
         .toList();
-    return new SummaryBuilder(
-            librarySources, context, context.analysisOptions.strongMode)
-        .build();
+    return new SummaryBuilder(librarySources, context, true).build();
   }
 }
 

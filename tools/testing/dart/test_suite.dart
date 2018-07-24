@@ -130,10 +130,6 @@ abstract class TestSuite {
     _environmentOverrides = {
       'DART_CONFIGURATION': configuration.configurationDirectory,
     };
-
-    if (useSdk && configuration.usingDart2VMWrapper) {
-      _environmentOverrides['DART_USE_SDK'] = '1';
-    }
   }
 
   Map<String, String> get environmentOverrides => _environmentOverrides;
@@ -167,14 +163,6 @@ abstract class TestSuite {
   String get dartVmBinaryFileName {
     // Controlled by user with the option "--dart".
     var dartExecutable = configuration.dartPath;
-
-    if (configuration.usingDart2VMWrapper) {
-      if (dartExecutable != null) {
-        throw 'Can not use --dart when testing Dart 2.0 configuration';
-      }
-
-      dartExecutable = 'pkg/vm/tool/dart2$executableScriptSuffix';
-    }
 
     if (dartExecutable == null) {
       dartExecutable = dartVmExecutableFileName;
@@ -406,22 +394,22 @@ abstract class TestSuite {
 
   String createOutputDirectory(Path testPath) {
     var checked = configuration.isChecked ? '-checked' : '';
-    var strong = configuration.isStrong ? '-strong' : '';
+    var legacy = configuration.noPreviewDart2 ? '-legacy' : '';
     var minified = configuration.isMinified ? '-minified' : '';
     var sdk = configuration.useSdk ? '-sdk' : '';
     var dirName = "${configuration.compiler.name}-${configuration.runtime.name}"
-        "$checked$strong$minified$sdk";
+        "$checked$legacy$minified$sdk";
     return createGeneratedTestDirectoryHelper("tests", dirName, testPath);
   }
 
   String createCompilationOutputDirectory(Path testPath) {
     var checked = configuration.isChecked ? '-checked' : '';
-    var strong = configuration.isStrong ? '-strong' : '';
+    var legacy = configuration.noPreviewDart2 ? '-legacy' : '';
     var minified = configuration.isMinified ? '-minified' : '';
     var csp = configuration.isCsp ? '-csp' : '';
     var sdk = configuration.useSdk ? '-sdk' : '';
     var dirName = "${configuration.compiler.name}"
-        "$checked$strong$minified$csp$sdk";
+        "$checked$legacy$minified$csp$sdk";
     return createGeneratedTestDirectoryHelper(
         "compilations", dirName, testPath);
   }
@@ -489,13 +477,10 @@ class VMTestSuite extends TestSuite {
 
   void _addTest(ExpectationSet testExpectations, String testName) {
     var args = configuration.standardOptions.toList();
-    if (configuration.compilerConfiguration.useDfe) {
+    if (configuration.compilerConfiguration.previewDart2) {
       args.add('--use-dart-frontend');
       // '--dfe' has to be the first argument for run_vm_test to pick it up.
       args.insert(0, '--dfe=$buildDir/gen/kernel-service.dart.snapshot');
-    }
-
-    if (configuration.isStrong) {
       args.add('--strong');
     }
 
@@ -737,7 +722,7 @@ class StandardTestSuite extends TestSuite {
       String pattern = regex.pattern;
       if (pattern.contains("/")) {
         String lastPart = pattern.substring(pattern.lastIndexOf("/") + 1);
-        if (int.parse(lastPart, onError: (_) => -1) >= 0 ||
+        if (int.tryParse(lastPart) != null ||
             lastPart.toLowerCase() == "none") {
           pattern = pattern.substring(0, pattern.lastIndexOf("/"));
         }
@@ -857,17 +842,6 @@ class StandardTestSuite extends TestSuite {
       var allVmOptions = vmOptions;
       if (!extraVmOptions.isEmpty) {
         allVmOptions = vmOptions.toList()..addAll(extraVmOptions);
-      }
-
-      // TODO(rnystrom): Hack. When running the 2.0 tests, always implicitly
-      // turn on reified generics in the VM.
-      // Note that VMOptions=--no-reify-generic-functions in test is ignored.
-      // Also, enable Dart 2.0 fixed-size integers with --limit-ints-to-64-bits.
-      // Dart 2 VM wrapper (pkg/vm/tool/dart2) already passes correct arguments.
-      if (suiteName.endsWith("_2") && !configuration.usingDart2VMWrapper) {
-        allVmOptions = allVmOptions.toList()
-          ..add("--reify-generic-functions")
-          ..add("--limit-ints-to-64-bits");
       }
 
       var commands =
@@ -1064,7 +1038,7 @@ class StandardTestSuite extends TestSuite {
         // Always run with synchronous starts of `async` functions.
         // If we want to make this dependent on other parameters or flags,
         // this flag could be become conditional.
-        content = dartdevcHtml(nameNoExt, jsDir, buildDir);
+        content = dartdevcHtml(nameNoExt, jsDir, configuration.compiler);
       }
     }
 
@@ -1282,6 +1256,13 @@ class StandardTestSuite extends TestSuite {
     if (options != null) args.addAll(options);
     options = optionsFromFile['dart2jsOptions'] as List<String>;
     if (options != null) args.addAll(options);
+    if (configuration.compiler == Compiler.dart2js) {
+      if (configuration.noPreviewDart2) {
+        args.add("--no-preview-dart-2");
+      } else {
+        args.add("--preview-dart-2");
+      }
+    }
 
     return Command.compilation(Compiler.dart2js.name, outputFile,
         dart2JsBootstrapDependencies, compilerPath, args, environmentOverrides,
@@ -1312,12 +1293,18 @@ class StandardTestSuite extends TestSuite {
     if (configuration.compiler == Compiler.dart2analyzer) {
       args.add('--format=machine');
       args.add('--no-hints');
-      if (configuration.previewDart2) args.add("--preview-dart-2");
-      if (configuration.noPreviewDart2) args.add("--no-preview-dart-2");
 
       if (filePath.filename.contains("dart2js") ||
           filePath.directoryPath.segments().last.contains('html_common')) {
         args.add("--use-dart2js-libraries");
+      }
+    }
+
+    if (configuration.compiler == Compiler.dart2js) {
+      if (configuration.noPreviewDart2) {
+        args.add("--no-preview-dart-2");
+      } else {
+        args.add("--preview-dart-2");
       }
     }
 
@@ -1473,7 +1460,7 @@ class StandardTestSuite extends TestSuite {
     for (var match in matches) {
       result.add(wordSplit(match[1]));
     }
-    if (result.isEmpty) result.add([]);
+    if (result.isEmpty) result.add(<String>[]);
 
     dartOptions = singleListOfOptions('DartOptions');
     sharedOptions = singleListOfOptions('SharedOptions');
@@ -1621,6 +1608,7 @@ class StandardTestSuite extends TestSuite {
     const compilers = const [
       Compiler.none,
       Compiler.dartk,
+      Compiler.dartkb,
       Compiler.dartkp,
       Compiler.precompiler,
       Compiler.appJit
@@ -1665,7 +1653,7 @@ class StandardTestSuite extends TestSuite {
     bool isMultitest = multiTestRegExp.hasMatch(contents);
 
     return {
-      "vmOptions": <List>[[]],
+      "vmOptions": <List<String>>[[]],
       "sharedOptions": <String>[],
       "dart2jsOptions": <String>[],
       "dartOptions": null,

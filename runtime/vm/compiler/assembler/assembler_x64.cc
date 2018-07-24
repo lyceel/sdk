@@ -8,7 +8,7 @@
 #include "vm/compiler/assembler/assembler.h"
 #include "vm/compiler/backend/locations.h"
 #include "vm/cpu.h"
-#include "vm/heap.h"
+#include "vm/heap/heap.h"
 #include "vm/instructions.h"
 #include "vm/memory_region.h"
 #include "vm/runtime_entry.h"
@@ -98,6 +98,14 @@ void Assembler::CallToRuntime() {
   movq(TMP, Address(THR, Thread::call_to_runtime_entry_point_offset()));
   movq(CODE_REG, Address(THR, Thread::call_to_runtime_stub_offset()));
   call(TMP);
+}
+
+void Assembler::CallNullErrorShared(bool save_fpu_registers) {
+  uword entry_point_offset =
+      save_fpu_registers
+          ? Thread::null_error_shared_with_fpu_regs_entry_point_offset()
+          : Thread::null_error_shared_without_fpu_regs_entry_point_offset();
+  call(Address(THR, entry_point_offset));
 }
 
 void Assembler::pushq(Register reg) {
@@ -1250,12 +1258,8 @@ void Assembler::StoreIntoObject(Register object,
   if (object != RDX) {
     movq(RDX, object);
   }
-  pushq(CODE_REG);
-  movq(TMP, Address(THR, Thread::update_store_buffer_entry_point_offset()));
-  movq(CODE_REG, Address(THR, Thread::update_store_buffer_code_offset()));
-  call(TMP);
+  call(Address(THR, Thread::update_store_buffer_entry_point_offset()));
 
-  popq(CODE_REG);
   if (value != RDX) popq(RDX);
   Bind(&done);
 }
@@ -1307,8 +1311,8 @@ void Assembler::IncrementSmiField(const Address& dest, int64_t increment) {
 }
 
 void Assembler::Stop(const char* message, bool fixed_length_encoding) {
-  int64_t message_address = reinterpret_cast<int64_t>(message);
   if (FLAG_print_stop_message) {
+    int64_t message_address = reinterpret_cast<int64_t>(message);
     pushq(TMP);  // Preserve TMP register.
     pushq(RDI);  // Preserve RDI register.
     if (fixed_length_encoding) {
@@ -1322,14 +1326,6 @@ void Assembler::Stop(const char* message, bool fixed_length_encoding) {
     call(&StubCode::PrintStopMessage_entry()->label());
     popq(RDI);  // Restore RDI register.
     popq(TMP);  // Restore TMP register.
-  } else {
-    // Emit the lower half and the higher half of the message address as
-    // immediate operands in the test rax instructions.
-    testl(RAX, Immediate(Utils::Low32Bits(message_address)));
-    uint32_t hi = Utils::High32Bits(message_address);
-    if (hi != 0) {
-      testl(RAX, Immediate(hi));
-    }
   }
   // Emit the int3 instruction.
   int3();  // Execution can be resumed with the 'cont' command in gdb.

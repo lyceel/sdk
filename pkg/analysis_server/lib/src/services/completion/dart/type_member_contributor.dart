@@ -22,6 +22,8 @@ class TypeMemberContributor extends DartCompletionContributor {
   @override
   Future<List<CompletionSuggestion>> computeSuggestions(
       DartCompletionRequest request) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     LibraryElement containingLibrary = request.libraryElement;
     // Gracefully degrade if the library element is not resolved
     // e.g. detached part file or source change
@@ -35,7 +37,7 @@ class TypeMemberContributor extends DartCompletionContributor {
       return EMPTY_LIST;
     }
     if (expression is Identifier) {
-      Element elem = expression.bestElement;
+      Element elem = expression.staticElement;
       if (elem is ClassElement) {
         // Suggestions provided by StaticMemberContributor
         return EMPTY_LIST;
@@ -47,12 +49,12 @@ class TypeMemberContributor extends DartCompletionContributor {
     }
 
     // Determine the target expression's type
-    DartType type = expression.bestType;
-    if (type.isDynamic) {
+    DartType type = expression.staticType;
+    if (type == null || type.isDynamic) {
       // If the expression does not provide a good type
       // then attempt to get a better type from the element
       if (expression is Identifier) {
-        Element elem = expression.bestElement;
+        Element elem = expression.staticElement;
         if (elem is FunctionTypedElement) {
           type = elem.returnType;
         } else if (elem is ParameterElement) {
@@ -87,7 +89,7 @@ class TypeMemberContributor extends DartCompletionContributor {
         }
       }
     }
-    if (type.isDynamic) {
+    if (type == null || type.isDynamic) {
       // Suggest members from object if target is "dynamic"
       type = request.objectType;
     }
@@ -180,7 +182,7 @@ class _LocalBestTypeVisitor extends LocalDeclarationVisitor {
   @override
   void declaredLocalVar(SimpleIdentifier name, TypeAnnotation type) {
     if (name.name == targetName) {
-      typeFound = name.bestType;
+      typeFound = name.staticType;
       finished();
     }
   }

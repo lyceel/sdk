@@ -21,7 +21,7 @@ import '../native/enqueue.dart';
 import '../options.dart';
 import '../universe/selector.dart' show Selector;
 import '../universe/world_builder.dart' show CodegenWorldBuilder;
-import '../world.dart' show ClosedWorld;
+import '../world.dart' show JClosedWorld;
 
 import 'code_emitter_task.dart' show CodeEmitterTask, Emitter;
 
@@ -34,7 +34,7 @@ class InterceptorStubGenerator {
   final OneShotInterceptorData _oneShotInterceptorData;
   final CustomElementsCodegenAnalysis _customElementsCodegenAnalysis;
   final CodegenWorldBuilder _codegenWorldBuilder;
-  final ClosedWorld _closedWorld;
+  final JClosedWorld _closedWorld;
 
   InterceptorStubGenerator(
       this._options,
@@ -301,8 +301,8 @@ class InterceptorStubGenerator {
       bool containsJsIndexable = _closedWorld
               .isImplemented(_commonElements.jsIndexingBehaviorInterface) &&
           classes.any((cls) {
-            return _closedWorld.isSubtypeOf(
-                cls, _commonElements.jsIndexingBehaviorInterface);
+            return _closedWorld.classHierarchy
+                .isSubtypeOf(cls, _commonElements.jsIndexingBehaviorInterface);
           });
       // The index set operator requires a check on its set value in
       // checked mode, so we don't optimize the interceptor if the
@@ -451,7 +451,7 @@ class InterceptorStubGenerator {
         //     {"": A.A$, "foo": A.A$foo, "bar": A.A$bar}
         //
         // We expect most of the time the map will be a singleton.
-        var properties = [];
+        var properties = <jsAst.Property>[];
         for (ConstructorEntity member in analysis.constructors(classElement)) {
           properties.add(new jsAst.Property(
               js.string(member.name), _emitter.staticFunctionAccess(member)));

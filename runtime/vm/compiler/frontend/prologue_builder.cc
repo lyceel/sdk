@@ -6,7 +6,7 @@
 
 #include "vm/compiler/backend/il.h"
 #include "vm/compiler/backend/il_printer.h"
-#include "vm/compiler/frontend/kernel_binary_flowgraph.h"
+#include "vm/compiler/frontend/kernel_to_il.h"
 #include "vm/compiler/jit/compiler.h"
 #include "vm/kernel_loader.h"
 #include "vm/longjump.h"
@@ -87,7 +87,8 @@ Fragment PrologueBuilder::BuildTypeArgumentsLengthCheck(bool strong,
   // If expect_type_args, a non-zero length must match the declaration length.
   TargetEntryInstr *then, *fail;
   check_type_args += LoadArgDescriptor();
-  check_type_args += LoadField(ArgumentsDescriptor::type_args_len_offset());
+  check_type_args += LoadNativeField(NativeFieldDesc::Get(
+      NativeFieldDesc::kArgumentsDescriptor_type_args_len));
   if (expect_type_args) {
     JoinEntryInstr* join2 = BuildJoinEntry();
 

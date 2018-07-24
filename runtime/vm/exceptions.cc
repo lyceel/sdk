@@ -122,7 +122,7 @@ void PreallocatedStackTraceBuilder::AddFrame(const Code& code,
 }
 
 static void BuildStackTrace(StackTraceBuilder* builder) {
-  StackFrameIterator frames(StackFrameIterator::kDontValidateFrames,
+  StackFrameIterator frames(ValidationPolicy::kDontValidateFrames,
                             Thread::Current(),
                             StackFrameIterator::kNoCrossThreadIteration);
   StackFrame* frame = frames.NextFrame();
@@ -163,7 +163,7 @@ class ExceptionHandlerFinder : public StackResource {
   // can continue in that frame. Sets 'needs_stacktrace' if there is no
   // cath-all handler or if a stack-trace is specified in the catch.
   bool Find() {
-    StackFrameIterator frames(StackFrameIterator::kDontValidateFrames,
+    StackFrameIterator frames(ValidationPolicy::kDontValidateFrames,
                               Thread::Current(),
                               StackFrameIterator::kNoCrossThreadIteration);
     StackFrame* frame = frames.NextFrame();
@@ -342,7 +342,7 @@ class ExceptionHandlerFinder : public StackResource {
 static void FindErrorHandler(uword* handler_pc,
                              uword* handler_sp,
                              uword* handler_fp) {
-  StackFrameIterator frames(StackFrameIterator::kDontValidateFrames,
+  StackFrameIterator frames(ValidationPolicy::kDontValidateFrames,
                             Thread::Current(),
                             StackFrameIterator::kNoCrossThreadIteration);
   StackFrame* frame = frames.NextFrame();
@@ -466,6 +466,15 @@ void Exceptions::JumpToFrame(Thread* thread,
   Simulator::Current()->JumpToFrame(program_counter, stack_pointer,
                                     frame_pointer, thread);
 #else
+#if defined(DART_USE_INTERPRETER)
+  Interpreter* interpreter = thread->isolate()->interpreter();
+  if ((interpreter != NULL) && interpreter->HasFrame(frame_pointer)) {
+    interpreter->JumpToFrame(program_counter, stack_pointer, frame_pointer,
+                             thread);
+  }
+  // TODO(regis): We still possibly need to unwind interpreter frames if they
+  // are callee frames of the C++ frame handling the exception.
+#endif
   // Prepare for unwinding frames by destroying all the stack resources
   // in the previous frames.
   StackResource::Unwind(thread);

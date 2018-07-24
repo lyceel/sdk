@@ -66,17 +66,14 @@ var tests = <IsolateTest>[
     );
     // Observe that it failed.
     expect(response['success'], isFalse);
-    List/*<Map<String, dynamic>>*/ notices = response['details']['notices'];
+    List notices = response['details']['notices'];
     expect(notices.length, equals(1));
-    Map/*<String, dynamic>*/ reasonForCancelling = notices[0];
+    Map<String, dynamic> reasonForCancelling = notices[0];
     expect(reasonForCancelling['type'], equals('ReasonForCancelling'));
     expect(reasonForCancelling['message'], contains('library_isnt_here_man'));
 
-    // TODO(32341): enable in Dart 2
-    if (!Platform.executableArguments.contains("--preview_dart_2")) {
-      String v2 = await invokeTest(spawnedIsolate);
-      expect(v2, 'apple');
-    }
+    String v2 = await invokeTest(spawnedIsolate);
+    expect(v2, 'apple');
   }
 ];
 

@@ -13,6 +13,7 @@ import '../constants/values.dart';
 import '../elements/entities.dart';
 import '../elements/types.dart';
 import '../kernel/element_map.dart';
+import '../kernel/runtime_type_analysis.dart';
 import '../options.dart';
 import '../resolution/registry.dart' show ResolutionWorldImpactBuilder;
 import '../universe/call_structure.dart';
@@ -141,9 +142,8 @@ class KernelImpactBuilder extends ir.Visitor {
     handleSignature(constructor.function, checkReturnType: false);
     visitNodes(constructor.initializers);
     visitNode(constructor.function.body);
-    if (constructor.isExternal &&
-        !elementMap.isForeignLibrary(constructor.enclosingLibrary)) {
-      MemberEntity member = elementMap.getMember(constructor);
+    MemberEntity member = elementMap.getMember(constructor);
+    if (constructor.isExternal && !elementMap.isForeignHelper(member)) {
       bool isJsInterop = elementMap.nativeBasicData.isJsInteropMember(member);
       impactBuilder.registerNativeData(elementMap
           .getNativeBehaviorForMethod(constructor, isJsInterop: isJsInterop));
@@ -197,9 +197,8 @@ class KernelImpactBuilder extends ir.Visitor {
     handleSignature(procedure.function);
     visitNode(procedure.function.body);
     handleAsyncMarker(procedure.function);
-    if (procedure.isExternal &&
-        !elementMap.isForeignLibrary(procedure.enclosingLibrary)) {
-      MemberEntity member = elementMap.getMember(procedure);
+    MemberEntity member = elementMap.getMember(procedure);
+    if (procedure.isExternal && !elementMap.isForeignHelper(member)) {
       bool isJsInterop = elementMap.nativeBasicData.isJsInteropMember(member);
       impactBuilder.registerNativeData(elementMap
           .getNativeBehaviorForMethod(procedure, isJsInterop: isJsInterop));
@@ -235,8 +234,8 @@ class KernelImpactBuilder extends ir.Visitor {
 
   @override
   void visitIntLiteral(ir.IntLiteral literal) {
-    impactBuilder
-        .registerConstantLiteral(new IntConstantExpression(literal.value));
+    impactBuilder.registerConstantLiteral(new IntConstantExpression(
+        new BigInt.from(literal.value).toUnsigned(64)));
   }
 
   @override
@@ -406,12 +405,12 @@ class KernelImpactBuilder extends ir.Visitor {
       handleNew(node, node.target, isConst: node.isConst);
     } else {
       FunctionEntity target = elementMap.getMethod(node.target);
+      List<DartType> typeArguments = _visitArguments(node.arguments);
       if (_options.strongMode &&
           target == commonElements.extractTypeArguments) {
-        _handleExtractTypeArguments(node, target);
+        _handleExtractTypeArguments(node, target, typeArguments);
         return;
       }
-      List<DartType> typeArguments = _visitArguments(node.arguments);
       impactBuilder.registerStaticUse(new StaticUse.staticInvoke(
           target, elementMap.getCallStructure(node.arguments), typeArguments));
     }
@@ -440,8 +439,8 @@ class KernelImpactBuilder extends ir.Visitor {
     }
   }
 
-  void _handleExtractTypeArguments(
-      ir.StaticInvocation node, FunctionEntity target) {
+  void _handleExtractTypeArguments(ir.StaticInvocation node,
+      FunctionEntity target, List<DartType> typeArguments) {
     // extractTypeArguments<Map>(obj, fn) has additional impacts:
     //
     //   1. All classes implementing Map need to carry type arguments (similar
@@ -449,7 +448,6 @@ class KernelImpactBuilder extends ir.Visitor {
     //
     //   2. There is an invocation of fn with some number of type arguments.
     //
-    List<DartType> typeArguments = _visitArguments(node.arguments);
     impactBuilder.registerStaticUse(new StaticUse.staticInvoke(
         target, elementMap.getCallStructure(node.arguments), typeArguments));
 
@@ -510,7 +508,7 @@ class KernelImpactBuilder extends ir.Visitor {
     List<DartType> typeArguments = _visitArguments(node.arguments);
     // TODO(johnniwinther): Restrict the dynamic use to only match the known
     // target.
-    ReceiverConstraint constraint;
+    Object constraint;
     MemberEntity member = elementMap.getMember(node.target);
     if (_options.strongMode && useStrongModeWorldStrategy) {
       // TODO(johnniwinther): Restrict this to subclasses?
@@ -610,7 +608,7 @@ class KernelImpactBuilder extends ir.Visitor {
       }
     } else {
       visitNode(node.receiver);
-      ReceiverConstraint constraint;
+      Object constraint;
       if (_options.strongMode && useStrongModeWorldStrategy) {
         DartType receiverType = elementMap.getStaticType(node.receiver);
         if (receiverType is InterfaceType) {
@@ -626,7 +624,7 @@ class KernelImpactBuilder extends ir.Visitor {
   @override
   void visitPropertyGet(ir.PropertyGet node) {
     visitNode(node.receiver);
-    ReceiverConstraint constraint;
+    Object constraint;
     if (_options.strongMode && useStrongModeWorldStrategy) {
       DartType receiverType = elementMap.getStaticType(node.receiver);
       if (receiverType is InterfaceType) {
@@ -636,13 +634,44 @@ class KernelImpactBuilder extends ir.Visitor {
     impactBuilder.registerDynamicUse(new ConstrainedDynamicUse(
         new Selector.getter(elementMap.getName(node.name)),
         constraint, const <DartType>[]));
+
+    if (node.name.name == Identifiers.runtimeType_) {
+      if (_options.strongMode) {
+        RuntimeTypeUse runtimeTypeUse = computeRuntimeTypeUse(elementMap, node);
+        if (_options.omitImplicitChecks) {
+          switch (runtimeTypeUse.kind) {
+            case RuntimeTypeUseKind.string:
+              if (!_options.laxRuntimeTypeToString) {
+                if (runtimeTypeUse.receiverType == commonElements.objectType) {
+                  reporter.reportHintMessage(
+                      computeSourceSpanFromTreeNode(node),
+                      MessageKind.RUNTIME_TYPE_TO_STRING_OBJECT);
+                } else {
+                  reporter.reportHintMessage(
+                      computeSourceSpanFromTreeNode(node),
+                      MessageKind.RUNTIME_TYPE_TO_STRING_SUBTYPE,
+                      {'receiverType': '${runtimeTypeUse.receiverType}.'});
+                }
+              }
+              break;
+            case RuntimeTypeUseKind.equals:
+            case RuntimeTypeUseKind.unknown:
+              break;
+          }
+        }
+        impactBuilder.registerRuntimeTypeUse(runtimeTypeUse);
+      } else {
+        impactBuilder.registerRuntimeTypeUse(new RuntimeTypeUse(
+            RuntimeTypeUseKind.unknown, const DynamicType(), null));
+      }
+    }
   }
 
   @override
   void visitPropertySet(ir.PropertySet node) {
     visitNode(node.receiver);
     visitNode(node.value);
-    ReceiverConstraint constraint;
+    Object constraint;
     if (_options.strongMode && useStrongModeWorldStrategy) {
       DartType receiverType = elementMap.getStaticType(node.receiver);
       if (receiverType is InterfaceType) {
@@ -665,7 +694,9 @@ class KernelImpactBuilder extends ir.Visitor {
   @override
   void visitInstantiation(ir.Instantiation node) {
     // TODO(johnniwinther): Track which arities are used in instantiation.
-    impactBuilder.registerFeature(Feature.GENERIC_INSTANTIATION);
+    impactBuilder.registerInstantiation(new GenericInstantiation(
+        elementMap.getStaticType(node.expression),
+        node.typeArguments.map(elementMap.getDartType).toList()));
     node.visitChildren(this);
   }
 

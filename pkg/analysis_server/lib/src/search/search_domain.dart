@@ -3,6 +3,7 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import 'dart:async';
+import 'dart:collection';
 
 import 'package:analysis_server/protocol/protocol_constants.dart';
 import 'package:analysis_server/src/analysis_server.dart';
@@ -41,6 +42,8 @@ class SearchDomainHandler implements protocol.RequestHandler {
         searchEngine = server.searchEngine;
 
   Future findElementReferences(protocol.Request request) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     var params =
         new protocol.SearchFindElementReferencesParams.fromRequest(request);
     String file = params.file;
@@ -73,6 +76,8 @@ class SearchDomainHandler implements protocol.RequestHandler {
   }
 
   Future findMemberDeclarations(protocol.Request request) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     var params =
         new protocol.SearchFindMemberDeclarationsParams.fromRequest(request);
     await server.onAnalysisComplete;
@@ -88,6 +93,8 @@ class SearchDomainHandler implements protocol.RequestHandler {
   }
 
   Future findMemberReferences(protocol.Request request) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     var params =
         new protocol.SearchFindMemberReferencesParams.fromRequest(request);
     await server.onAnalysisComplete;
@@ -103,6 +110,8 @@ class SearchDomainHandler implements protocol.RequestHandler {
   }
 
   Future findTopLevelDeclarations(protocol.Request request) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     var params =
         new protocol.SearchFindTopLevelDeclarationsParams.fromRequest(request);
     try {
@@ -130,6 +139,8 @@ class SearchDomainHandler implements protocol.RequestHandler {
    * Implement the `search.getDeclarations` request.
    */
   Future getDeclarations(protocol.Request request) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     var params =
         new protocol.SearchGetElementDeclarationsParams.fromRequest(request);
 
@@ -144,7 +155,7 @@ class SearchDomainHandler implements protocol.RequestHandler {
       }
     }
 
-    var files = <String>[];
+    var files = new LinkedHashSet<String>();
     var declarations = <search.Declaration>[];
 
     protocol.ElementKind getElementKind(search.DeclarationKind kind) {
@@ -209,7 +220,7 @@ class SearchDomainHandler implements protocol.RequestHandler {
     }).toList();
 
     server.sendResponse(new protocol.SearchGetElementDeclarationsResult(
-            elementDeclarations, files)
+            elementDeclarations, files.toList())
         .toResponse(request.id));
   }
 
@@ -217,6 +228,8 @@ class SearchDomainHandler implements protocol.RequestHandler {
    * Implement the `search.getTypeHierarchy` request.
    */
   Future getTypeHierarchy(protocol.Request request) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     var params = new protocol.SearchGetTypeHierarchyParams.fromRequest(request);
     String file = params.file;
     // prepare element

@@ -20,10 +20,12 @@ class LibraryMemberContributor extends DartCompletionContributor {
   @override
   Future<List<CompletionSuggestion>> computeSuggestions(
       DartCompletionRequest request) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     // Determine if the target looks like a library prefix
     Expression targetId = request.dotTarget;
     if (targetId is SimpleIdentifier && !request.target.isCascade) {
-      Element elem = targetId.bestElement;
+      Element elem = targetId.staticElement;
       if (elem is PrefixElement && !elem.isSynthetic) {
         LibraryElement containingLibrary = request.libraryElement;
         // Gracefully degrade if the library or directives

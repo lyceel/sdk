@@ -34,9 +34,10 @@ import '../../base/instrumentation.dart'
 
 import '../builder/builder.dart'
     show
-        Builder,
         ClassBuilder,
+        Declaration,
         EnumBuilder,
+        FieldBuilder,
         LibraryBuilder,
         NamedTypeBuilder,
         TypeBuilder;
@@ -79,7 +80,7 @@ import '../parser/class_member_parser.dart' show ClassMemberParser;
 
 import '../parser.dart' show Parser, lengthForToken, offsetForToken;
 
-import '../problems.dart' show internalProblem;
+import '../problems.dart' show internalProblem, unhandled;
 
 import '../scanner.dart' show ErrorToken, ScannerResult, Token, scan;
 
@@ -115,6 +116,7 @@ class SourceLoader<L> extends Loader<L> {
   ClassHierarchy hierarchy;
   CoreTypes coreTypes;
 
+  @override
   TypeInferenceEngine typeInferenceEngine;
 
   InterfaceResolver interfaceResolver;
@@ -204,6 +206,10 @@ class SourceLoader<L> extends Loader<L> {
       DietParser parser = new DietParser(listener);
       parser.parseUnit(tokens);
       for (SourceLibraryBuilder part in library.parts) {
+        if (part.partOfLibrary != library) {
+          // Part was included in multiple libraries. Skip it here.
+          continue;
+        }
         Token tokens = await tokenize(part);
         if (tokens != null) {
           listener.uri = part.fileUri;
@@ -223,9 +229,10 @@ class SourceLoader<L> extends Loader<L> {
     if (token == null) return null;
     DietListener dietListener = createDietListener(library);
 
-    Builder parent = library;
+    Declaration parent = library;
     if (enclosingClass != null) {
-      Builder cls = dietListener.memberScope.lookup(enclosingClass, -1, null);
+      Declaration cls =
+          dietListener.memberScope.lookup(enclosingClass, -1, null);
       if (cls is ClassBuilder) {
         parent = cls;
         dietListener
@@ -236,7 +243,7 @@ class SourceLoader<L> extends Loader<L> {
       }
     }
     KernelProcedureBuilder builder = new KernelProcedureBuilder(null, 0, null,
-        "debugExpr", null, null, ProcedureKind.Method, library, 0, -1, -1)
+        "debugExpr", null, null, ProcedureKind.Method, library, 0, 0, -1, -1)
       ..parent = parent;
     BodyBuilder listener = dietListener.createListener(
         builder, dietListener.memberScope, isInstanceMember);
@@ -247,7 +254,7 @@ class SourceLoader<L> extends Loader<L> {
 
   KernelTarget get target => super.target;
 
-  DietListener createDietListener(LibraryBuilder library) {
+  DietListener createDietListener(SourceLibraryBuilder library) {
     return new DietListener(library, hierarchy, coreTypes, typeInferenceEngine);
   }
 
@@ -304,7 +311,7 @@ class SourceLoader<L> extends Loader<L> {
       wasChanged = false;
       for (SourceLibraryBuilder exported in both) {
         for (Export export in exported.exporters) {
-          exported.exportScope.forEach((String name, Builder member) {
+          exported.exportScope.forEach((String name, Declaration member) {
             if (export.addToExportScope(name, member)) {
               wasChanged = true;
             }
@@ -333,15 +340,15 @@ class SourceLoader<L> extends Loader<L> {
     // TODO(sigmund): should be `covarint SourceLibraryBuilder`.
     builders.forEach((Uri uri, dynamic l) {
       SourceLibraryBuilder library = l;
-      Set<Builder> members = new Set<Builder>();
-      library.forEach((String name, Builder member) {
+      Set<Declaration> members = new Set<Declaration>();
+      library.forEach((String name, Declaration member) {
         while (member != null) {
           members.add(member);
           member = member.next;
         }
       });
       List<String> exports = <String>[];
-      library.exportScope.forEach((String name, Builder member) {
+      library.exportScope.forEach((String name, Declaration member) {
         while (member != null) {
           if (!members.contains(member)) {
             exports.add(name);
@@ -376,6 +383,16 @@ class SourceLoader<L> extends Loader<L> {
     ticker.logMs("Finished deferred load tearoffs $count");
   }
 
+  void finishNoSuchMethodForwarders() {
+    int count = 0;
+    builders.forEach((Uri uri, LibraryBuilder library) {
+      if (library.loader == this) {
+        count += library.finishForwarders();
+      }
+    });
+    ticker.logMs("Finished forwarders for $count procedures");
+  }
+
   void resolveConstructors() {
     int count = 0;
     builders.forEach((Uri uri, LibraryBuilder library) {
@@ -396,16 +413,16 @@ class SourceLoader<L> extends Loader<L> {
     ticker.logMs("Resolved $count type-variable bounds");
   }
 
-  void instantiateToBound(TypeBuilder dynamicType, TypeBuilder bottomType,
+  void computeDefaultTypes(TypeBuilder dynamicType, TypeBuilder bottomType,
       ClassBuilder objectClass) {
     int count = 0;
     builders.forEach((Uri uri, LibraryBuilder library) {
       if (library.loader == this) {
         count +=
-            library.instantiateToBound(dynamicType, bottomType, objectClass);
+            library.computeDefaultTypes(dynamicType, bottomType, objectClass);
       }
     });
-    ticker.logMs("Instantiated $count type variables to their bounds");
+    ticker.logMs("Computed default types for $count type variables");
   }
 
   void finishNativeMethods() {
@@ -553,10 +570,11 @@ class SourceLoader<L> extends Loader<L> {
       if (mixedInType != null) {
         bool isClassBuilder = false;
         if (mixedInType is NamedTypeBuilder) {
-          var builder = mixedInType.builder;
+          var builder = mixedInType.declaration;
           if (builder is ClassBuilder) {
             isClassBuilder = true;
-            for (Builder constructory in builder.constructors.local.values) {
+            for (Declaration constructory
+                in builder.constructors.local.values) {
               if (constructory.isConstructor && !constructory.isSynthetic) {
                 cls.addCompileTimeError(
                     templateIllegalMixinDueToConstructors
@@ -664,7 +682,7 @@ class SourceLoader<L> extends Loader<L> {
     TypeEnvironment env = new TypeEnvironment(coreTypes, hierarchy,
         strongMode: target.strongMode);
 
-    if (cls.isSyntheticMixinImplementation) return;
+    if (cls.isAnonymousMixin) return;
 
     if (env.isSubtypeOf(a.asInterfaceType, b.asInterfaceType)) return;
     addProblem(
@@ -707,11 +725,15 @@ class SourceLoader<L> extends Loader<L> {
   void addNoSuchMethodForwarders(List<SourceClassBuilder> sourceClasses) {
     if (!target.backendTarget.enableNoSuchMethodForwarders) return;
 
+    List<Class> changedClasses = new List<Class>();
     for (SourceClassBuilder builder in sourceClasses) {
       if (builder.library.loader == this) {
-        builder.addNoSuchMethodForwarders(target, hierarchy);
+        if (builder.addNoSuchMethodForwarders(target, hierarchy)) {
+          changedClasses.add(builder.target);
+        }
       }
     }
+    hierarchy.applyMemberChanges(changedClasses, findDescendants: true);
     ticker.logMs("Added noSuchMethod forwarders");
   }
 
@@ -720,11 +742,13 @@ class SourceLoader<L> extends Loader<L> {
         new ShadowTypeInferenceEngine(instrumentation, target.strongMode);
   }
 
-  /// Performs the first phase of top level initializer inference, which
-  /// consists of creating kernel objects for all fields and top level variables
-  /// that might be subject to type inference, and records dependencies between
-  /// them.
-  void prepareTopLevelInference(List<SourceClassBuilder> sourceClasses) {
+  void performTopLevelInference(List<SourceClassBuilder> sourceClasses) {
+    if (target.disableTypeInference) return;
+
+    /// The first phase of top level initializer inference, which consists of
+    /// creating kernel objects for all fields and top level variables that
+    /// might be subject to type inference, and records dependencies between
+    /// them.
     typeInferenceEngine.prepareTopLevel(coreTypes, hierarchy);
     interfaceResolver = new InterfaceResolver(
         typeInferenceEngine,
@@ -733,30 +757,38 @@ class SourceLoader<L> extends Loader<L> {
         target.strongMode);
     builders.forEach((Uri uri, LibraryBuilder library) {
       if (library.loader == this) {
-        library.prepareTopLevelInference(library, null);
+        library.forEach((String name, Declaration member) {
+          if (member is FieldBuilder) {
+            member.prepareTopLevelInference();
+          }
+        });
       }
     });
-    // Note: we need to create a list before iterating, since calling
-    // builder.prepareTopLevelInference causes further class hierarchy queries
-    // to be made which would otherwise result in a concurrent modification
-    // exception.
-    orderedClasses = hierarchy
-        .getOrderedClasses(sourceClasses.map((builder) => builder.target))
-        .map((class_) => ShadowClass.getClassInferenceInfo(class_).builder)
-        .toList();
-    for (var builder in orderedClasses) {
-      ShadowClass class_ = builder.target;
-      builder.prepareTopLevelInference(builder.library, builder);
-      class_.setupApiMembers(interfaceResolver);
+    {
+      // Note: we need to create a list before iterating, since calling
+      // builder.prepareTopLevelInference causes further class hierarchy
+      // queries to be made which would otherwise result in a concurrent
+      // modification exception.
+      List<Class> classes = new List<Class>(sourceClasses.length);
+      for (int i = 0; i < sourceClasses.length; i++) {
+        classes[i] = sourceClasses[i].target;
+      }
+      orderedClasses = null;
+      List<ClassBuilder> result = new List<ClassBuilder>(sourceClasses.length);
+      int i = 0;
+      for (Class cls
+          in new List<Class>.from(hierarchy.getOrderedClasses(classes))) {
+        result[i++] = ShadowClass.getClassInferenceInfo(cls).builder
+          ..prepareTopLevelInference();
+      }
+      orderedClasses = result;
     }
     typeInferenceEngine.isTypeInferencePrepared = true;
     ticker.logMs("Prepared top level inference");
-  }
 
-  /// Performs the second phase of top level initializer inference, which is to
-  /// visit fields and top level variables in topologically-sorted order and
-  /// assign their types.
-  void performTopLevelInference(List<SourceClassBuilder> sourceClasses) {
+    /// The second phase of top level initializer inference, which is to visit
+    /// fields and top level variables in topologically-sorted order and assign
+    /// their types.
     typeInferenceEngine.finishTopLevelFields();
     List<Class> changedClasses = new List<Class>();
     for (var builder in orderedClasses) {
@@ -796,8 +828,6 @@ class SourceLoader<L> extends Loader<L> {
     hierarchy.applyMemberChanges(changedClasses, findDescendants: true);
     ticker.logMs("Performed top level inference");
   }
-
-  List<Uri> getDependencies() => sourceBytes.keys.toList();
 
   Expression instantiateInvocation(Expression receiver, String name,
       Arguments arguments, int offset, bool isSuper) {
@@ -848,8 +878,7 @@ class SourceLoader<L> extends Loader<L> {
     if (instrumentation == null) return;
 
     if (charOffset == -1 &&
-        (severity == Severity.nit ||
-            message.code == fasta_codes.codeConstConstructorWithBody ||
+        (message.code == fasta_codes.codeConstConstructorWithBody ||
             message.code == fasta_codes.codeConstructorNotFound ||
             message.code == fasta_codes.codeSuperclassHasNoDefaultConstructor ||
             message.code == fasta_codes.codeTypeArgumentsOnTypeVariable ||
@@ -869,10 +898,6 @@ class SourceLoader<L> extends Loader<L> {
         severityString = "internal problem";
         break;
 
-      case Severity.nit:
-        severityString = "nit";
-        break;
-
       case Severity.warning:
         severityString = "warning";
         break;
@@ -886,6 +911,10 @@ class SourceLoader<L> extends Loader<L> {
       case Severity.context:
         severityString = "context";
         break;
+
+      case Severity.ignored:
+        unhandled("IGNORED", "recordMessage", charOffset, fileUri);
+        return;
     }
     instrumentation.record(
         fileUri,

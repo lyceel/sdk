@@ -4,14 +4,32 @@
 
 import 'dart:math' as math;
 
-import 'package:front_end/src/fasta/type_inference/type_constraint_gatherer.dart';
-import 'package:front_end/src/fasta/type_inference/type_schema.dart';
-import 'package:front_end/src/fasta/type_inference/type_schema_elimination.dart';
-import 'package:kernel/ast.dart';
-import 'package:kernel/class_hierarchy.dart';
-import 'package:kernel/core_types.dart';
-import 'package:kernel/type_algebra.dart';
-import 'package:kernel/type_environment.dart';
+import 'package:kernel/ast.dart'
+    show
+        BottomType,
+        DartType,
+        DynamicType,
+        FunctionType,
+        InterfaceType,
+        NamedType,
+        Procedure,
+        TypeParameter,
+        TypeParameterType,
+        VoidType;
+
+import 'package:kernel/class_hierarchy.dart' show ClassHierarchy;
+
+import 'package:kernel/core_types.dart' show CoreTypes;
+
+import 'package:kernel/type_algebra.dart' show Substitution;
+
+import 'package:kernel/type_environment.dart' show TypeEnvironment;
+
+import 'type_constraint_gatherer.dart' show TypeConstraintGatherer;
+
+import 'type_schema.dart' show UnknownType, typeSchemaToString, isKnown;
+
+import 'type_schema_elimination.dart' show greatestClosure, leastClosure;
 
 // TODO(paulberry): try to push this functionality into kernel.
 FunctionType substituteTypeParams(
@@ -267,7 +285,22 @@ class TypeSchemaEnvironment extends TypeEnvironment {
         downwardsInferPhase: formalTypes == null);
   }
 
-  /// Use the given [constraints] to substitute for type variables..
+  bool hasOmittedBound(TypeParameter parameter) {
+    // If the bound was omitted by the programmer, the Kernel representation for
+    // the parameter will look similar to the following:
+    //
+    //     T extends Object = dynamic
+    //
+    // Note that it's not possible to receive [Object] as [TypeParameter.bound]
+    // and `dynamic` as [TypeParameter.defaultType] from the front end in any
+    // other way.
+    DartType bound = parameter.bound;
+    return bound is InterfaceType &&
+        identical(bound.classNode, coreTypes.objectClass) &&
+        parameter.defaultType is DynamicType;
+  }
+
+  /// Use the given [constraints] to substitute for type variables.
   ///
   /// [typeParametersToInfer] is the set of type parameters that should be
   /// substituted for.  [inferredTypes] should be a list of the same length.
@@ -293,7 +326,7 @@ class TypeSchemaEnvironment extends TypeEnvironment {
 
       var typeParamBound = typeParam.bound;
       DartType extendsConstraint;
-      if (!_isObjectOrDynamic(typeParamBound)) {
+      if (!hasOmittedBound(typeParam)) {
         extendsConstraint = Substitution
             .fromPairs(typeParametersToInfer, inferredTypes)
             .substituteType(typeParamBound);
@@ -326,7 +359,7 @@ class TypeSchemaEnvironment extends TypeEnvironment {
 
       var inferred = inferredTypes[i];
       bool success = typeSatisfiesConstraint(inferred, constraint);
-      if (success && !_isObjectOrDynamic(typeParamBound)) {
+      if (success && !hasOmittedBound(typeParam)) {
         // If everything else succeeded, check the `extends` constraint.
         var extendsConstraint = typeParamBound;
         success = isSubtypeOf(inferred, extendsConstraint);
@@ -665,11 +698,6 @@ class TypeSchemaEnvironment extends TypeEnvironment {
     }
     return hierarchy.getClassicLeastUpperBound(type1, type2);
   }
-
-  bool _isObjectOrDynamic(DartType type) =>
-      type is DynamicType ||
-      (type is InterfaceType &&
-          identical(type.classNode, coreTypes.objectClass));
 
   DartType _typeParameterLeastUpperBound(DartType type1, DartType type2) {
     // This currently just implements a simple least upper bound to

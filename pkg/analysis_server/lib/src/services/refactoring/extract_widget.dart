@@ -31,6 +31,7 @@ class ExtractWidgetRefactoringImpl extends RefactoringImpl
   final AnalysisSessionHelper sessionHelper;
   final CompilationUnit unit;
   final int offset;
+  final int length;
 
   CompilationUnitElement unitElement;
   LibraryElement libraryElement;
@@ -58,6 +59,12 @@ class ExtractWidgetRefactoringImpl extends RefactoringImpl
   /// The widget creation expression to extract.
   InstanceCreationExpression _expression;
 
+  /// The statements covered by [offset] and [length] to extract.
+  List<Statement> _statements;
+
+  /// The [SourceRange] that covers [_statements].
+  SourceRange _statementsRange;
+
   /// The method returning widget to extract.
   MethodDeclaration _method;
 
@@ -66,8 +73,8 @@ class ExtractWidgetRefactoringImpl extends RefactoringImpl
   /// and [_method] parameters.
   List<_Parameter> _parameters = [];
 
-  ExtractWidgetRefactoringImpl(
-      this.searchEngine, AnalysisSession session, this.unit, this.offset)
+  ExtractWidgetRefactoringImpl(this.searchEngine, AnalysisSession session,
+      this.unit, this.offset, this.length)
       : sessionHelper = new AnalysisSessionHelper(session) {
     unitElement = unit.element;
     libraryElement = unitElement.library;
@@ -81,6 +88,8 @@ class ExtractWidgetRefactoringImpl extends RefactoringImpl
 
   @override
   Future<RefactoringStatus> checkFinalConditions() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     RefactoringStatus result = new RefactoringStatus();
     result.addStatus(validateClassName(name));
     return result;
@@ -88,6 +97,8 @@ class ExtractWidgetRefactoringImpl extends RefactoringImpl
 
   @override
   Future<RefactoringStatus> checkInitialConditions() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     RefactoringStatus result = new RefactoringStatus();
 
     result.addStatus(_checkSelection());
@@ -95,8 +106,10 @@ class ExtractWidgetRefactoringImpl extends RefactoringImpl
       return result;
     }
 
-    _enclosingUnitMember = (_expression ?? _method).getAncestor(
-        (n) => n is CompilationUnitMember && n.parent is CompilationUnit);
+    AstNode astNode = _expression ?? _method ?? _statements.first;
+    _enclosingUnitMember = astNode.getAncestor((n) {
+      return n is CompilationUnitMember && n.parent is CompilationUnit;
+    });
 
     result.addStatus(await _initializeClasses());
     result.addStatus(await _initializeParameters());
@@ -129,12 +142,20 @@ class ExtractWidgetRefactoringImpl extends RefactoringImpl
 
   @override
   Future<SourceChange> createChange() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     String file = unitElement.source.fullName;
     var changeBuilder = new DartChangeBuilder(sessionHelper.session);
     await changeBuilder.addFileEdit(file, (builder) {
       if (_expression != null) {
         builder.addReplacement(range.node(_expression), (builder) {
           _writeWidgetInstantiation(builder);
+        });
+      } else if (_statements != null) {
+        builder.addReplacement(_statementsRange, (builder) {
+          builder.write('return ');
+          _writeWidgetInstantiation(builder);
+          builder.write(';');
         });
       } else {
         _removeMethodDeclaration(builder);
@@ -156,7 +177,12 @@ class ExtractWidgetRefactoringImpl extends RefactoringImpl
 
   /// Checks if [offset] is a widget creation expression that can be extracted.
   RefactoringStatus _checkSelection() {
-    AstNode node = new NodeLocator2(offset, offset).searchWithin(unit);
+    AstNode node = new NodeLocator(offset, offset + length).searchWithin(unit);
+
+    // Treat single ReturnStatement as its expression.
+    if (node is ReturnStatement) {
+      node = (node as ReturnStatement).expression;
+    }
 
     // Find the enclosing class.
     _enclosingClassNode = node?.getAncestor((n) => n is ClassDeclaration);
@@ -167,6 +193,30 @@ class ExtractWidgetRefactoringImpl extends RefactoringImpl
     if (isWidgetCreation(newExpression)) {
       _expression = newExpression;
       return new RefactoringStatus();
+    }
+
+    // Block with selected statements.
+    if (node is Block) {
+      var selectionRange = new SourceRange(offset, length);
+      var statements = <Statement>[];
+      for (var statement in node.statements) {
+        var statementRange = range.node(statement);
+        if (statementRange.intersects(selectionRange)) {
+          statements.add(statement);
+        }
+      }
+      if (statements.isNotEmpty) {
+        var lastStatement = statements.last;
+        if (lastStatement is ReturnStatement &&
+            isWidgetExpression(lastStatement.expression)) {
+          _statements = statements;
+          _statementsRange = range.startEnd(statements.first, statements.last);
+          return new RefactoringStatus();
+        } else {
+          return new RefactoringStatus.fatal(
+              'The last selected statement must return a widget.');
+        }
+      }
     }
 
     // Widget myMethod(...) { ... }
@@ -190,9 +240,13 @@ class ExtractWidgetRefactoringImpl extends RefactoringImpl
   }
 
   Future<RefactoringStatus> _initializeClasses() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     var result = new RefactoringStatus();
 
     Future<ClassElement> getClass(String name) async {
+      // TODO(brianwilkerson) Determine whether this await is necessary.
+      await null;
       const uri = 'package:flutter/widgets.dart';
       var element = await sessionHelper.getClass(uri, name);
       if (element == null) {
@@ -202,6 +256,8 @@ class ExtractWidgetRefactoringImpl extends RefactoringImpl
     }
 
     Future<PropertyAccessorElement> getAccessor(String uri, String name) async {
+      // TODO(brianwilkerson) Determine whether this await is necessary.
+      await null;
       var element = await sessionHelper.getTopLevelPropertyAccessor(uri, name);
       if (element == null) {
         result.addFatalError("Unable to find 'required' in $uri");
@@ -223,11 +279,20 @@ class ExtractWidgetRefactoringImpl extends RefactoringImpl
   /// Prepare referenced local variables and fields, that should be turned
   /// into the widget class fields and constructor parameters.
   Future<RefactoringStatus> _initializeParameters() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     _ParametersCollector collector;
     if (_expression != null) {
       SourceRange localRange = range.node(_expression);
       collector = new _ParametersCollector(_enclosingClassElement, localRange);
       _expression.accept(collector);
+    }
+    if (_statements != null) {
+      collector =
+          new _ParametersCollector(_enclosingClassElement, _statementsRange);
+      for (var statement in _statements) {
+        statement.accept(collector);
+      }
     }
     if (_method != null) {
       SourceRange localRange = range.node(_method);
@@ -266,6 +331,29 @@ class ExtractWidgetRefactoringImpl extends RefactoringImpl
       }
     }
 
+    // Collect used public names.
+    var usedNames = new Set<String>();
+    for (var parameter in _parameters) {
+      if (!parameter.name.startsWith('_')) {
+        usedNames.add(parameter.name);
+      }
+    }
+
+    // Give each private parameter a public name for the constructor.
+    for (var parameter in _parameters) {
+      var name = parameter.name;
+      if (name.startsWith('_')) {
+        var baseName = name.substring(1);
+        for (var i = 1;; i++) {
+          name = i == 1 ? baseName : '$baseName$i';
+          if (usedNames.add(name)) {
+            break;
+          }
+        }
+      }
+      parameter.constructorName = name;
+    }
+
     return collector.status;
   }
 
@@ -275,6 +363,11 @@ class ExtractWidgetRefactoringImpl extends RefactoringImpl
     SourceRange linesRange =
         utils.getLinesRange(methodRange, skipLeadingEmptyLines: true);
     builder.addDeletion(linesRange);
+  }
+
+  String _replaceIndent(String code, String indentOld, String indentNew) {
+    var regExp = new RegExp('^$indentOld', multiLine: true);
+    return code.replaceAll(regExp, indentNew);
   }
 
   /// Replace invocations of the [_method] with instantiations of the new
@@ -334,18 +427,33 @@ class ExtractWidgetRefactoringImpl extends RefactoringImpl
               builder.writeln(',');
 
               // Add parameters for fields, local, and method parameters.
-              for (int i = 0; i < _parameters.length; i++) {
+              for (var parameter in _parameters) {
                 builder.write('    ');
                 builder.write('@');
                 builder.writeReference(accessorRequired);
-                builder.write(' this.');
-                builder.write(_parameters[i].name);
+                builder.write(' ');
+                if (parameter.constructorName != parameter.name) {
+                  builder.writeType(parameter.type);
+                  builder.write(' ');
+                  builder.write(parameter.constructorName);
+                } else {
+                  builder.write('this.');
+                  builder.write(parameter.name);
+                }
                 builder.writeln(',');
               }
 
               builder.write('  }');
             },
             initializerWriter: () {
+              for (var parameter in _parameters) {
+                if (parameter.constructorName != parameter.name) {
+                  builder.write(parameter.name);
+                  builder.write(' = ');
+                  builder.write(parameter.constructorName);
+                  builder.write(', ');
+                }
+              }
               builder.write('super(key: key)');
             },
           );
@@ -378,14 +486,27 @@ class ExtractWidgetRefactoringImpl extends RefactoringImpl
                 String indentNew = '    ';
 
                 String code = utils.getNodeText(_expression);
-                code = code.replaceAll(
-                    new RegExp('^$indentOld', multiLine: true), indentNew);
+                code = _replaceIndent(code, indentOld, indentNew);
 
                 builder.writeln('{');
 
                 builder.write('    return ');
                 builder.write(code);
                 builder.writeln(';');
+
+                builder.writeln('  }');
+              } else if (_statements != null) {
+                String indentOld = utils.getLinePrefix(_statementsRange.offset);
+                String indentNew = '    ';
+
+                String code = utils.getRangeText(_statementsRange);
+                code = _replaceIndent(code, indentOld, indentNew);
+
+                builder.writeln('{');
+
+                builder.write(indentNew);
+                builder.write(code);
+                builder.writeln();
 
                 builder.writeln('  }');
               } else {
@@ -407,7 +528,7 @@ class ExtractWidgetRefactoringImpl extends RefactoringImpl
       if (parameter != _parameters.first) {
         builder.write(', ');
       }
-      builder.write(parameter.name);
+      builder.write(parameter.constructorName);
       builder.write(': ');
       builder.write(parameter.name);
     }
@@ -433,11 +554,18 @@ class _MethodInvocationsCollector extends RecursiveAstVisitor<void> {
 }
 
 class _Parameter {
+  /// The name which is used to reference this parameter in the expression
+  /// being extracted, and also the name of the field in the new widget.
   final String name;
+
   final DartType type;
 
   /// Whether the parameter is a parameter of the method being extracted.
   final bool isMethodParameter;
+
+  /// If the [name] is private, the public name to use in the new widget
+  /// constructor. If the [name] is already public, then the [name].
+  String constructorName;
 
   _Parameter(this.name, this.type, {this.isMethodParameter: false});
 }
@@ -486,6 +614,7 @@ class _ParametersCollector extends RecursiveAstVisitor<void> {
         }
       }
     }
+    // TODO(scheglov) support for ParameterElement
 
     if (type != null && uniqueElements.add(element)) {
       parameters.add(new _Parameter(elementName, type));

@@ -361,7 +361,7 @@ bool FlowGraphCompiler::GenerateInstantiatedTypeNoArgumentsTest(
     __ b(is_not_instance_lbl);
     return false;
   }
-  // Custom checking for numbers (Smi, Mint, Bigint and Double).
+  // Custom checking for numbers (Smi, Mint and Double).
   // Note that instance is not Smi (checked above).
   if (type.IsNumberType() || type.IsIntType() || type.IsDoubleType()) {
     GenerateNumberTypeCheck(kClassIdReg, type, is_instance_lbl,
@@ -663,7 +663,8 @@ void FlowGraphCompiler::GenerateAssertAssignable(TokenPosition token_pos,
   }
 
   if (FLAG_precompiled_mode) {
-    GenerateAssertAssignableAOT(token_pos, deopt_id, dst_type, dst_name, locs);
+    GenerateAssertAssignableViaTypeTestingStub(token_pos, deopt_id, dst_type,
+                                               dst_name, locs);
   } else {
     Label is_assignable_fast, is_assignable, runtime_call;
 
@@ -691,10 +692,11 @@ void FlowGraphCompiler::GenerateAssertAssignable(TokenPosition token_pos,
     __ PushObject(dst_name);  // Push the name of the destination.
     __ LoadUniqueObject(R0, test_cache);
     __ Push(R0);
-    GenerateRuntimeCall(token_pos, deopt_id, kTypeCheckRuntimeEntry, 6, locs);
+    __ PushObject(Smi::ZoneHandle(zone(), Smi::New(kTypeCheckFromInline)));
+    GenerateRuntimeCall(token_pos, deopt_id, kTypeCheckRuntimeEntry, 7, locs);
     // Pop the parameters supplied to the runtime entry. The result of the
     // type check runtime call is the checked value.
-    __ Drop(6);
+    __ Drop(7);
     __ Pop(R0);
     __ Bind(&is_assignable);
     __ PopList((1 << kFunctionTypeArgumentsReg) |
@@ -703,7 +705,7 @@ void FlowGraphCompiler::GenerateAssertAssignable(TokenPosition token_pos,
   }
 }
 
-void FlowGraphCompiler::GenerateAssertAssignableAOT(
+void FlowGraphCompiler::GenerateAssertAssignableViaTypeTestingStub(
     TokenPosition token_pos,
     intptr_t deopt_id,
     const AbstractType& dst_type,
@@ -719,10 +721,10 @@ void FlowGraphCompiler::GenerateAssertAssignableAOT(
 
   Label done;
 
-  GenerateAssertAssignableAOT(dst_type, dst_name, kInstanceReg,
-                              kInstantiatorTypeArgumentsReg,
-                              kFunctionTypeArgumentsReg, kSubtypeTestCacheReg,
-                              kDstTypeReg, kScratchReg, &done);
+  GenerateAssertAssignableViaTypeTestingStub(
+      dst_type, dst_name, kInstanceReg, kInstantiatorTypeArgumentsReg,
+      kFunctionTypeArgumentsReg, kSubtypeTestCacheReg, kDstTypeReg, kScratchReg,
+      &done);
   // We use 2 consecutive entries in the pool for the subtype cache and the
   // destination name.  The second entry, namely [dst_name] seems to be unused,
   // but it will be used by the code throwing a TypeError if the type test fails
@@ -741,7 +743,8 @@ void FlowGraphCompiler::GenerateAssertAssignableAOT(
   __ LoadField(R9,
                FieldAddress(kDstTypeReg,
                             AbstractType::type_test_stub_entry_point_offset()));
-  __ ldr(kSubtypeTestCacheReg, Address(PP, sub_type_cache_offset));
+  __ LoadWordFromPoolOffset(kSubtypeTestCacheReg, sub_type_cache_offset, PP,
+                            AL);
   __ blx(R9);
   EmitCallsiteMetadata(token_pos, deopt_id, RawPcDescriptors::kOther, locs);
   __ Bind(&done);
@@ -821,7 +824,6 @@ void FlowGraphCompiler::EmitFrameEntry() {
 //   SP: address of last argument.
 //   FP: caller's frame pointer.
 //   PP: caller's pool pointer.
-//   R9: ic-data.
 //   R4: arguments descriptor array.
 void FlowGraphCompiler::CompileGraph() {
   InitCompiler();
@@ -846,20 +848,19 @@ void FlowGraphCompiler::CompileGraph() {
   if (!is_optimizing()) {
     const int num_locals = parsed_function().num_stack_locals();
 
-    intptr_t args_desc_index = -1;
+    intptr_t args_desc_slot = -1;
     if (parsed_function().has_arg_desc_var()) {
-      args_desc_index =
-          -(parsed_function().arg_desc_var()->index() - kFirstLocalSlotFromFp);
+      args_desc_slot = FrameSlotForVariable(parsed_function().arg_desc_var());
     }
 
     __ Comment("Initialize spill slots");
-    if (num_locals > 1 || (num_locals == 1 && args_desc_index == -1)) {
+    if (num_locals > 1 || (num_locals == 1 && args_desc_slot == -1)) {
       __ LoadObject(R0, Object::null_object());
     }
     for (intptr_t i = 0; i < num_locals; ++i) {
-      Register value_reg = i == args_desc_index ? ARGS_DESC_REG : R0;
-      __ StoreToOffset(kWord, value_reg, FP,
-                       (kFirstLocalSlotFromFp - i) * kWordSize);
+      const intptr_t slot_index = FrameSlotForVariableIndex(-i);
+      Register value_reg = slot_index == args_desc_slot ? ARGS_DESC_REG : R0;
+      __ StoreToOffset(kWord, value_reg, FP, slot_index * kWordSize);
     }
   }
 
@@ -1083,7 +1084,7 @@ Condition FlowGraphCompiler::EmitEqualityRegConstCompare(
     TokenPosition token_pos,
     intptr_t deopt_id) {
   if (needs_number_check) {
-    ASSERT(!obj.IsMint() && !obj.IsDouble() && !obj.IsBigint());
+    ASSERT(!obj.IsMint() && !obj.IsDouble());
     __ Push(reg);
     __ PushObject(obj);
     if (is_optimizing()) {
@@ -1135,69 +1136,12 @@ void FlowGraphCompiler::SaveLiveRegisters(LocationSummary* locs) {
   locs->CheckWritableInputs();
   ClobberDeadTempRegisters(locs);
 #endif
-
   // TODO(vegorov): consider saving only caller save (volatile) registers.
-  const intptr_t fpu_regs_count = locs->live_registers()->FpuRegisterCount();
-  if (fpu_regs_count > 0) {
-    __ AddImmediate(SP, -(fpu_regs_count * kFpuRegisterSize));
-    // Store fpu registers with the lowest register number at the lowest
-    // address.
-    intptr_t offset = 0;
-    __ mov(IP, Operand(SP));
-    for (intptr_t i = 0; i < kNumberOfFpuRegisters; ++i) {
-      QRegister fpu_reg = static_cast<QRegister>(i);
-      if (locs->live_registers()->ContainsFpuRegister(fpu_reg)) {
-        DRegister d = EvenDRegisterOf(fpu_reg);
-        ASSERT(d + 1 == OddDRegisterOf(fpu_reg));
-        __ vstmd(IA_W, IP, d, 2);
-        offset += kFpuRegisterSize;
-      }
-    }
-    ASSERT(offset == (fpu_regs_count * kFpuRegisterSize));
-  }
-
-  // The order in which the registers are pushed must match the order
-  // in which the registers are encoded in the safe point's stack map.
-  // NOTE: This matches the order of ARM's multi-register push.
-  RegList reg_list = 0;
-  for (intptr_t i = kNumberOfCpuRegisters - 1; i >= 0; --i) {
-    Register reg = static_cast<Register>(i);
-    if (locs->live_registers()->ContainsRegister(reg)) {
-      reg_list |= (1 << reg);
-    }
-  }
-  if (reg_list != 0) {
-    __ PushList(reg_list);
-  }
+  __ PushRegisters(*locs->live_registers());
 }
 
 void FlowGraphCompiler::RestoreLiveRegisters(LocationSummary* locs) {
-  RegList reg_list = 0;
-  for (intptr_t i = kNumberOfCpuRegisters - 1; i >= 0; --i) {
-    Register reg = static_cast<Register>(i);
-    if (locs->live_registers()->ContainsRegister(reg)) {
-      reg_list |= (1 << reg);
-    }
-  }
-  if (reg_list != 0) {
-    __ PopList(reg_list);
-  }
-
-  const intptr_t fpu_regs_count = locs->live_registers()->FpuRegisterCount();
-  if (fpu_regs_count > 0) {
-    // Fpu registers have the lowest register number at the lowest address.
-    intptr_t offset = 0;
-    for (intptr_t i = 0; i < kNumberOfFpuRegisters; ++i) {
-      QRegister fpu_reg = static_cast<QRegister>(i);
-      if (locs->live_registers()->ContainsFpuRegister(fpu_reg)) {
-        DRegister d = EvenDRegisterOf(fpu_reg);
-        ASSERT(d + 1 == OddDRegisterOf(fpu_reg));
-        __ vldmd(IA_W, SP, d, 2);
-        offset += kFpuRegisterSize;
-      }
-    }
-    ASSERT(offset == (fpu_regs_count * kFpuRegisterSize));
-  }
+  __ PopRegisters(*locs->live_registers());
 }
 
 #if defined(DEBUG)

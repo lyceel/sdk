@@ -2,6 +2,7 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+import 'dart:async';
 import 'package:analyzer/src/dart/ast/ast.dart';
 import 'package:analyzer/src/dart/ast/utilities.dart';
 import 'package:analyzer/src/generated/engine.dart';
@@ -29,7 +30,7 @@ class ExpressionImplTest extends ParserTestCase {
     expect(index >= 0, isTrue);
     NodeLocator visitor = new NodeLocator(index);
     AstNodeImpl node = visitor.searchWithin(testUnit);
-    expect(node, new isInstanceOf<ExpressionImpl>());
+    expect(node, new TypeMatcher<ExpressionImpl>());
     expect((node as ExpressionImpl).inConstantContext,
         isInContext ? isTrue : isFalse);
   }
@@ -470,7 +471,18 @@ class InstanceCreationExpressionImplTest extends ResolverTestCase {
 
   bool get enableNewAnalysisDriver => true;
 
-  void assertIsConst(String snippet, bool isConst) {
+  void assertCanBeConst(String snippet, bool expectedResult) {
+    int index = testSource.indexOf(snippet);
+    expect(index >= 0, isTrue);
+    NodeLocator visitor = new NodeLocator(index);
+    AstNodeImpl node = visitor.searchWithin(testUnit);
+    node = node.getAncestor((node) => node is InstanceCreationExpressionImpl);
+    expect(node, isNotNull);
+    expect((node as InstanceCreationExpressionImpl).canBeConst(),
+        expectedResult ? isTrue : isFalse);
+  }
+
+  void assertIsConst(String snippet, bool expectedResult) {
     int index = testSource.indexOf(snippet);
     expect(index >= 0, isTrue);
     NodeLocator visitor = new NodeLocator(index);
@@ -478,16 +490,78 @@ class InstanceCreationExpressionImplTest extends ResolverTestCase {
     node = node.getAncestor((node) => node is InstanceCreationExpressionImpl);
     expect(node, isNotNull);
     expect((node as InstanceCreationExpressionImpl).isConst,
-        isConst ? isTrue : isFalse);
+        expectedResult ? isTrue : isFalse);
   }
 
   void enablePreviewDart2() {
     resetWith(options: new AnalysisOptionsImpl()..previewDart2 = true);
   }
 
-  void resolve(String source) async {
+  Future<void> resolve(String source) async {
     testSource = source;
     testUnit = await resolveSource2('/test.dart', source);
+  }
+
+  void test_canBeConst_false_argument_invocation() async {
+    enablePreviewDart2();
+    await resolve('''
+class A {}
+class B {
+  const B(A a);
+}
+A f() => A();
+B g() => B(f());
+''');
+    assertCanBeConst("B(f", false);
+  }
+
+  void test_canBeConst_false_argument_invocationInList() async {
+    enablePreviewDart2();
+    await resolve('''
+class A {}
+class B {
+  const B(a);
+}
+A f() => A();
+B g() => B([f()]);
+''');
+    assertCanBeConst("B([", false);
+  }
+
+  void test_canBeConst_false_argument_nonConstConstructor() async {
+    enablePreviewDart2();
+    await resolve('''
+class A {}
+class B {
+  const B(A a);
+}
+B f() => B(A());
+''');
+    assertCanBeConst("B(A(", false);
+  }
+
+  void test_canBeConst_false_nonConstConstructor() async {
+    enablePreviewDart2();
+    await resolve('''
+class A {}
+A f() => A();
+''');
+    assertCanBeConst("A(", false);
+  }
+
+  @failingTest
+  void test_canBeConst_true_argument_constConstructor() async {
+    enablePreviewDart2();
+    await resolve('''
+class A {
+  const A();
+}
+class B {
+  const B(A a);
+}
+B f() => B(A());
+''');
+    assertCanBeConst("B(A(", true);
   }
 
   void
@@ -748,11 +822,11 @@ class IntegerLiteralImplTest {
   }
 
   test_isValidLiteral_hex_negative_equalMax() {
-    expect(IntegerLiteralImpl.isValidLiteral('0x7FFFFFFFFFFFFFFF', true), true);
+    expect(IntegerLiteralImpl.isValidLiteral('0x8000000000000000', true), true);
   }
 
   test_isValidLiteral_heX_negative_equalMax() {
-    expect(IntegerLiteralImpl.isValidLiteral('0X7FFFFFFFFFFFFFFF', true), true);
+    expect(IntegerLiteralImpl.isValidLiteral('0X8000000000000000', true), true);
   }
 
   test_isValidLiteral_hex_negative_fewDigits() {
@@ -783,14 +857,22 @@ class IntegerLiteralImplTest {
         IntegerLiteralImpl.isValidLiteral('0X007FFFFFFFFFFFFFFF', true), true);
   }
 
+  test_isValidLiteral_hex_negative_oneBelowMax() {
+    expect(IntegerLiteralImpl.isValidLiteral('0x7FFFFFFFFFFFFFFF', true), true);
+  }
+
+  test_isValidLiteral_heX_negative_oneBelowMax() {
+    expect(IntegerLiteralImpl.isValidLiteral('0X7FFFFFFFFFFFFFFF', true), true);
+  }
+
   test_isValidLiteral_hex_negative_oneOverMax() {
     expect(
-        IntegerLiteralImpl.isValidLiteral('0x8000000000000000', true), false);
+        IntegerLiteralImpl.isValidLiteral('0x8000000000000001', true), false);
   }
 
   test_isValidLiteral_heX_negative_oneOverMax() {
     expect(
-        IntegerLiteralImpl.isValidLiteral('0X8000000000000000', true), false);
+        IntegerLiteralImpl.isValidLiteral('0X8000000000000001', true), false);
   }
 
   test_isValidLiteral_hex_negative_tooManyDigits() {

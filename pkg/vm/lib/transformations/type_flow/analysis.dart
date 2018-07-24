@@ -12,6 +12,7 @@ import 'dart:math' show max;
 import 'package:kernel/ast.dart' hide Statement, StatementVisitor;
 import 'package:kernel/class_hierarchy.dart' show ClosedWorldClassHierarchy;
 import 'package:kernel/library_index.dart' show LibraryIndex;
+import 'package:kernel/core_types.dart' show CoreTypes;
 import 'package:kernel/type_environment.dart';
 
 import 'calls.dart';
@@ -611,20 +612,65 @@ class _ReceiverTypeBuilder {
   }
 }
 
+/// Keeps track of number of cached [_Invocation] objects with
+/// a particular selector and provides approximation if needed.
+class _SelectorApproximation {
+  /// Approximation [_Invocation] with raw arguments is created and used
+  /// after number of [_Invocation] objects with same selector but
+  /// different arguments reaches this limit.
+  static const int maxInvocationsPerSelector = 5000;
+
+  int count = 0;
+  _Invocation approximation;
+}
+
+/// Maintains ([Selector], [Args]) => [_Invocation] cache.
+/// Invocations are cached in order to reuse previously calculated result.
 class _InvocationsCache {
+  final TypeFlowAnalysis _typeFlowAnalysis;
   final Set<_Invocation> _invocations = new Set<_Invocation>();
+  final Map<Selector, _SelectorApproximation> _approximations =
+      <Selector, _SelectorApproximation>{};
+
+  _InvocationsCache(this._typeFlowAnalysis);
 
   _Invocation getInvocation(Selector selector, Args<Type> args) {
+    ++Statistics.invocationsQueriedInCache;
     _Invocation invocation = (selector is DirectSelector)
         ? new _DirectInvocation(selector, args)
         : new _DispatchableInvocation(selector, args);
     _Invocation result = _invocations.lookup(invocation);
-    if (result == null) {
-      bool added = _invocations.add(invocation);
-      assertx(added);
-      result = invocation;
+    if (result != null) {
+      return result;
     }
-    return result;
+
+    if (selector is InterfaceSelector) {
+      // Detect if there are too many invocations per selector. In such case,
+      // approximate extra invocations with a single invocation with raw
+      // arguments.
+
+      final sa = (_approximations[selector] ??= new _SelectorApproximation());
+
+      if (sa.count >= _SelectorApproximation.maxInvocationsPerSelector) {
+        if (sa.approximation == null) {
+          final rawArgs =
+              _typeFlowAnalysis.summaryCollector.rawArguments(selector);
+          sa.approximation = new _DispatchableInvocation(selector, rawArgs);
+          Statistics.approximateInvocationsCreated++;
+        }
+        Statistics.approximateInvocationsUsed++;
+        return sa.approximation;
+      }
+
+      ++sa.count;
+      Statistics.maxInvocationsCachedPerSelector =
+          max(Statistics.maxInvocationsCachedPerSelector, sa.count);
+    }
+
+    bool added = _invocations.add(invocation);
+    assertx(added);
+    ++Statistics.invocationsAddedToCache;
+    return invocation;
   }
 }
 
@@ -685,9 +731,38 @@ class _FieldValue extends _DependencyTracker {
   }
 
   void setValue(Type newValue, TypeFlowAnalysis typeFlowAnalysis) {
-    final Type newType = value.union(
-        newValue.intersection(staticType, typeFlowAnalysis.hierarchyCache),
-        typeFlowAnalysis.hierarchyCache);
+    // Make sure type cones are specialized before putting them into field
+    // value, in order to ensure that dependency is established between
+    // cone's base type and corresponding field setter.
+    //
+    // This ensures correct invalidation in the following scenario:
+    //
+    // 1) setValue(Cone(X)).
+    //    It sets field value to Cone(X).
+    //
+    // 2) setValue(Y).
+    //    It calculates Cone(X) U Y, specializing Cone(X).
+    //    This establishes class X --> setter(Y)  dependency.
+    //    If X does not have allocated subclasses, then Cone(X) is specialized
+    //    to Empty and the new field value is Y.
+    //
+    // 3) A new allocated subtype is added to X.
+    //    This invalidates setter(Y). However, recalculation of setter(Y)
+    //    does not yield correct field value, as value calculated on step 1 is
+    //    already lost, and repeating setValue(Y) will not change field value.
+    //
+    // The eager specialization of field value ensures that specialization
+    // will happen on step 1 and dependency class X --> setter(Cone(X))
+    // is established.
+    //
+    final hierarchy = typeFlowAnalysis.hierarchyCache;
+    Type newType = value
+        .union(
+            newValue.specialize(hierarchy).intersection(staticType, hierarchy),
+            hierarchy)
+        .specialize(hierarchy);
+    assertx(newType.isSpecialized);
+
     if (newType != value) {
       if (kPrintTrace) {
         tracePrint("Set field $field value $newType");
@@ -841,8 +916,8 @@ class _ClassHierarchyCache implements TypeHierarchy {
   @override
   bool isSubtype(DartType subType, DartType superType) {
     if (kPrintTrace) {
-      tracePrint("isSubtype for sub = $subType (${subType
-              .runtimeType}), sup = $superType (${superType.runtimeType})");
+      tracePrint("isSubtype for sub = $subType (${subType.runtimeType}),"
+          " sup = $superType (${superType.runtimeType})");
     }
     if (subType == superType) {
       return true;
@@ -1010,6 +1085,7 @@ class _WorkList {
   void process() {
     while (pending.isNotEmpty) {
       assertx(callStack.isEmpty && processing.isEmpty);
+      Statistics.iterationsOverInvocationsWorkList++;
       processInvocation(pending.first);
     }
   }
@@ -1060,6 +1136,7 @@ class _WorkList {
       // Invocation is still pending - it was invalidated while being processed.
       // Move result to invalidatedResult.
       if (_isPending(invocation)) {
+        Statistics.invocationsInvalidatedDuringProcessing++;
         invocation.invalidatedResult = result;
         invocation.result = null;
       }
@@ -1095,24 +1172,27 @@ class TypeFlowAnalysis implements EntryPointsListener, CallHandler {
   final NativeCodeOracle nativeCodeOracle;
   _ClassHierarchyCache hierarchyCache;
   SummaryCollector summaryCollector;
-  _InvocationsCache _invocationsCache = new _InvocationsCache();
+  _InvocationsCache _invocationsCache;
   _WorkList workList;
 
   final Map<Member, Summary> _summaries = <Member, Summary>{};
   final Map<Field, _FieldValue> _fieldValues = <Field, _FieldValue>{};
 
-  TypeFlowAnalysis(
+  TypeFlowAnalysis(Component component, CoreTypes coreTypes,
       ClosedWorldClassHierarchy hierarchy, this.environment, this.libraryIndex,
       {List<String> entryPointsJSONFiles})
       : nativeCodeOracle = new NativeCodeOracle(libraryIndex) {
     hierarchyCache = new _ClassHierarchyCache(this, hierarchy);
     summaryCollector =
         new SummaryCollector(environment, this, nativeCodeOracle);
+    _invocationsCache = new _InvocationsCache(this);
     workList = new _WorkList(this);
 
     if (entryPointsJSONFiles != null) {
       nativeCodeOracle.processEntryPointsJSONFiles(entryPointsJSONFiles, this);
     }
+
+    component.accept(new PragmaEntryPointsVisitor(coreTypes, this));
   }
 
   _Invocation get currentInvocation => workList.callStack.last;
@@ -1184,6 +1264,11 @@ class TypeFlowAnalysis implements EntryPointsListener, CallHandler {
   }
 
   /// ---- Implementation of [EntryPointsListener] interface. ----
+
+  @override
+  void addDirectFieldAccess(Field field, Type value) {
+    getFieldValue(field).setValue(value, this);
+  }
 
   @override
   void addRawCall(Selector selector) {

@@ -12,9 +12,10 @@
 #include "vm/bitfield.h"
 #include "vm/globals.h"
 #include "vm/handles.h"
+#include "vm/heap/store_buffer.h"
 #include "vm/os_thread.h"
 #include "vm/runtime_entry_list.h"
-#include "vm/store_buffer.h"
+
 namespace dart {
 
 class AbstractType;
@@ -93,6 +94,14 @@ class Zone;
     StubCode::InvokeDartCodeFromBytecode_entry()->code(), NULL)                \
   V(RawCode*, call_to_runtime_stub_, StubCode::CallToRuntime_entry()->code(),  \
     NULL)                                                                      \
+  V(RawCode*, null_error_shared_without_fpu_regs_stub_,                        \
+    StubCode::NullErrorSharedWithoutFPURegs_entry()->code(), NULL)             \
+  V(RawCode*, null_error_shared_with_fpu_regs_stub_,                           \
+    StubCode::NullErrorSharedWithFPURegs_entry()->code(), NULL)                \
+  V(RawCode*, stack_overflow_shared_without_fpu_regs_stub_,                    \
+    StubCode::StackOverflowSharedWithoutFPURegs_entry()->code(), NULL)         \
+  V(RawCode*, stack_overflow_shared_with_fpu_regs_stub_,                       \
+    StubCode::StackOverflowSharedWithFPURegs_entry()->code(), NULL)            \
   V(RawCode*, monomorphic_miss_stub_,                                          \
     StubCode::MonomorphicMiss_entry()->code(), NULL)                           \
   V(RawCode*, ic_lookup_through_code_stub_,                                    \
@@ -102,7 +111,9 @@ class Zone;
   V(RawCode*, lazy_deopt_from_throw_stub_,                                     \
     StubCode::DeoptimizeLazyFromThrow_entry()->code(), NULL)                   \
   V(RawCode*, slow_type_test_stub_, StubCode::SlowTypeTest_entry()->code(),    \
-    NULL)
+    NULL)                                                                      \
+  V(RawCode*, lazy_specialize_type_test_stub_,                                 \
+    StubCode::LazySpecializeTypeTest_entry()->code(), NULL)
 
 #endif
 
@@ -131,6 +142,14 @@ class Zone;
     StubCode::UpdateStoreBuffer_entry()->EntryPoint(), 0)                      \
   V(uword, call_to_runtime_entry_point_,                                       \
     StubCode::CallToRuntime_entry()->EntryPoint(), 0)                          \
+  V(uword, null_error_shared_without_fpu_regs_entry_point_,                    \
+    StubCode::NullErrorSharedWithoutFPURegs_entry()->EntryPoint(), 0)          \
+  V(uword, null_error_shared_with_fpu_regs_entry_point_,                       \
+    StubCode::NullErrorSharedWithFPURegs_entry()->EntryPoint(), 0)             \
+  V(uword, stack_overflow_shared_without_fpu_regs_entry_point_,                \
+    StubCode::StackOverflowSharedWithoutFPURegs_entry()->EntryPoint(), 0)      \
+  V(uword, stack_overflow_shared_with_fpu_regs_entry_point_,                   \
+    StubCode::StackOverflowSharedWithFPURegs_entry()->EntryPoint(), 0)         \
   V(uword, megamorphic_call_checked_entry_,                                    \
     StubCode::MegamorphicCall_entry()->EntryPoint(), 0)                        \
   V(uword, monomorphic_miss_entry_,                                            \
@@ -144,8 +163,11 @@ class Zone;
     NativeEntry::NoScopeNativeCallWrapperEntry(), 0)                           \
   V(uword, auto_scope_native_wrapper_entry_point_,                             \
     NativeEntry::AutoScopeNativeCallWrapperEntry(), 0)                         \
+  V(uword, interpret_call_entry_point_, RuntimeEntry::InterpretCallEntry(), 0) \
   V(RawString**, predefined_symbols_address_, Symbols::PredefinedAddress(),    \
     NULL)                                                                      \
+  V(uword, double_nan_address_, reinterpret_cast<uword>(&double_nan_constant), \
+    0)                                                                         \
   V(uword, double_negate_address_,                                             \
     reinterpret_cast<uword>(&double_negate_constant), 0)                       \
   V(uword, double_abs_address_, reinterpret_cast<uword>(&double_abs_constant), \
@@ -162,6 +184,11 @@ class Zone;
 #define CACHED_CONSTANTS_LIST(V)                                               \
   CACHED_VM_OBJECTS_LIST(V)                                                    \
   CACHED_ADDRESSES_LIST(V)
+
+enum class ValidationPolicy {
+  kValidateFrames = 0,
+  kDontValidateFrames = 1,
+};
 
 // A VM thread; may be executing Dart code or performing helper tasks like
 // garbage collection or compilation. The Thread structure associated with
@@ -186,11 +213,15 @@ class Thread : public BaseThread {
 
   // The currently executing thread, or NULL if not yet initialized.
   static Thread* Current() {
+#if defined(HAS_C11_THREAD_LOCAL)
+    return OSThread::CurrentVMThread();
+#else
     BaseThread* thread = OSThread::GetCurrentTLS();
     if (thread == NULL || thread->is_os_thread()) {
       return NULL;
     }
     return reinterpret_cast<Thread*>(thread);
+#endif
   }
 
   // Makes the current thread enter 'isolate'.
@@ -211,7 +242,6 @@ class Thread : public BaseThread {
   void PrepareForGC();
 
   void SetStackLimit(uword value);
-  void SetStackLimitFromStackBase(uword stack_base);
   void ClearStackLimit();
 
   // Access to the current stack limit for generated code.  This may be
@@ -547,6 +577,16 @@ class Thread : public BaseThread {
   void set_vm_tag(uword tag) { vm_tag_ = tag; }
   static intptr_t vm_tag_offset() { return OFFSET_OF(Thread, vm_tag_); }
 
+  int64_t unboxed_int64_runtime_arg() const {
+    return unboxed_int64_runtime_arg_;
+  }
+  void set_unboxed_int64_runtime_arg(int64_t value) {
+    unboxed_int64_runtime_arg_ = value;
+  }
+  static intptr_t unboxed_int64_runtime_arg_offset() {
+    return OFFSET_OF(Thread, unboxed_int64_runtime_arg_);
+  }
+
   RawGrowableObjectArray* pending_functions();
   void clear_pending_functions();
 
@@ -731,7 +771,8 @@ class Thread : public BaseThread {
   Thread* next() const { return next_; }
 
   // Visit all object pointers.
-  void VisitObjectPointers(ObjectPointerVisitor* visitor, bool validate_frames);
+  void VisitObjectPointers(ObjectPointerVisitor* visitor,
+                           ValidationPolicy validate_frames);
 
   bool IsValidHandle(Dart_Handle object) const;
   bool IsValidLocalHandle(Dart_Handle object) const;
@@ -770,6 +811,12 @@ class Thread : public BaseThread {
   uword vm_tag_;
   TaskKind task_kind_;
   RawStackTrace* async_stack_trace_;
+  // Memory location dedicated for passing unboxed int64 values from
+  // generated code to runtime.
+  // TODO(dartbug.com/33549): Clean this up when unboxed values
+  // could be passed as arguments.
+  int64_t unboxed_int64_runtime_arg_;
+
 // State that is cached in the TLS for fast access in generated code.
 #define DECLARE_MEMBERS(type_name, member_name, expr, default_init_value)      \
   type_name member_name;
@@ -860,9 +907,7 @@ class Thread : public BaseThread {
   void ExitSafepointUsingLock();
   void BlockForSafepoint();
 
-  static void SetCurrent(Thread* current) {
-    OSThread::SetCurrentTLS(reinterpret_cast<uword>(current));
-  }
+  static void SetCurrent(Thread* current) { OSThread::SetCurrentTLS(current); }
 
   void DeferOOBMessageInterrupts();
   void RestoreOOBMessageInterrupts();

@@ -96,7 +96,9 @@ precompiler:   Compile into AOT snapshot before running the test.
 dart2js:       Compile to JavaScript using dart2js.
 dart2analyzer: Perform static analysis on Dart code using the analyzer.
 app_jit:       Compile the Dart code into an app snapshot.
+app_jitk:      Compile the Dart code into Kernel and then into an app snapshot.
 dartk:         Compile the Dart code into Kernel before running test.
+dartkb:        Compile the Dart code into Kernel with bytecode before running test.
 dartkp:        Compile the Dart code into Kernel and then Kernel into AOT
                snapshot before running the test.
 spec_parser:   Parse Dart code using the specification parser.''',
@@ -151,9 +153,18 @@ simdbc, simdbc64''',
         values: System.names,
         defaultsTo: Platform.operatingSystem,
         hide: true),
+    new _Option(
+        'named_configuration',
+        '''The named test configuration that supplies the values for all
+test options, specifying how tests should be run. Unimplemented
+currently.''',
+        abbr: 'n',
+        hide: true),
     new _Option.bool('checked', 'Run tests in checked mode.'),
-    new _Option.bool('strong', 'Run tests in strong mode.'),
-    new _Option.bool('host_checked', 'Run compiler in checked mode.',
+    new _Option.bool('strong', 'Deprecated, no-op.', hide: true),
+    // TODO(sigmund): rename flag once we migrate all dart2js bots to the test
+    // matrix.
+    new _Option.bool('host_checked', 'Run compiler with assertions enabled.',
         hide: true),
     new _Option.bool('minified', 'Enable minification in the compiler.',
         hide: true),
@@ -166,9 +177,15 @@ simdbc, simdbc64''',
         'Only run tests that are not marked `Slow` or `Timeout`.'),
     new _Option.bool('enable_asserts',
         'Pass the --enable-asserts flag to dart2js or to the vm.'),
-    new _Option.bool('preview_dart_2',
-        'Pass the --preview-dart-2 flag to analyzer, or pass --no-preview-dart-2 if false.',
+    new _Option.bool('no_preview_dart_2',
+        'Enable legacy Dart 1 behavior for some runtimes and compilers.',
         hide: true),
+    new _Option.bool('use_cfe', 'Pass the --use-cfe flag to analyzer',
+        hide: true),
+    new _Option.bool('analyzer_use_fasta_parser',
+        'Pass the --use-fasta-parser flag to analyzer',
+        hide: true),
+
     // TODO(sigmund): replace dart2js_with_kernel with preview-dart-2.
     new _Option.bool(
         'dart2js_with_kernel', 'Pass the --use-kernel flag to dart2js.',
@@ -232,8 +249,7 @@ compact, color, line, verbose, silent, status, buildbot, diff''',
     new _Option('output_directory',
         'The name of the output directory for storing log files.',
         defaultsTo: "logs", hide: true),
-    new _Option.bool('noBatch', 'Do not run tests in batch mode.',
-        abbr: 'n', hide: true),
+    new _Option.bool('noBatch', 'Do not run tests in batch mode.', hide: true),
     new _Option.bool('dart2js_batch', 'Run dart2js tests in batch mode.',
         hide: true),
     new _Option.bool(
@@ -461,6 +477,11 @@ compiler.''',
       }
     }
 
+    if (configuration['no_preview_dart_2'] == true &&
+        configuration['preview_dart_2'] == true) {
+      _fail('"--no-preview-dart-2" and "--preview-dart-2" specified,');
+    }
+
     return _createConfigurations(configuration);
   }
 
@@ -634,26 +655,28 @@ compiler.''',
                 hotReload: data["hot_reload"] as bool,
                 hotReloadRollback: data["hot_reload_rollback"] as bool,
                 isChecked: data["checked"] as bool,
-                isStrong: data["strong"] as bool,
                 isHostChecked: data["host_checked"] as bool,
                 isCsp: data["csp"] as bool,
                 isMinified: data["minified"] as bool,
                 isVerbose: data["verbose"] as bool,
                 listTests: data["list"] as bool,
                 listStatusFiles: data["list_status_files"] as bool,
-                noPreviewDart2: !(data["preview_dart_2"] as bool),
-                previewDart2: data["preview_dart_2"] as bool,
+                noPreviewDart2: data["no_preview_dart_2"] as bool,
                 printTiming: data["time"] as bool,
                 printReport: data["report"] as bool,
                 reportInJson: data["report_in_json"] as bool,
                 resetBrowser: data["reset_browser_configuration"] as bool,
                 skipCompilation: data["skip_compilation"] as bool,
+                useAnalyzerCfe: data["use_cfe"] as bool,
+                useAnalyzerFastaParser:
+                    data["analyzer_use_fasta_parser"] as bool,
                 useBlobs: data["use_blobs"] as bool,
                 useSdk: data["use_sdk"] as bool,
                 useFastStartup: data["fast_startup"] as bool,
                 useEnableAsserts: data["enable_asserts"] as bool,
                 useDart2JSWithKernel: data["dart2js_with_kernel"] as bool,
                 useDart2JSOldFrontend: data["dart2js_old_frontend"] as bool,
+                useKernelBytecode: compiler == Compiler.dartkb,
                 writeDebugLog: data["write_debug_log"] as bool,
                 writeTestOutcomeLog: data["write_test_outcome_log"] as bool,
                 writeResultLog: data["write_result_log"] as bool,
@@ -761,7 +784,7 @@ files matching the regexp ".*issue.*\\.dart" in the "tests/language" directory.
 If you specify only a runtime ("-r"), then an appropriate default compiler will
 be chosen for that runtime. Likewise, if you specify only a compiler ("-c"),
 then a matching runtime is chosen. If neither compiler nor runtime is selected,
-the test is run directly from source on the VM. 
+the test is run directly from source on the VM.
 
 Options:''');
 

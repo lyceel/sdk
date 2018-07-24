@@ -29,8 +29,8 @@ class ErrorGetHandler extends AbstractGetHandler {
   @override
   void handleGetRequest(HttpRequest request) {
     HttpResponse response = request.response;
-    response.statusCode = HttpStatus.NOT_FOUND;
-    response.headers.contentType = ContentType.TEXT;
+    response.statusCode = HttpStatus.notFound;
+    response.headers.contentType = ContentType.text;
     response.write(message);
     response.close();
   }
@@ -78,7 +78,11 @@ class HttpAnalysisServer {
   /**
    * Return the port this server is bound to.
    */
-  Future<int> get boundPort async => (await _serverFuture)?.port;
+  Future<int> get boundPort async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
+    return (await _serverFuture)?.port;
+  }
 
   void close() {
     _serverFuture?.then((HttpServer server) {
@@ -101,13 +105,15 @@ class HttpAnalysisServer {
    * Begin serving HTTP requests over the given port.
    */
   Future<int> serveHttp([int initialPort]) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (_serverFuture != null) {
       return boundPort;
     }
 
     try {
       _serverFuture =
-          HttpServer.bind(InternetAddress.LOOPBACK_IP_V4, initialPort ?? 0);
+          HttpServer.bind(InternetAddress.loopbackIPv4, initialPort ?? 0);
 
       HttpServer server = await _serverFuture;
       _handleServer(server);
@@ -125,10 +131,14 @@ class HttpAnalysisServer {
    * Handle a GET request received by the HTTP server.
    */
   Future<Null> _handleGetRequest(HttpRequest request) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (getHandler == null) {
       getHandler = new DiagnosticsSite(socketServer, _printBuffer);
     }
-    await getHandler.handleGetRequest(request);
+    // TODO(brianwilkerson) Determine if await is necessary, if so, change the
+    // return type of [AbstractGetHandler.handleGetRequest] to `Future<void>`.
+    await (getHandler.handleGetRequest(request) as dynamic);
   }
 
   /**
@@ -136,7 +146,9 @@ class HttpAnalysisServer {
    */
   void _handleServer(HttpServer httpServer) {
     httpServer.listen((HttpRequest request) async {
-      List<String> updateValues = request.headers[HttpHeaders.UPGRADE];
+      // TODO(brianwilkerson) Determine whether this await is necessary.
+      await null;
+      List<String> updateValues = request.headers[HttpHeaders.upgradeHeader];
       if (request.method == 'GET') {
         await _handleGetRequest(request);
       } else if (updateValues != null &&
@@ -144,8 +156,8 @@ class HttpAnalysisServer {
         // We no longer support serving analysis server communications over
         // WebSocket connections.
         HttpResponse response = request.response;
-        response.statusCode = HttpStatus.NOT_FOUND;
-        response.headers.contentType = ContentType.TEXT;
+        response.statusCode = HttpStatus.notFound;
+        response.headers.contentType = ContentType.text;
         response.write(
             'WebSocket connections not supported (${request.uri.path}).');
         response.close();
@@ -161,8 +173,8 @@ class HttpAnalysisServer {
    */
   void _returnUnknownRequest(HttpRequest request) {
     HttpResponse response = request.response;
-    response.statusCode = HttpStatus.NOT_FOUND;
-    response.headers.contentType = ContentType.TEXT;
+    response.statusCode = HttpStatus.notFound;
+    response.headers.contentType = ContentType.text;
     response.write('Not found');
     response.close();
   }

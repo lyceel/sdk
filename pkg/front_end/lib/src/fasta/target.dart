@@ -6,14 +6,15 @@ library fasta.target;
 
 import 'dart:async' show Future;
 
-import 'package:kernel/ast.dart';
+import 'package:kernel/ast.dart' show Component;
+
 import 'ticker.dart' show Ticker;
 
 /// A compilation target.
 ///
 /// A target reads source files with [read], builds outlines when
-/// [buildOutlines] is called and builds the full component when [buildComponent]
-/// is called.
+/// [buildOutlines] is called and builds the full component when
+/// [buildComponent] is called.
 abstract class Target {
   final Ticker ticker;
 

@@ -14,7 +14,7 @@ class Bar<T extends asy::Stream<core::String> = asy::Stream<core::String>> exten
     : super core::Object::•()
     ;
   method foo(generic-covariant-impl self::Bar::T t) → dynamic /* originally async */ {
-    final asy::Completer<dynamic> :completer = asy::Completer::sync<dynamic>();
+    final asy::Completer<dynamic> :async_completer = asy::Completer::sync<dynamic>();
     asy::FutureOr<dynamic> :return_value;
     dynamic :async_stack_trace;
     dynamic :async_op_then;
@@ -38,7 +38,7 @@ class Bar<T extends asy::Stream<core::String> = asy::Stream<core::String>> exten
                 if(:result) {
                   core::String i = :for-iterator.{asy::_StreamIterator::current};
                   {
-                    core::int x = let final dynamic #t2 = let<BottomType> _ = null in invalid-expression "pkg/front_end/testcases/inference/infer_types_on_loop_indices_for_each_loop_async.dart:17:44: Error: A value of type 'dart.core::String' can't be assigned to a variable of type 'dart.core::int'.
+                    core::int x = let<BottomType> _ = null in let final dynamic #t2 = let<BottomType> _ = null in invalid-expression "pkg/front_end/testcases/inference/infer_types_on_loop_indices_for_each_loop_async.dart:17:44: Error: A value of type 'dart.core::String' can't be assigned to a variable of type 'dart.core::int'.
 Try changing the type of the left hand side, or casting the right hand side to 'dart.core::int'.
       int x = /*error:INVALID_ASSIGNMENT*/ i;
                                            ^" in let final core::String #t3 = i in null;
@@ -54,17 +54,17 @@ Try changing the type of the left hand side, or casting the right hand side to '
               }
           }
         }
-        :completer.{asy::Completer::complete}(:return_value);
+        asy::_completeOnAsyncReturn(:async_completer, :return_value);
         return;
       }
       on dynamic catch(dynamic :exception, dynamic :stack_trace) {
-        :completer.{asy::Completer::completeError}(:exception, :stack_trace);
+        :async_completer.{asy::Completer::completeError}(:exception, :stack_trace);
       }
     :async_stack_trace = asy::_asyncStackTraceHelper(:async_op);
     :async_op_then = asy::_asyncThenWrapperHelper(:async_op);
     :async_op_error = asy::_asyncErrorWrapperHelper(:async_op);
     asy::Future::microtask<dynamic>(:async_op);
-    return :completer.{asy::Completer::future};
+    return :async_completer.{asy::Completer::future};
   }
 }
 class Baz<T extends core::Object = dynamic, E extends asy::Stream<self::Baz::T> = asy::Stream<dynamic>, S extends self::Baz::E = asy::Stream<dynamic>> extends core::Object {
@@ -72,7 +72,7 @@ class Baz<T extends core::Object = dynamic, E extends asy::Stream<self::Baz::T> 
     : super core::Object::•()
     ;
   method foo(generic-covariant-impl self::Baz::S t) → dynamic /* originally async */ {
-    final asy::Completer<dynamic> :completer = asy::Completer::sync<dynamic>();
+    final asy::Completer<dynamic> :async_completer = asy::Completer::sync<dynamic>();
     asy::FutureOr<dynamic> :return_value;
     dynamic :async_stack_trace;
     dynamic :async_op_then;
@@ -96,7 +96,7 @@ class Baz<T extends core::Object = dynamic, E extends asy::Stream<self::Baz::T> 
                 if(:result) {
                   self::Baz::T i = :for-iterator.{asy::_StreamIterator::current};
                   {
-                    core::int x = let final dynamic #t6 = let<BottomType> _ = null in invalid-expression "pkg/front_end/testcases/inference/infer_types_on_loop_indices_for_each_loop_async.dart:25:44: Error: A value of type 'test::Baz::T' can't be assigned to a variable of type 'dart.core::int'.
+                    core::int x = let<BottomType> _ = null in let final dynamic #t6 = let<BottomType> _ = null in invalid-expression "pkg/front_end/testcases/inference/infer_types_on_loop_indices_for_each_loop_async.dart:25:44: Error: A value of type 'test::Baz::T' can't be assigned to a variable of type 'dart.core::int'.
 Try changing the type of the left hand side, or casting the right hand side to 'dart.core::int'.
       int x = /*error:INVALID_ASSIGNMENT*/ i;
                                            ^" in let final self::Baz::T #t7 = i in null;
@@ -113,17 +113,17 @@ Try changing the type of the left hand side, or casting the right hand side to '
               }
           }
         }
-        :completer.{asy::Completer::complete}(:return_value);
+        asy::_completeOnAsyncReturn(:async_completer, :return_value);
         return;
       }
       on dynamic catch(dynamic :exception, dynamic :stack_trace) {
-        :completer.{asy::Completer::completeError}(:exception, :stack_trace);
+        :async_completer.{asy::Completer::completeError}(:exception, :stack_trace);
       }
     :async_stack_trace = asy::_asyncStackTraceHelper(:async_op);
     :async_op_then = asy::_asyncThenWrapperHelper(:async_op);
     :async_op_error = asy::_asyncErrorWrapperHelper(:async_op);
     asy::Future::microtask<dynamic>(:async_op);
-    return :completer.{asy::Completer::future};
+    return :async_completer.{asy::Completer::future};
   }
 }
 abstract class MyStream<T extends core::Object = dynamic> extends asy::Stream<self::MyStream::T> {
@@ -131,7 +131,7 @@ abstract class MyStream<T extends core::Object = dynamic> extends asy::Stream<se
     return null;
 }
 static method test() → dynamic /* originally async */ {
-  final asy::Completer<dynamic> :completer = asy::Completer::sync<dynamic>();
+  final asy::Completer<dynamic> :async_completer = asy::Completer::sync<dynamic>();
   asy::FutureOr<dynamic> :return_value;
   dynamic :async_stack_trace;
   dynamic :async_op_then;
@@ -156,7 +156,7 @@ static method test() → dynamic /* originally async */ {
               if(:result) {
                 self::Foo x = :for-iterator.{asy::_StreamIterator::current};
                 {
-                  core::String y = let final dynamic #t10 = let<BottomType> _ = null in invalid-expression "pkg/front_end/testcases/inference/infer_types_on_loop_indices_for_each_loop_async.dart:38:45: Error: A value of type 'test::Foo' can't be assigned to a variable of type 'dart.core::String'.
+                  core::String y = let<BottomType> _ = null in let final dynamic #t10 = let<BottomType> _ = null in invalid-expression "pkg/front_end/testcases/inference/infer_types_on_loop_indices_for_each_loop_async.dart:38:45: Error: A value of type 'test::Foo' can't be assigned to a variable of type 'dart.core::String'.
 Try changing the type of the left hand side, or casting the right hand side to 'dart.core::String'.
     String y = /*error:INVALID_ASSIGNMENT*/ x;
                                             ^" in let final self::Foo #t11 = x in null;
@@ -201,8 +201,8 @@ Try changing the type of the left hand side, or casting the right hand side to '
               if(:result) {
                 final self::Foo #t16 = :for-iterator.{asy::_StreamIterator::current};
                 {
-                  core::String x = let final dynamic #t17 = let<BottomType> _ = null in invalid-expression "pkg/front_end/testcases/inference/infer_types_on_loop_indices_for_each_loop_async.dart:45:21: Error: A value of type 'test::Foo' can't be assigned to a variable of type 'dart.core::String'.
-Try changing the type of the left hand side, or casting the right hand side to 'dart.core::String'.
+                  core::String x = let<BottomType> _ = null in let final dynamic #t17 = let<BottomType> _ = null in invalid-expression "pkg/front_end/testcases/inference/infer_types_on_loop_indices_for_each_loop_async.dart:45:21: Error: A value of type 'test::Foo' can't be assigned to a variable of type 'dart.core::String'.
+Try changing the type of the variable.
   await for (String x in /*error:FOR_IN_OF_INVALID_ELEMENT_TYPE*/ myStream) {
                     ^" in let final self::Foo #t18 = #t16 in null;
                   core::String y = x;
@@ -288,8 +288,7 @@ Try changing the type of the left hand side, or casting the right hand side to '
         }
         core::Map<core::String, self::Foo> map = <core::String, self::Foo>{};
         {
-          asy::_StreamIterator<dynamic> :for-iterator = new asy::_StreamIterator::•<dynamic>(let final dynamic #t29 = let<BottomType> _ = null in invalid-expression "pkg/front_end/testcases/inference/infer_types_on_loop_indices_for_each_loop_async.dart:66:74: Error: A value of type 'dart.core::Map<dart.core::String, test::Foo>' can't be assigned to a variable of type 'dart.async::Stream<dynamic>'.
-Try changing the type of the left hand side, or casting the right hand side to 'dart.async::Stream<dynamic>'.
+          asy::_StreamIterator<dynamic> :for-iterator = new asy::_StreamIterator::•<dynamic>(let<BottomType> _ = null in let final dynamic #t29 = let<BottomType> _ = null in invalid-expression "pkg/front_end/testcases/inference/infer_types_on_loop_indices_for_each_loop_async.dart:66:74: Error: The type 'dart.core::Map<dart.core::String, test::Foo>' used in the 'for' loop must implement 'dart.async::Stream<dynamic>'.
   await for (var /*@type=dynamic*/ x in /*error:FOR_IN_OF_INVALID_TYPE*/ map) {
                                                                          ^" in let final core::Map<core::String, self::Foo> #t30 = map in null);
           try
@@ -312,16 +311,16 @@ Try changing the type of the left hand side, or casting the right hand side to '
             }
         }
       }
-      :completer.{asy::Completer::complete}(:return_value);
+      asy::_completeOnAsyncReturn(:async_completer, :return_value);
       return;
     }
     on dynamic catch(dynamic :exception, dynamic :stack_trace) {
-      :completer.{asy::Completer::completeError}(:exception, :stack_trace);
+      :async_completer.{asy::Completer::completeError}(:exception, :stack_trace);
     }
   :async_stack_trace = asy::_asyncStackTraceHelper(:async_op);
   :async_op_then = asy::_asyncThenWrapperHelper(:async_op);
   :async_op_error = asy::_asyncErrorWrapperHelper(:async_op);
   asy::Future::microtask<dynamic>(:async_op);
-  return :completer.{asy::Completer::future};
+  return :async_completer.{asy::Completer::future};
 }
 static method main() → dynamic {}

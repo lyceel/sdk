@@ -6,7 +6,6 @@ library dart2js.js_emitter.full_emitter.container_builder;
 
 import '../../deferred_load.dart' show OutputUnit;
 import '../../elements/entities.dart';
-import '../../elements/entity_utils.dart' as utils;
 import '../../elements/names.dart';
 import '../../js/js.dart' as jsAst;
 import '../../js/js.dart' show js;
@@ -29,15 +28,13 @@ class ContainerBuilder extends CodeEmitterHelper {
     jsAst.Expression code = method.code;
     bool needsStubs = method.parameterStubs.isNotEmpty;
     bool canBeApplied = method.canBeApplied;
-    bool canBeReflected = method.canBeReflected;
     bool canTearOff = method.needsTearOff;
     jsAst.Name tearOffName = method.tearOffName;
     bool isClosure = method is InstanceMethod && method.isClosureCallMethod;
     jsAst.Name superAlias = method is InstanceMethod ? method.aliasName : null;
     bool hasSuperAlias = superAlias != null;
     jsAst.Expression memberTypeExpression = method.functionType;
-    bool needStructuredInfo =
-        canTearOff || canBeReflected || canBeApplied || hasSuperAlias;
+    bool needStructuredInfo = canTearOff || canBeApplied || hasSuperAlias;
 
     bool isIntercepted = false;
     if (method is InstanceMethod) {
@@ -67,9 +64,10 @@ class ContainerBuilder extends CodeEmitterHelper {
     // The information is stored in an array with this format:
     //
     // 1.   The alias name for this function (optional).
-    // 2.   The JS function for this member.
-    // 3.   First stub.
-    // 4.   Name of first stub.
+    // 2.   Index into the functions and stubs of the apply stub (optional).
+    // 3.   The JS function for this member.
+    // 4.   First stub.
+    // 5.   Name of first stub.
     // ...
     // M.   Call name of this member.
     // M+1. Call name of first stub.
@@ -97,10 +95,15 @@ class ContainerBuilder extends CodeEmitterHelper {
       expressions.add(js.quoteName(superAlias));
     }
 
+    if (canBeApplied && parameters.typeParameters > 0) {
+      // The first stub is the one that has all the value parameters parameters
+      // but no type parameters. This is the entry point for Function.apply.
+      expressions.add(js.number(1));
+    }
+
     expressions.add(code);
 
-    bool onlyNeedsSuperAlias =
-        !(canTearOff || canBeReflected || canBeApplied || needsStubs);
+    bool onlyNeedsSuperAlias = !(canTearOff || canBeApplied || needsStubs);
 
     if (onlyNeedsSuperAlias) {
       jsAst.ArrayInitializer arrayInit =
@@ -152,7 +155,7 @@ class ContainerBuilder extends CodeEmitterHelper {
       ..add(js.number(optionalParameterCount))
       ..add(memberTypeExpression == null ? js("null") : memberTypeExpression);
 
-    if (canBeReflected || canBeApplied) {
+    if (canBeApplied) {
       expressions.addAll(
           task.metadataCollector.reifyDefaultArguments(member, outputUnit));
 
@@ -161,19 +164,7 @@ class ContainerBuilder extends CodeEmitterHelper {
       });
     }
     Name memberName = member.memberName;
-    if (canBeReflected) {
-      jsAst.LiteralString reflectionName;
-      if (member.isConstructor) {
-        // TODO(herhut): This registers name as a mangled name. Do we need this
-        //               given that we use a different name below?
-        emitter.getReflectionMemberName(member, name);
-        reflectionName = new jsAst.LiteralString(
-            '"new ${utils.reconstructConstructorName(member)}"');
-      } else {
-        reflectionName = js.string(namer.privateName(memberName));
-      }
-      expressions..add(reflectionName);
-    } else if (isClosure && canBeApplied) {
+    if (isClosure && canBeApplied) {
       expressions.add(js.string(namer.privateName(memberName)));
     }
 

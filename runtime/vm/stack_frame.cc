@@ -5,9 +5,9 @@
 #include "vm/stack_frame.h"
 
 #include "platform/memory_sanitizer.h"
-#include "vm/become.h"
 #include "vm/compiler/assembler/assembler.h"
 #include "vm/deopt_instructions.h"
+#include "vm/heap/become.h"
 #include "vm/isolate.h"
 #include "vm/object.h"
 #include "vm/object_store.h"
@@ -15,12 +15,43 @@
 #include "vm/parser.h"
 #include "vm/raw_object.h"
 #include "vm/reusable_handles.h"
+#include "vm/scopes.h"
 #include "vm/stub_code.h"
 #include "vm/visitor.h"
 
 namespace dart {
 
+intptr_t FrameSlotForVariable(const LocalVariable* variable) {
+  ASSERT(!variable->is_captured());
+  return FrameSlotForVariableIndex(variable->index().value());
+}
+
+intptr_t FrameOffsetInBytesForVariable(const LocalVariable* variable) {
+  return FrameSlotForVariable(variable) * kWordSize;
+}
+
+intptr_t FrameSlotForVariableIndex(intptr_t variable_index) {
+  // Variable indices are:
+  //    [1, 2, ..., M] for the M parameters.
+  //    [0, -1, -2, ... -(N-1)] for the N [LocalVariable]s
+  // See (runtime/vm/scopes.h)
+  return variable_index <= 0 ? (variable_index + kFirstLocalSlotFromFp)
+                             : (variable_index + kParamEndSlotFromFp);
+}
+
+intptr_t VariableIndexForFrameSlot(intptr_t frame_slot) {
+  if (frame_slot <= kFirstLocalSlotFromFp) {
+    return frame_slot - kFirstLocalSlotFromFp;
+  } else {
+    ASSERT(frame_slot > kParamEndSlotFromFp);
+    return frame_slot - kParamEndSlotFromFp;
+  }
+}
+
 bool StackFrame::IsStubFrame() const {
+  if (is_interpreted()) {
+    return false;
+  }
   ASSERT(!(IsEntryFrame() || IsExitFrame()));
 #if !defined(HOST_OS_WINDOWS) && !defined(HOST_OS_FUCHSIA)
   // On Windows and Fuchsia, the profiler calls this from a separate thread
@@ -116,6 +147,9 @@ void StackFrame::VisitObjectPointers(ObjectPointerVisitor* visitor) {
     map = code.GetStackMap(pc() - start, &maps, &map);
     if (!map.IsNull()) {
 #if !defined(TARGET_ARCH_DBC)
+      if (is_interpreted()) {
+        UNIMPLEMENTED();
+      }
       RawObject** first = reinterpret_cast<RawObject**>(sp());
       RawObject** last = reinterpret_cast<RawObject**>(
           fp() + (kFirstLocalSlotFromFp * kWordSize));
@@ -204,9 +238,10 @@ void StackFrame::VisitObjectPointers(ObjectPointerVisitor* visitor) {
 #if !defined(TARGET_ARCH_DBC)
   // For normal unoptimized Dart frames and Stub frames each slot
   // between the first and last included are tagged objects.
-  RawObject** first = reinterpret_cast<RawObject**>(sp());
+  RawObject** first = reinterpret_cast<RawObject**>(
+      is_interpreted() ? fp() + (kKBCFirstObjectSlotFromFp * kWordSize) : sp());
   RawObject** last = reinterpret_cast<RawObject**>(
-      fp() + (kFirstObjectSlotFromFp * kWordSize));
+      is_interpreted() ? sp() : fp() + (kFirstObjectSlotFromFp * kWordSize));
 #else
   // On DBC stack grows upwards: fp() <= sp().
   RawObject** first = reinterpret_cast<RawObject**>(
@@ -250,8 +285,10 @@ RawCode* StackFrame::GetCodeObject() const {
 }
 
 RawCode* StackFrame::UncheckedGetCodeObject() const {
-  return *(
-      reinterpret_cast<RawCode**>(fp() + (kPcMarkerSlotFromFp * kWordSize)));
+  return *(reinterpret_cast<RawCode**>(
+      fp() +
+      ((is_interpreted() ? kKBCPcMarkerSlotFromFp : kPcMarkerSlotFromFp) *
+       kWordSize)));
 }
 
 bool StackFrame::FindExceptionHandler(Thread* thread,
@@ -288,19 +325,44 @@ bool StackFrame::FindExceptionHandler(Thread* thread,
   PcDescriptors& descriptors = reused_pc_descriptors_handle.Handle();
   descriptors = code.pc_descriptors();
   PcDescriptors::Iterator iter(descriptors, RawPcDescriptors::kAnyKind);
-  while (iter.MoveNext()) {
-    const intptr_t current_try_index = iter.TryIndex();
-    if ((iter.PcOffset() == pc_offset) && (current_try_index != -1)) {
-      ExceptionHandlerInfo handler_info;
-      handlers.GetHandlerInfo(current_try_index, &handler_info);
-      *handler_pc = code.PayloadStart() + handler_info.handler_pc_offset;
-      *needs_stacktrace = handler_info.needs_stacktrace;
-      *has_catch_all = handler_info.has_catch_all;
-      cache->Insert(pc(), handler_info);
-      return true;
+  intptr_t try_index = -1;
+  if (is_interpreted()) {
+    while (iter.MoveNext()) {
+      // PC descriptors for try blocks in bytecode are generated in pairs,
+      // marking start and end of a try block.
+      // See BytecodeMetadataHelper::ReadExceptionsTable for details.
+      const intptr_t current_try_index = iter.TryIndex();
+      const uword start_pc = iter.PcOffset();
+      if (pc_offset < start_pc) {
+        break;
+      }
+      const bool has_next = iter.MoveNext();
+      ASSERT(has_next);
+      const uword end_pc = iter.PcOffset();
+      if (start_pc <= pc_offset && pc_offset < end_pc) {
+        ASSERT(try_index < current_try_index);
+        try_index = current_try_index;
+      }
+    }
+  } else {
+    while (iter.MoveNext()) {
+      const intptr_t current_try_index = iter.TryIndex();
+      if ((iter.PcOffset() == pc_offset) && (current_try_index != -1)) {
+        try_index = current_try_index;
+        break;
+      }
     }
   }
-  return false;
+  if (try_index == -1) {
+    return false;
+  }
+  ExceptionHandlerInfo handler_info;
+  handlers.GetHandlerInfo(try_index, &handler_info);
+  *handler_pc = code.PayloadStart() + handler_info.handler_pc_offset;
+  *needs_stacktrace = handler_info.needs_stacktrace;
+  *has_catch_all = handler_info.has_catch_all;
+  cache->Insert(pc(), handler_info);
+  return true;
 }
 
 TokenPosition StackFrame::GetTokenPos() const {
@@ -332,14 +394,23 @@ void StackFrameIterator::SetupLastExitFrameData() {
   ASSERT(thread_ != NULL);
   uword exit_marker = thread_->top_exit_frame_info();
   frames_.fp_ = exit_marker;
+#if defined(DART_USE_INTERPRETER)
+  frames_.CheckIfInterpreted(exit_marker);
+#endif
 }
 
 void StackFrameIterator::SetupNextExitFrameData() {
-  uword exit_address = entry_.fp() + (kExitLinkSlotFromEntryFp * kWordSize);
+  uword exit_address =
+      entry_.fp() + ((entry_.is_interpreted() ? kKBCExitLinkSlotFromEntryFp
+                                              : kExitLinkSlotFromEntryFp) *
+                     kWordSize);
   uword exit_marker = *reinterpret_cast<uword*>(exit_address);
   frames_.fp_ = exit_marker;
   frames_.sp_ = 0;
   frames_.pc_ = 0;
+#if defined(DART_USE_INTERPRETER)
+  frames_.CheckIfInterpreted(exit_marker);
+#endif
 }
 
 // Tell MemorySanitizer that generated code initializes part of the stack.
@@ -353,7 +424,7 @@ static void UnpoisonStack(uword fp) {
 StackFrameIterator::StackFrameIterator(ValidationPolicy validation_policy,
                                        Thread* thread,
                                        CrossThreadPolicy cross_thread_policy)
-    : validate_(validation_policy == kValidateFrames),
+    : validate_(validation_policy == ValidationPolicy::kValidateFrames),
       entry_(thread),
       exit_(thread),
       frames_(thread),
@@ -368,7 +439,7 @@ StackFrameIterator::StackFrameIterator(uword last_fp,
                                        ValidationPolicy validation_policy,
                                        Thread* thread,
                                        CrossThreadPolicy cross_thread_policy)
-    : validate_(validation_policy == kValidateFrames),
+    : validate_(validation_policy == ValidationPolicy::kValidateFrames),
       entry_(thread),
       exit_(thread),
       frames_(thread),
@@ -379,6 +450,9 @@ StackFrameIterator::StackFrameIterator(uword last_fp,
   frames_.fp_ = last_fp;
   frames_.sp_ = 0;
   frames_.pc_ = 0;
+#if defined(DART_USE_INTERPRETER)
+  frames_.CheckIfInterpreted(last_fp);
+#endif
 }
 
 #if !defined(TARGET_ARCH_DBC)
@@ -388,7 +462,7 @@ StackFrameIterator::StackFrameIterator(uword fp,
                                        ValidationPolicy validation_policy,
                                        Thread* thread,
                                        CrossThreadPolicy cross_thread_policy)
-    : validate_(validation_policy == kValidateFrames),
+    : validate_(validation_policy == ValidationPolicy::kValidateFrames),
       entry_(thread),
       exit_(thread),
       frames_(thread),
@@ -399,6 +473,9 @@ StackFrameIterator::StackFrameIterator(uword fp,
   frames_.fp_ = fp;
   frames_.sp_ = sp;
   frames_.pc_ = pc;
+#if defined(DART_USE_INTERPRETER)
+  frames_.CheckIfInterpreted(fp);
+#endif
 }
 #endif
 
@@ -425,8 +502,10 @@ StackFrame* StackFrameIterator::NextFrame() {
       // Iteration starts from an exit frame given by its fp.
       current_frame_ = NextExitFrame();
     } else if (*(reinterpret_cast<uword*>(
-                   frames_.fp_ + (kSavedCallerFpSlotFromFp * kWordSize))) ==
-               0) {
+                   frames_.fp_ +
+                   ((frames_.is_interpreted() ? kKBCSavedCallerFpSlotFromFp
+                                              : kSavedCallerFpSlotFromFp) *
+                    kWordSize))) == 0) {
       // Iteration starts from an entry frame given by its fp, sp, and pc.
       current_frame_ = NextEntryFrame();
     } else {
@@ -441,7 +520,7 @@ StackFrame* StackFrameIterator::NextFrame() {
 #endif  // !defined(TARGET_ARCH_DBC)
     return current_frame_;
   }
-  ASSERT((validate_ == kDontValidateFrames) || current_frame_->IsValid());
+  ASSERT(!validate_ || current_frame_->IsValid());
   if (current_frame_->IsEntryFrame()) {
     if (HasNextFrame()) {  // We have another chained block.
       current_frame_ = NextExitFrame();
@@ -450,7 +529,7 @@ StackFrame* StackFrameIterator::NextFrame() {
     current_frame_ = NULL;  // No more frames.
     return current_frame_;
   }
-  ASSERT((validate_ == kDontValidateFrames) || current_frame_->IsExitFrame() ||
+  ASSERT(!validate_ || current_frame_->IsExitFrame() ||
          current_frame_->IsDartFrame(validate_) ||
          current_frame_->IsStubFrame());
 
@@ -462,6 +541,16 @@ StackFrame* StackFrameIterator::NextFrame() {
   return current_frame_;
 }
 
+#if defined(DART_USE_INTERPRETER)
+void StackFrameIterator::FrameSetIterator::CheckIfInterpreted(
+    uword exit_marker) {
+  // TODO(regis): Once the interpreter shares the native stack, we may rely on
+  // a new thread vm_tag to identify an interpreter frame.
+  Interpreter* interpreter = thread_->isolate()->interpreter();
+  is_interpreted_ = (interpreter != NULL) && interpreter->HasFrame(exit_marker);
+}
+#endif
+
 StackFrame* StackFrameIterator::FrameSetIterator::NextFrame(bool validate) {
   StackFrame* frame;
   ASSERT(HasNext());
@@ -469,10 +558,16 @@ StackFrame* StackFrameIterator::FrameSetIterator::NextFrame(bool validate) {
   frame->sp_ = sp_;
   frame->fp_ = fp_;
   frame->pc_ = pc_;
+#if defined(DART_USE_INTERPRETER)
+  frame->is_interpreted_ = is_interpreted_;
+#endif
   sp_ = frame->GetCallerSp();
   fp_ = frame->GetCallerFp();
   pc_ = frame->GetCallerPc();
-  ASSERT((validate == kDontValidateFrames) || frame->IsValid());
+#if defined(DART_USE_INTERPRETER)
+  ASSERT(is_interpreted_ == frame->is_interpreted_);
+#endif
+  ASSERT(!validate || frame->IsValid());
   return frame;
 }
 
@@ -480,10 +575,16 @@ ExitFrame* StackFrameIterator::NextExitFrame() {
   exit_.sp_ = frames_.sp_;
   exit_.fp_ = frames_.fp_;
   exit_.pc_ = frames_.pc_;
+#if defined(DART_USE_INTERPRETER)
+  exit_.is_interpreted_ = frames_.is_interpreted_;
+#endif
   frames_.sp_ = exit_.GetCallerSp();
   frames_.fp_ = exit_.GetCallerFp();
   frames_.pc_ = exit_.GetCallerPc();
-  ASSERT((validate_ == kDontValidateFrames) || exit_.IsValid());
+#if defined(DART_USE_INTERPRETER)
+  ASSERT(frames_.is_interpreted_ == exit_.is_interpreted_);
+#endif
+  ASSERT(!validate_ || exit_.IsValid());
   return &exit_;
 }
 
@@ -492,8 +593,11 @@ EntryFrame* StackFrameIterator::NextEntryFrame() {
   entry_.sp_ = frames_.sp_;
   entry_.fp_ = frames_.fp_;
   entry_.pc_ = frames_.pc_;
+#if defined(DART_USE_INTERPRETER)
+  entry_.is_interpreted_ = frames_.is_interpreted_;
+#endif
   SetupNextExitFrameData();  // Setup data for next exit frame in chain.
-  ASSERT((validate_ == kDontValidateFrames) || entry_.IsValid());
+  ASSERT(!validate_ || entry_.IsValid());
   return &entry_;
 }
 
@@ -586,7 +690,7 @@ intptr_t InlinedFunctionsIterator::GetDeoptFpOffset() const {
 
 #if defined(DEBUG)
 void ValidateFrames() {
-  StackFrameIterator frames(StackFrameIterator::kValidateFrames,
+  StackFrameIterator frames(ValidationPolicy::kValidateFrames,
                             Thread::Current(),
                             StackFrameIterator::kNoCrossThreadIteration);
   StackFrame* frame = frames.NextFrame();

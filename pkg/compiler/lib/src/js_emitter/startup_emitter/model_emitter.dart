@@ -57,7 +57,7 @@ class ModelEmitter {
   ConstantEmitter constantEmitter;
   final NativeEmitter nativeEmitter;
   final bool shouldGenerateSourceMap;
-  final ClosedWorld _closedWorld;
+  final JClosedWorld _closedWorld;
   final ConstantOrdering _constantOrdering;
 
   // The full code that is written to each hunk part-file.
@@ -83,7 +83,7 @@ class ModelEmitter {
         compiler.codegenWorldBuilder,
         _closedWorld.rtiNeed,
         compiler.backend.rtiEncoder,
-        namer,
+        _closedWorld.allocatorAnalysis,
         task,
         this.generateConstantReference,
         constantListGenerator);
@@ -226,6 +226,9 @@ class ModelEmitter {
     if (compiler.options.trustPrimitives) flavor.write(', trust primitives');
     if (compiler.options.trustTypeAnnotations) flavor.write(', trust types');
     if (compiler.options.omitImplicitChecks) flavor.write(', omit checks');
+    if (compiler.options.laxRuntimeTypeToString) {
+      flavor.write(', lax runtime type');
+    }
     if (compiler.options.useContentSecurityPolicy) flavor.write(', CSP');
     return new js.Comment(generatedBy(compiler, flavor: '$flavor'));
   }
@@ -293,6 +296,8 @@ class ModelEmitter {
       SourceMapBuilder.outputSourceMap(
           mainOutput,
           locationCollector,
+          namer.createMinifiedGlobalNameMap(),
+          namer.createMinifiedInstanceNameMap(),
           '',
           compiler.options.sourceMapUri,
           compiler.options.outputUri,
@@ -377,8 +382,15 @@ class ModelEmitter {
 
       output.add(SourceMapBuilder.generateSourceMapTag(mapUri, partUri));
       output.close();
-      SourceMapBuilder.outputSourceMap(output, locationCollector, partName,
-          mapUri, partUri, compiler.outputProvider);
+      SourceMapBuilder.outputSourceMap(
+          output,
+          locationCollector,
+          namer.createMinifiedGlobalNameMap(),
+          namer.createMinifiedInstanceNameMap(),
+          partName,
+          mapUri,
+          partUri,
+          compiler.outputProvider);
     } else {
       output.close();
     }

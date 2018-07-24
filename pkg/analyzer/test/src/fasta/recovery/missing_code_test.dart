@@ -29,7 +29,6 @@ f() => [a, _s_, b];
 ''');
   }
 
-  @failingTest
   void test_missingComma() {
     testRecovery('''
 f() => [a, b c];
@@ -116,6 +115,24 @@ class MissingCodeTest extends AbstractRecoveryTest {
 convert(x) => as T;
 ''', [ParserErrorCode.EXPECTED_TYPE_NAME], '''
 convert(x) => _s_ as T;
+''');
+  }
+
+  @failingTest
+  void test_initializerList_missingComma() {
+    // https://github.com/dart-lang/sdk/issues/33241
+    testRecovery('''
+class Test {
+  Test()
+    : assert(true)
+      assert(true);
+}
+''', [ParserErrorCode.EXPECTED_TOKEN], '''
+class Test {
+  Test()
+    : assert(true),
+      assert(true);
+}
 ''');
   }
 

@@ -11,7 +11,7 @@
 
 #include "platform/utils.h"
 #include "vm/allocation.h"
-#include "vm/heap.h"
+#include "vm/heap/heap.h"
 #include "vm/instructions.h"
 #include "vm/os.h"
 #include "vm/stack_frame.h"
@@ -1234,8 +1234,11 @@ void DisassemblerX64::CheckPrintStop(uint8_t* data) {
 #if defined(TARGET_ARCH_IA32)
   // Recognize stop pattern.
   if (*data == 0xCC) {
-    const char* text = *reinterpret_cast<const char**>(data - 4);
-    Print("  STOP:'%s'", text);
+    const char* message = "Stop messages not enabled";
+    if (FLAG_print_stop_message) {
+      message = *reinterpret_cast<const char**>(data - 4);
+    }
+    Print("  STOP:'%s'", message);
   }
 #endif
 }

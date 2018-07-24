@@ -7,7 +7,7 @@
 #include "vm/compiler/jit/compiler.h"
 #include "vm/flags.h"
 #include "vm/hash_table.h"
-#include "vm/heap.h"
+#include "vm/heap/heap.h"
 #include "vm/isolate.h"
 #include "vm/kernel_loader.h"
 #include "vm/log.h"
@@ -190,7 +190,7 @@ void ClassFinalizer::CollectInterfaces(const Class& cls,
 #if !defined(DART_PRECOMPILED_RUNTIME)
 void ClassFinalizer::VerifyBootstrapClasses() {
   if (FLAG_trace_class_finalization) {
-    OS::Print("VerifyBootstrapClasses START.\n");
+    OS::PrintErr("VerifyBootstrapClasses START.\n");
   }
   ObjectStore* object_store = Isolate::Current()->object_store();
 
@@ -249,7 +249,7 @@ void ClassFinalizer::VerifyBootstrapClasses() {
     OS::Exit(255);
   }
   if (FLAG_trace_class_finalization) {
-    OS::Print("VerifyBootstrapClasses END.\n");
+    OS::PrintErr("VerifyBootstrapClasses END.\n");
   }
   Isolate::Current()->heap()->Verify();
 }
@@ -1172,7 +1172,9 @@ RawAbstractType* ClassFinalizer::FinalizeType(const Class& cls,
     // malformed.
     if ((finalization >= kCanonicalize) && !type.IsMalformed() &&
         !type.IsCanonical() && type.IsType()) {
-      CheckTypeBounds(cls, type);
+      if (!Isolate::Current()->strong()) {
+        CheckTypeBounds(cls, type);
+      }
       return type.Canonicalize();
     }
     return type.raw();
@@ -1314,7 +1316,7 @@ RawAbstractType* ClassFinalizer::FinalizeType(const Class& cls,
 
   // If we are done finalizing a graph of mutually recursive types, check their
   // bounds.
-  if (is_root_type) {
+  if (is_root_type && !Isolate::Current()->strong()) {
     for (intptr_t i = pending_types->length() - 1; i >= 0; i--) {
       const AbstractType& type = pending_types->At(i);
       if (!type.IsMalformed() && !type.IsCanonical()) {
@@ -1555,7 +1557,7 @@ void ClassFinalizer::ResolveAndFinalizeMemberTypes(const Class& cls) {
   AbstractType& type = AbstractType::Handle(zone);
   String& name = String::Handle(zone);
   String& getter_name = String::Handle(zone);
-  String& setter_name = String::Handle(zone);
+  String& other_name = String::Handle(zone);
   Class& super_class = Class::Handle(zone);
   const intptr_t num_fields = array.Length();
   for (intptr_t i = 0; i < num_fields; i++) {
@@ -1579,8 +1581,8 @@ void ClassFinalizer::ResolveAndFinalizeMemberTypes(const Class& cls) {
       // An implicit setter is not generated for a static field, therefore, we
       // cannot rely on the code below handling the static setter case to report
       // a conflict with an instance setter. So we check explicitly here.
-      setter_name = Field::SetterSymbol(name);
-      super_class = FindSuperOwnerOfFunction(cls, setter_name);
+      other_name = Field::SetterSymbol(name);
+      super_class = FindSuperOwnerOfFunction(cls, other_name);
       if (!super_class.IsNull()) {
         const String& class_name = String::Handle(zone, cls.Name());
         const String& super_cls_name = String::Handle(zone, super_class.Name());
@@ -1707,6 +1709,19 @@ void ClassFinalizer::ResolveAndFinalizeMemberTypes(const Class& cls) {
                        interface_name.ToCString());
         }
       }
+    }
+    if (function.IsImplicitGetterFunction() ||
+        function.IsImplicitSetterFunction() ||
+        function.IsImplicitStaticFieldInitializer()) {
+      // Cache the field object in the function data_ field.
+      if (function.IsImplicitSetterFunction()) {
+        other_name = Field::NameFromSetter(name);
+      } else {
+        other_name = Field::NameFromGetter(name);
+      }
+      field = cls.LookupFieldAllowPrivate(other_name);
+      ASSERT(!field.IsNull());
+      function.set_accessor_field(field);
     }
     if (function.IsSetterFunction() || function.IsImplicitSetterFunction()) {
       if (function.is_static()) {
@@ -3150,6 +3165,31 @@ RawType* ClassFinalizer::ResolveMixinAppType(
   return Type::New(mixin_app_class, mixin_app_args, mixin_app_type.token_pos());
 }
 
+// For a class used as an interface marks this class and all its superclasses
+// implemented.
+//
+// Does not mark its interfaces implemented because those would already be
+// marked as such.
+static void MarkImplemented(Zone* zone, const Class& iface) {
+  if (iface.is_implemented()) {
+    return;
+  }
+
+  Class& cls = Class::Handle(zone, iface.raw());
+  AbstractType& type = AbstractType::Handle(zone);
+
+  while (!cls.is_implemented()) {
+    cls.set_is_implemented();
+
+    type = cls.super_type();
+    if (type.IsNull() || type.IsObjectType()) {
+      break;
+    }
+    ASSERT(type.IsResolved());
+    cls = type.type_class();
+  }
+}
+
 // Recursively walks the graph of explicitly declared super type and
 // interfaces, resolving unresolved super types and interfaces.
 // Reports an error if there is an interface reference that cannot be
@@ -3198,9 +3238,11 @@ void ClassFinalizer::ResolveSuperTypeAndInterfaces(
     cls.set_super_type(super_type);
   }
 
-  // If cls belongs to core lib, restrictions about allowed interfaces
-  // are lifted.
-  const bool cls_belongs_to_core_lib = cls.library() == Library::CoreLibrary();
+  // If cls belongs to core lib or is a synthetic class which could belong to
+  // the core library, the restrictions about allowed interfaces are lifted.
+  const bool exempt_from_hierarchy_restrictions =
+      cls.library() == Library::CoreLibrary() ||
+      String::Handle(cls.Name()).Equals(Symbols::DebugClassName());
 
   // Resolve and check the super type and interfaces of cls.
   visited->Add(cls_index);
@@ -3231,7 +3273,7 @@ void ClassFinalizer::ResolveSuperTypeAndInterfaces(
 
   // If cls belongs to core lib or to core lib's implementation, restrictions
   // about allowed interfaces are lifted.
-  if (!cls_belongs_to_core_lib) {
+  if (!exempt_from_hierarchy_restrictions) {
     // Prevent extending core implementation classes.
     bool is_error = false;
     switch (interface_class.id()) {
@@ -3239,7 +3281,6 @@ void ClassFinalizer::ResolveSuperTypeAndInterfaces(
       case kIntegerCid:  // Class Integer, not int.
       case kSmiCid:
       case kMintCid:
-      case kBigintCid:
       case kDoubleCid:  // Class Double, not double.
       case kOneByteStringCid:
       case kTwoByteStringCid:
@@ -3310,7 +3351,7 @@ void ClassFinalizer::ResolveSuperTypeAndInterfaces(
     }
     // Verify that unless cls belongs to core lib, it cannot extend, implement,
     // or mixin any of Null, bool, num, int, double, String, dynamic.
-    if (!cls_belongs_to_core_lib) {
+    if (!exempt_from_hierarchy_restrictions) {
       if (interface.IsBoolType() || interface.IsNullType() ||
           interface.IsNumberType() || interface.IsIntType() ||
           interface.IsDoubleType() || interface.IsStringType() ||
@@ -3328,9 +3369,10 @@ void ClassFinalizer::ResolveSuperTypeAndInterfaces(
         }
       }
     }
-    interface_class.set_is_implemented();
+
     // Now resolve the super interfaces.
     ResolveSuperTypeAndInterfaces(interface_class, visited);
+    MarkImplemented(zone, interface_class);
   }
   visited->RemoveLast();
   cls.set_is_cycle_free();

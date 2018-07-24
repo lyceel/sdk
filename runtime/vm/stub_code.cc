@@ -10,8 +10,8 @@
 #include "vm/compiler/assembler/assembler.h"
 #include "vm/compiler/assembler/disassembler.h"
 #include "vm/flags.h"
+#include "vm/heap/safepoint.h"
 #include "vm/object_store.h"
-#include "vm/safepoint.h"
 #include "vm/snapshot.h"
 #include "vm/virtual_memory.h"
 #include "vm/visitor.h"
@@ -86,12 +86,27 @@ bool StubCode::HasBeenInitialized() {
   return StubCode::AsynchronousGapMarker_entry() != NULL;
 }
 
-bool StubCode::InInvocationStub(uword pc) {
+bool StubCode::InInvocationStub(uword pc, bool is_interpreted_frame) {
 #if !defined(TARGET_ARCH_DBC)
   ASSERT(HasBeenInitialized());
+#if defined(DART_USE_INTERPRETER)
+  if (is_interpreted_frame) {
+    // Recognize special marker set up by interpreter in entry frame.
+    return (pc & 2) != 0;
+  }
+  {
+    uword entry = StubCode::InvokeDartCodeFromBytecode_entry()->EntryPoint();
+    uword size = StubCode::InvokeDartCodeFromBytecodeSize();
+    if ((pc >= entry) && (pc < (entry + size))) {
+      return true;
+    }
+  }
+#endif
   uword entry = StubCode::InvokeDartCode_entry()->EntryPoint();
   uword size = StubCode::InvokeDartCodeSize();
   return (pc >= entry) && (pc < (entry + size));
+#elif defined(DART_USE_INTERPRETER)
+#error "Simultaneous usage of DBC simulator and interpreter not yet supported."
 #else
   // On DBC we use a special marker PC to signify entry frame because there is
   // no such thing as invocation stub.

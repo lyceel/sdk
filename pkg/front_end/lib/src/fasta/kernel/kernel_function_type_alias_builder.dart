@@ -101,7 +101,7 @@ class KernelFunctionTypeAliasBuilder
 
     if (arguments == null && typeVariables != null) {
       List<DartType> result =
-          new List<DartType>.filled(typeVariables.length, null);
+          new List<DartType>.filled(typeVariables.length, null, growable: true);
       for (int i = 0; i < result.length; ++i) {
         result[i] = typeVariables[i].defaultType.build(library);
       }
@@ -112,7 +112,7 @@ class KernelFunctionTypeAliasBuilder
       // That should be caught and reported as a compile-time error earlier.
       return unhandled(
           templateTypeArgumentMismatch
-              .withArguments(name, typeVariables.length.toString())
+              .withArguments(name, typeVariables.length)
               .message,
           "buildTypeArguments",
           -1,
@@ -120,7 +120,8 @@ class KernelFunctionTypeAliasBuilder
     }
 
     // arguments.length == typeVariables.length
-    List<DartType> result = new List<DartType>.filled(arguments.length, null);
+    List<DartType> result =
+        new List<DartType>.filled(arguments.length, null, growable: true);
     for (int i = 0; i < result.length; ++i) {
       result[i] = arguments[i].build(library);
     }

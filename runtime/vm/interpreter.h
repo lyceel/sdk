@@ -5,6 +5,9 @@
 #ifndef RUNTIME_VM_INTERPRETER_H_
 #define RUNTIME_VM_INTERPRETER_H_
 
+#include "vm/globals.h"
+#if defined(DART_USE_INTERPRETER)
+
 #include "vm/compiler/method_recognizer.h"
 #include "vm/constants_kbc.h"
 
@@ -21,6 +24,7 @@ class RawImmutableArray;
 class RawArray;
 class RawObjectPool;
 class RawFunction;
+class RawSubtypeTestCache;
 class ObjectPointerVisitor;
 
 // Interpreter intrinsic handler. It is invoked on entry to the intrinsified
@@ -48,18 +52,26 @@ class Interpreter {
   // High address (KBC stack grows up).
   uword stack_limit() const { return stack_limit_; }
 
-  // The thread's top_exit_frame_info refers to a Dart frame in the interpreter
-  // stack. The interpreter's top_exit_frame_info refers to a C++ frame in the
-  // native stack.
-  uword top_exit_frame_info() const { return top_exit_frame_info_; }
-  void set_top_exit_frame_info(uword value) { top_exit_frame_info_ = value; }
+  // Returns true if the interpreter's stack contains the given frame.
+  // TODO(regis): Once the interpreter shares the native stack, we may rely on
+  // a new thread vm_tag to identify an interpreter frame and we will not need
+  // this HasFrame() method.
+  bool HasFrame(uword frame) const {
+    return frame >= stack_base() && frame <= get_fp();
+  }
 
   // Call on program start.
   static void InitOnce();
 
-  RawObject* Call(const Code& code,
+  RawObject* Call(const Function& function,
                   const Array& arguments_descriptor,
                   const Array& arguments,
+                  Thread* thread);
+
+  RawObject* Call(RawFunction* function,
+                  RawArray* argdesc,
+                  intptr_t argc,
+                  RawObject* const* argv,
                   Thread* thread);
 
   void JumpToFrame(uword pc, uword sp, uword fp, Thread* thread);
@@ -121,16 +133,24 @@ class Interpreter {
                    RawObject** result,
                    uword target);
 
-  void Invoke(Thread* thread,
+  bool Invoke(Thread* thread,
               RawObject** call_base,
               RawObject** call_top,
               uint32_t** pc,
               RawObject*** FP,
               RawObject*** SP);
 
+  bool ProcessInvocation(bool* invoked,
+                         Thread* thread,
+                         RawFunction* function,
+                         RawObject** call_base,
+                         RawObject** call_top,
+                         uint32_t** pc,
+                         RawObject*** FP,
+                         RawObject*** SP);
+
   bool InvokeCompiled(Thread* thread,
                       RawFunction* function,
-                      RawArray* argdesc,
                       RawObject** call_base,
                       RawObject** call_top,
                       uint32_t** pc,
@@ -152,7 +172,7 @@ class Interpreter {
                        RawObject** FP,
                        RawObject** SP);
 
-  void InstanceCall1(Thread* thread,
+  bool InstanceCall1(Thread* thread,
                      RawICData* icdata,
                      RawObject** call_base,
                      RawObject** call_top,
@@ -161,7 +181,7 @@ class Interpreter {
                      RawObject*** SP,
                      bool optimized);
 
-  void InstanceCall2(Thread* thread,
+  bool InstanceCall2(Thread* thread,
                      RawICData* icdata,
                      RawObject** call_base,
                      RawObject** call_top,
@@ -176,13 +196,20 @@ class Interpreter {
                           RawObject*** SP,
                           uint32_t** pc);
 
-#if !defined(PRODUCT)
+  bool AssertAssignable(Thread* thread,
+                        uint32_t* pc,
+                        RawObject** FP,
+                        RawObject** call_top,
+                        RawObject** args,
+                        RawSubtypeTestCache* cache);
+
+#if defined(DEBUG)
   // Returns true if tracing of executed instructions is enabled.
   bool IsTracingExecution() const;
 
   // Prints bytecode instruction at given pc for instruction tracing.
   void TraceInstruction(uint32_t* pc) const;
-#endif  // !defined(PRODUCT)
+#endif  // defined(DEBUG)
 
   // Longjmp support for exceptions.
   InterpreterSetjmpBuffer* last_setjmp_buffer() { return last_setjmp_buffer_; }
@@ -195,5 +222,7 @@ class Interpreter {
 };
 
 }  // namespace dart
+
+#endif  // defined(DART_USE_INTERPRETER)
 
 #endif  // RUNTIME_VM_INTERPRETER_H_

@@ -59,17 +59,25 @@
 # `#unicode` a Unicode short identifier (U+xxxx). We use this to represent code
 #  units or code points.
 #
-# `#name` a name (a string).
-#
-# `#name2` another name (a string).
+# `#name`, `#name2`, `#name3`: names (as strings).
 #
 # `#lexeme` a token. The token's `lexeme` property is used.
 #
-# `#string` a string.
+# `#string`, `#string2`, `#string3`: strings (that aren't names).
+#    Note: as a rule of thumb, avoid using the `#string` keys. In particular,
+#    do not use them for composing error messages, see [diagnostics.md](
+#    lib/src/fasta/diagnostics.md#avoid-composing-messages-programmatically).
 #
-# `#string2` another string.
+# `#type`, #type2`: Kernel types.
 #
-# `#uri` a Uri.
+# `#uri`, `#uri2`, `#uri3`: URIs.
+#
+# `#count`, `#count2`: counts (as integers)
+#
+# `#constant` a Kernel constant.
+#
+# `#num1%N.M`, `#num2%N.M`, `#num3%N.M`: numbers (doubles) formatted to minimum
+# width N and with M fraction digits.
 
 AsciiControlCharacter:
   template: "The control character #unicode can only be used in strings and comments."
@@ -94,6 +102,15 @@ ConstEvalInvalidType:
 ConstEvalInvalidBinaryOperandType:
   template: "Binary operator '#string' on '#constant' requires operand of type '#type', but was of type '#type2'."
 
+ConstEvalZeroDivisor:
+  template: "Binary operator '#string' on '#string2' requires non-zero divisor, but divisor was '0'."
+  dart2jsCode: INVALID_CONSTANT_DIV
+  analyzerCode: CONST_EVAL_THROWS_IDBZE
+
+ConstEvalNegativeShift:
+  template: "Binary operator '#string' on '#string2' requires non-negative operand, but was '#string3'."
+  dart2jsCode: INVALID_CONSTANT_SHIFT
+
 ConstEvalInvalidMethodInvocation:
   template: "The method '#string' can't be invoked on '#constant' within a const context."
   analyzerCode: UNDEFINED_OPERATOR
@@ -113,6 +130,21 @@ ConstEvalFailedAssertion:
 ConstEvalFailedAssertionWithMessage:
   template: "This assertion failed with message: #string"
   analyzerCode: CONST_EVAL_THROWS_EXCEPTION
+
+ConstEvalNonConstantVariableGet:
+  template: "The variable '#string' is not a constant, only constant expressions are allowed."
+  analyzerCode: NON_CONSTANT_VALUE_IN_INITIALIZER
+
+NotConstantExpression:
+  template: "#string is not a constant expression."
+  analyzerCode: NOT_CONSTANT_EXPRESSION
+  dart2jsCode: "*fatal*"
+
+NotAConstantExpression:
+  template: "Not a constant expression."
+  severity: ERROR
+  analyzerCode: NOT_CONSTANT_EXPRESSION
+  dart2jsCode: "*fatal*"
 
 NonAsciiIdentifier:
   template: "The non-ASCII character '#character' (#unicode) can't be used in identifiers, only in strings and comments."
@@ -186,6 +218,7 @@ ExpectedStatement:
   statement: "void;"
 
 ExpectedButGot:
+  # Also see ExpectedAfterButGot
   template: "Expected '#string' before this."
   # Consider the second example below: the parser expects a ')' before 'y', but
   # a ',' would also have worked. We don't have enough information to give a
@@ -195,6 +228,32 @@ ExpectedButGot:
   script:
     - "main() => true ? 1;"
     - "main() => foo(x: 1 y: 2);"
+
+ExpectedAfterButGot:
+  # Also see ExpectedButGot
+  template: "Expected '#string' after this."
+  # This is an alternative to ExpectedButGot when it's better for the error to be
+  # associated with the last consumed token rather than the token being parsed.
+  # Doing so can make it cognitively easier for the user to understand and fix.
+  #
+  # For example, this is ok...
+  #
+  #    x = 7
+  #    class Foo {
+  #    ^^^^^
+  #        Expected ';' before this
+  #
+  # but this is easier for the user...
+  #
+  #    x = 7
+  #        ^
+  #        Expected ';' after this
+  #    class Foo {
+  #
+  analyzerCode: EXPECTED_TOKEN
+  dart2jsCode: MISSING_TOKEN_AFTER_THIS
+  script:
+    - "main() { return true }"
 
 MultipleLibraryDirectives:
   template: "Only one library directive may be declared in a file."
@@ -442,6 +501,20 @@ ConstFactory:
   script:
     - "class C { const factory C() {} }"
 
+NonConstFactory:
+  template: "Cannot invoke a non-'const' factory where a const expression is expected."
+  tip: "Try using a constructor or factory that is 'const'."
+  severity: ERROR
+  analyzerCode: NOT_CONSTANT_EXPRESSION
+  dart2jsCode: "*fatal*"
+
+NonConstConstructor:
+  template: "Cannot invoke a non-'const' constructor where a const expression is expected."
+  tip: "Try using a constructor or factory that is 'const'."
+  severity: ERROR
+  analyzerCode: NOT_CONSTANT_EXPRESSION
+  dart2jsCode: "*fatal*"
+
 ConstAfterFactory:
   template: "The modifier 'const' should be before the modifier 'factory'."
   tip: "Try re-ordering the modifiers."
@@ -535,6 +608,12 @@ ExternalConstructorWithBody:
   script:
     - "class C { external C() {} }"
 
+ExternalConstructorWithFieldInitializers:
+  template: "An external constructor can't initialize fields."
+  tip: "Try removing the field initializers, or removing the keyword 'external'."
+  analyzerCode: EXTERNAL_CONSTRUCTOR_WITH_FIELD_INITIALIZERS
+  dart2jsCode: "*fatal*"
+
 ExternalFactoryWithBody:
   template: "External factories can't have a body."
   tip: "Try removing the body of the factory, or removing the keyword 'external'."
@@ -550,6 +629,21 @@ ExternalField:
   dart2jsCode: EXTRANEOUS_MODIFIER
   script:
     - "class C { external var f; }"
+
+InitializerForStaticField:
+  template: "'#name' isn't an instance field of this class."
+  analyzerCode: INITIALIZER_FOR_STATIC_FIELD
+  dart2jsCode: "*fatal*"
+
+InitializerOutsideConstructor:
+  template: "Only constructors can have initializers, and '#name' is not a constructor."
+  analyzerCode: INITIALIZER_OUTSIDE_CONSTRUCTOR
+  dart2jsCode: "*fatal*"
+
+ConstConstructorWithNonConstSuper:
+  template: "Constant constructor can't call non-constant super constructors."
+  analyzerCode: CONST_CONSTRUCTOR_WITH_NON_CONST_SUPER
+  dart2jsCode: "*fatal*"
 
 ExtraneousModifier:
   template: "Can't have modifier '#lexeme' here."
@@ -709,6 +803,8 @@ InvalidSyncModifier:
 InvalidVoid:
   template: "Type 'void' can't be used here because it isn't a return type."
   tip: "Try removing 'void' keyword or replace it with 'var', 'final', or a type."
+  severity: ERROR
+  analyzerCode: INVALID_USE_OF_VOID
   dart2jsCode: VOID_NOT_ALLOWED
   script:
     - "void x; main() {}"
@@ -717,6 +813,9 @@ InvalidVoid:
 InvalidInitializer:
   template: "Not a valid initializer."
   tip: "To initialize a field, use the syntax 'name = value'."
+  severity: ERROR
+  analyzerCode: INVALID_INITIALIZER
+  dart2jsCode: "*fatal*"
 
 MissingExponent:
   template: "Numbers in exponential notation should always contain an exponent (an integer number with an optional sign)."
@@ -758,11 +857,39 @@ RequiredParameterWithDefault:
 
 StackOverflow:
   template: "Stack overflow."
+  analyzerCode: STACK_OVERFLOW
   dart2jsCode: GENERIC
+
+InvalidCodePoint:
+  template: "The escape sequence starting with '\\u' isn't a valid code point."
+  analyzerCode: INVALID_CODE_POINT
+  dart2jsCode: "*fatal*"
+  expression:
+    - "'\\u{110000}'"
+
+InvalidHexEscape:
+  template: "An escape sequence starting with '\\x' must be followed by 2 hexidecimal digits."
+  analyzerCode: INVALID_HEX_ESCAPE
+  dart2jsCode: "*fatal*"
+  expression:
+    - "'\\x0'"
+    - "'\\x0y'"
+
+InvalidUnicodeEscape:
+  template: "An escape sequence starting with '\\u' must be followed by 4 hexidecimal digits or from 1 to 6 digits between '{' and '}'."
+  analyzerCode: INVALID_UNICODE_ESCAPE
+  dart2jsCode: "*fatal*"
+  expression:
+    - "'\\u'"
+    - "'\\u0F'"
+    - "'\\u{'"
+    - "'\\u{03'"
+    - "'\\u{0Z}'"
 
 UnexpectedDollarInString:
   template: "A '$' has special meaning inside a string, and must be followed by an identifier or an expression in curly braces ({})."
   tip: "Try adding a backslash (\\) to escape the '$'."
+  analyzerCode: UNEXPECTED_DOLLAR_IN_STRING
   dart2jsCode: MALFORMED_STRING_LITERAL
   script:
     - >
@@ -791,6 +918,7 @@ UnexpectedToken:
 
 UnmatchedToken:
   template: "Can't find '#string' to match '#lexeme'."
+  analyzerCode: EXPECTED_TOKEN
   dart2jsCode: UNMATCHED_TOKEN
   script:
     - "main("
@@ -852,12 +980,16 @@ UnterminatedToken:
   template: "Incomplete token."
   dart2jsCode: UNTERMINATED_TOKEN
 
+# Note: avoid using this template, it should only be used for debugging and
+# prototyping, see [diagnostics.md](
+# lib/src/fasta/diagnostics.md#avoid-composing-messages-programmatically).
 Unspecified:
   template: "#string"
   dart2jsCode: GENERIC
 
 AbstractNotSync:
   template: "Abstract methods can't use 'async', 'async*', or 'sync*'."
+  analyzerCode: NON_SYNC_ABSTRACT_METHOD
   dart2jsCode: "*ignored*"
 
 AsyncAsIdentifier:
@@ -872,6 +1004,7 @@ AwaitAsIdentifier:
 
 AwaitNotAsync:
   template: "'await' can only be used in 'async' or 'async*' methods."
+  analyzerCode: AWAIT_IN_WRONG_CONTEXT
   dart2jsCode: "*ignored*"
 
 BuiltInIdentifierAsType:
@@ -895,8 +1028,14 @@ AwaitForNotAsync:
       await for (var e in o) {}
     }
 
+ConstructorNotSync:
+  template: "Constructor bodies can't use 'async', 'async*', or 'sync*'."
+  analyzerCode: NON_SYNC_CONSTRUCTOR
+  dart2jsCode: "*ignored*"
+
 FactoryNotSync:
-  template: "Factories can't use 'async', 'async*', or 'sync*'."
+  template: "Factory bodies can't use 'async', 'async*', or 'sync*'."
+  analyzerCode: NON_SYNC_FACTORY
   dart2jsCode: "*ignored*"
 
 GeneratorReturnsValue:
@@ -908,7 +1047,7 @@ InvalidInlineFunctionType:
   template: "Invalid inline function type."
   tip: "Try changing the inline function type (as in 'int f()') to a prefixed function type using the `Function` keyword (as in 'int Function() f')."
   dart2jsCode: INVALID_INLINE_FUNCTION_TYPE
-  declaration: "typedef F = Function(int f(String x)); main() { F f; }"
+  declaration: "typedef F = Function(int f(String x));"
 
 SetterNotSync:
   template: "Setters can't use 'async', 'async*', or 'sync*'."
@@ -959,6 +1098,7 @@ FunctionTypeDefaultValue:
 
 PrivateNamedParameter:
   template: "An optional named parameter can't start with '_'."
+  analyzerCode: PRIVATE_OPTIONAL_PARAMETER
   dart2jsCode: "*ignored*"
 
 NoFormals:
@@ -1008,6 +1148,7 @@ FinalFieldWithoutInitializer:
 
 MetadataTypeArguments:
   template: "An annotation (metadata) can't use type arguments."
+  analyzerCode: ANNOTATION_WITH_TYPE_ARGUMENTS
   dart2jsCode: "*ignored*"
 
 ConstructorNotFound:
@@ -1021,6 +1162,40 @@ ConstructorWithReturnType:
   dart2jsCode: "*fatal*"
   script:
     - "class C { int C() {} }"
+
+ConstructorWithTypeParameters:
+  template: "Constructors can't have type parameters."
+  severity: ERROR
+  analyzerCode: TYPE_PARAMETER_ON_CONSTRUCTOR
+  dart2jsCode: "*fatal*"
+  script:
+    - "class C { C<T>() {} }"
+    - "class C { C.foo<T>() {} }"
+    - "class C { factory C<T>() => null; }"
+    - "class C { factory C.foo<T>() => null; }"
+
+ConstructorWithWrongName:
+  template: "The name of a constructor must match the name of the enclosing class."
+  severity: ERROR
+  analyzerCode: INVALID_CONSTRUCTOR_NAME
+  dart2jsCode: "*fatal*"
+  script:
+    - "class A { B.foo() {} }"
+    - "class A { factory B() => null; }"
+    - "class A { factory B.foo() => null; }"
+
+ConstructorWithWrongNameContext:
+  template: "The name of the enclosing class is '#name'."
+  severity: CONTEXT
+
+ConstructorCyclic:
+  template: "Redirecting constructers can't be cyclic."
+  tip: "Try to have all constructors eventually redirect to a non-redirecting constructor."
+  severity: ERROR
+  analyzerCode: RECURSIVE_CONSTRUCTOR_REDIRECT
+  dart2jsCode: "*fatal*"
+  script:
+    - "class C { C.foo() : this.bar(); C.bar() : this.foo(); }"
 
 FieldInitializerOutsideConstructor:
   template: "Field formal parameters can only be used in a constructor."
@@ -1036,25 +1211,34 @@ RedirectionTargetNotFound:
 
 CyclicTypedef:
   template: "The typedef '#name' has a reference to itself."
+  analyzerCode: TYPE_ALIAS_CANNOT_REFERENCE_ITSELF
+  dart2jsCode: "*fatal*"
 
 TypeNotFound:
   template: "Type '#name' not found."
   severity: ERROR_LEGACY_WARNING
+  analyzerCode: UNDEFINED_CLASS
+  dart2jsCode: "*fatal*"
 
 NonInstanceTypeVariableUse:
   template: "Can only use type variables in instance methods."
   severity: ERROR_LEGACY_WARNING
+  analyzerCode: TYPE_PARAMETER_REFERENCED_BY_STATIC
+  dart2jsCode: "*fatal*"
 
 GetterNotFound:
   template: "Getter not found: '#name'."
+  analyzerCode: UNDEFINED_GETTER
   severity: ERROR_LEGACY_WARNING
 
 SetterNotFound:
   template: "Setter not found: '#name'."
+  analyzerCode: UNDEFINED_SETTER
   severity: ERROR_LEGACY_WARNING
 
 MethodNotFound:
   template: "Method not found: '#name'."
+  analyzerCode: UNDEFINED_METHOD
   severity: ERROR_LEGACY_WARNING
 
 CandidateFound:
@@ -1065,49 +1249,35 @@ CandidateFoundIsDefaultConstructor:
   template: "The class '#name' has a constructor that takes no arguments."
   severity: CONTEXT
 
-TooFewArgumentsToFunction:
-  template: "Too few positional arguments to function: #count required, #count2 given."
+TooFewArguments:
+  template: "Too few positional arguments: #count required, #count2 given."
   severity: ERROR_LEGACY_WARNING
+  analyzerCode: NOT_ENOUGH_REQUIRED_ARGUMENTS
+  dart2jsCode: "*fatal*"
 
-TooFewArgumentsToMethod:
-  template: "Too few positional arguments to method: #count required, #count2 given."
+TooManyArguments:
+  template: "Too many positional arguments: #count allowed, #count2 given."
   severity: ERROR_LEGACY_WARNING
+  analyzerCode: EXTRA_POSITIONAL_ARGUMENTS
+  dart2jsCode: "*fatal*"
 
-TooFewArgumentsToConstructor:
-  template: "Too few positional arguments to constructor: #count required, #count2 given."
+NoSuchNamedParameter:
+  template: "No named parameter with the name '#name'."
   severity: ERROR_LEGACY_WARNING
-
-TooManyArgumentsToFunction:
-  template: "Too many positional arguments to function: #count allowed, #count2 given."
-  severity: ERROR_LEGACY_WARNING
-
-TooManyArgumentsToMethod:
-  template: "Too many positional arguments to method: #count allowed, #count2 given."
-  severity: ERROR_LEGACY_WARNING
-
-TooManyArgumentsToConstructor:
-  template: "Too many positional arguments to constructor: #count allowed, #count2 given."
-  severity: ERROR_LEGACY_WARNING
-
-FunctionHasNoSuchNamedParameter:
-  template: "Function has no named parameter with the name '#name'."
-  severity: ERROR_LEGACY_WARNING
-
-MethodHasNoSuchNamedParameter:
-  template: "Method has no named parameter with the name '#name'."
-  severity: ERROR_LEGACY_WARNING
-
-ConstructorHasNoSuchNamedParameter:
-  template: "Constructor has no named parameter with the name '#name'."
-  severity: ERROR_LEGACY_WARNING
+  analyzerCode: UNDEFINED_NAMED_PARAMETER
+  dart2jsCode: "*fatal*"
 
 AbstractClassInstantiation:
   template: "The class '#name' is abstract and can't be instantiated."
   severity: ERROR_LEGACY_WARNING
+  analyzerCode: NEW_WITH_ABSTRACT_CLASS
+  dart2jsCode: "*fatal*"
 
 AbstractRedirectedClassInstantiation:
   template: "Factory redirects to class '#name', which is abstract and can't be instantiated."
   severity: ERROR_LEGACY_WARNING
+  analyzerCode: FACTORY_REDIRECTS_TO_ABSTRACT_CLASS
+  dart2jsCode: "*fatal*"
 
 MissingImplementationNotAbstract:
   template: |
@@ -1130,26 +1300,33 @@ MissingImplementationCause:
   severity: CONTEXT
 
 ListLiteralTooManyTypeArguments:
-  template: "Too many type arguments on List literal."
+  template: "List literal requires exactly one type argument."
   severity: ERROR_LEGACY_WARNING
+  analyzerCode: EXPECTED_ONE_LIST_TYPE_ARGUMENTS
+  dart2jsCode: "*fatal*"
 
-ListLiteralTypeArgumentMismatch:
-  template: "Map literal requires two type arguments."
+MapLiteralTypeArgumentMismatch:
+  template: "Map literal requires exactly two type arguments."
   severity: ERROR_LEGACY_WARNING
+  analyzerCode: EXPECTED_TWO_MAP_TYPE_ARGUMENTS
+  dart2jsCode: "*fatal*"
 
 LoadLibraryTakesNoArguments:
   template: "'loadLibrary' takes no arguments."
   severity: ERROR_LEGACY_WARNING
+  analyzerCode: LOAD_LIBRARY_TAKES_NO_ARGUMENTS
+  dart2jsCode: "*fatal*"
 
 LoadLibraryHidesMember:
   template: "The library '#uri' defines a top-level member named 'loadLibrary'. This member is hidden by the special member 'loadLibrary' that the language adds to support deferred loading."
   tip: "Try to rename or hide the member."
-  severity: NIT
+  severity: IGNORED
 
 TypeArgumentMismatch:
-  # TODO(sigmund): #string should be a number instead.
-  template: "'#name' expects #string type arguments."
+  template: "'#name' expects #count type arguments."
   severity: ERROR_LEGACY_WARNING
+  analyzerCode: WRONG_NUMBER_OF_TYPE_ARGUMENTS
+  dart2jsCode: "*fatal*"
 
 NotAType:
   template: "'#name' isn't a type."
@@ -1158,13 +1335,13 @@ NotAType:
   dart2jsCode: "*ignored*"
 
 NotAPrefixInTypeAnnotation:
-  template: "'#name.#name2' can't be used as a type because '#name' doesn't refer to an import prefix."
+  template: "'#lexeme.#lexeme2' can't be used as a type because '#lexeme' doesn't refer to an import prefix."
   severity: ERROR_LEGACY_WARNING
   analyzerCode: NOT_A_TYPE
   dart2jsCode: "*ignored*"
 
 UnresolvedPrefixInTypeAnnotation:
-  template: "'#name.#name2' can't be used as a type because '#name' isn't defined."
+  template: "'#lexeme.#lexeme2' can't be used as a type because '#lexeme' isn't defined."
   severity: ERROR_LEGACY_WARNING
   analyzerCode: NOT_A_TYPE
   dart2jsCode: "*ignored*"
@@ -1225,7 +1402,6 @@ FastaUsageLong:
 
       --fatal=errors
       --fatal=warnings
-      --fatal=nits
         Makes messages of the given kinds fatal, that is, immediately stop the
         compiler with a non-zero exit-code. In --verbose mode, also display an
         internal stack trace from the compiler. Multiple kinds can be separated by
@@ -1327,31 +1503,31 @@ InternalProblemContextSeverity:
   template: "Non-context message has context severity: #string"
   severity: INTERNAL_PROBLEM
 
-InternalVerificationError:
+InternalProblemVerificationError:
   template: |
     Verification of the generated program failed:
     #string
+  severity: INTERNAL_PROBLEM
 
-InternalVisitorUnsupportedDefault:
-  template: "Trying to invoke a default visiting method of a visitor on a node #string."
-  tip: "Try invoking one of the specialized 'visit' methods instead."
+InternalProblemDebugAbort:
+  template: "Compilation aborted due to fatal '#name' at:\n#string"
   severity: INTERNAL_PROBLEM
 
 LocalDefinitionHidesExport:
   template: "Local definition of '#name' hides export from '#uri'."
-  severity: NIT
+  severity: IGNORED
 
 LocalDefinitionHidesImport:
   template: "Local definition of '#name' hides import from '#uri'."
-  severity: NIT
+  severity: IGNORED
 
 ExportHidesExport:
   template: "Export of '#name' (from '#uri') hides export from '#uri2'."
-  severity: NIT
+  severity: IGNORED
 
 ImportHidesImport:
   template: "Import of '#name' (from '#uri') hides import from '#uri2'."
-  severity: NIT
+  severity: IGNORED
 
 MissingPrefixInDeferredImport:
   template: "Deferred imports should have a prefix."
@@ -1392,7 +1568,7 @@ PrefixAfterCombinator:
 
 DuplicatedExport:
   template: "'#name' is exported from both '#uri' and '#uri2'."
-  severity: NIT
+  severity: IGNORED
   analyzerCode: AMBIGUOUS_EXPORT
   dart2jsCode: "*ignored*"
 
@@ -1402,17 +1578,29 @@ DuplicatedExportInType:
 
 DuplicatedImport:
   template: "'#name' is imported from both '#uri' and '#uri2'."
-  severity: NIT
+  severity: IGNORED
 
 DuplicatedImportInType:
   template: "'#name' is imported from both '#uri' and '#uri2'."
   severity: ERROR_LEGACY_WARNING
+  analyzerCode: AMBIGUOUS_IMPORT
+  dart2jsCode: "*fatal*"
+  script:
+    lib1.dart: "class A {}"
+    lib2.dart: "class A {}"
+    main.dart: "import 'lib1.dart'; import 'lib2.dart'; A a;"
 
 CyclicClassHierarchy:
   template: "'#name' is a supertype of itself via '#string'."
+  severity: ERROR
+  analyzerCode: RECURSIVE_INTERFACE_INHERITANCE
+  dart2jsCode: "*fatal*"
 
 ExtendingEnum:
   template: "'#name' is an enum and can't be extended or implemented."
+  severity: ERROR
+  analyzerCode: EXTENDS_ENUM
+  dart2jsCode: "*fatal*"
 
 ExtendingRestricted:
   template: "'#name' is restricted and can't be extended or implemented."
@@ -1424,6 +1612,8 @@ NoUnnamedConstructorInObject:
 
 IllegalMixinDueToConstructors:
   template: "Can't use '#name' as a mixin because it has constructors."
+  analyzerCode: MIXIN_DECLARES_CONSTRUCTOR
+  dart2jsCode: "*fatal*"
 
 IllegalMixinDueToConstructorsCause:
   template: "This constructor prevents using '#name' as a mixin."
@@ -1432,6 +1622,8 @@ IllegalMixinDueToConstructorsCause:
 ConflictsWithConstructor:
   template: "Conflicts with constructor '#name'."
   severity: ERROR
+  analyzerCode: CONFLICTS_WITH_CONSTRUCTOR
+  dart2jsCode: "*fatal*"
 
 ConflictsWithFactory:
   template: "Conflicts with factory '#name'."
@@ -1440,22 +1632,32 @@ ConflictsWithFactory:
 ConflictsWithMember:
   template: "Conflicts with member '#name'."
   severity: ERROR
+  analyzerCode: CONFLICTS_WITH_MEMBER
+  dart2jsCode: "*fatal*"
 
 ConflictsWithMemberWarning:
   template: "Conflicts with member '#name'."
   severity: ERROR_LEGACY_WARNING
+  analyzerCode: CONFLICTS_WITH_MEMBER
+  dart2jsCode: "*fatal*"
 
 ConflictsWithSetter:
   template: "Conflicts with setter '#name'."
   severity: ERROR
+  analyzerCode: CONFLICTS_WITH_MEMBER
+  dart2jsCode: "*fatal*"
 
 ConflictsWithSetterWarning:
   template: "Conflicts with setter '#name'."
   severity: ERROR_LEGACY_WARNING
+  analyzerCode: CONFLICTS_WITH_MEMBER
+  dart2jsCode: "*fatal*"
 
 ConflictsWithTypeVariable:
   template: "Conflicts with type variable '#name'."
   severity: ERROR
+  analyzerCode: CONFLICTING_TYPE_VARIABLE_AND_MEMBER
+  dart2jsCode: "*fatal*"
 
 ConflictsWithTypeVariableCause:
   template: "This is the type variable."
@@ -1464,6 +1666,8 @@ ConflictsWithTypeVariableCause:
 DeclaredMemberConflictsWithInheritedMember:
   template: "Can't declare a member that conflicts with an inherited one."
   severity: ERROR_LEGACY_WARNING
+  analyzerCode: DECLARED_MEMBER_CONFLICTS_WITH_INHERITED
+  dart2jsCode: "*fatal*"
   script:
     - >-
       class A {
@@ -1501,6 +1705,8 @@ DeclaredMemberConflictsWithInheritedMemberCause:
 InheritedMembersConflict:
   template: "Can't inherit members that conflict with each other."
   severity: ERROR_LEGACY_WARNING
+  analyzerCode: CONFLICTS_WITH_INHERITED_MEMBER
+  dart2jsCode: "*fatal*"
   script:
     - >-
       class A {
@@ -1541,6 +1747,8 @@ IllegalMixin:
 OverrideTypeVariablesMismatch:
   template: "Declared type variables of '#name' doesn't match those on overridden method '#name2'."
   severity: ERROR_LEGACY_WARNING
+  analyzerCode: INVALID_METHOD_OVERRIDE_TYPE_PARAMETERS
+  dart2jsCode: "*fatal*"
 
 OverriddenMethodCause:
   template: "This is the overriden method ('#name')."
@@ -1549,18 +1757,26 @@ OverriddenMethodCause:
 OverrideMismatchNamedParameter:
   template: "The method '#name' doesn't have the named parameter '#name2' of overriden method '#name3'."
   severity: ERROR_LEGACY_WARNING
+  analyzerCode: INVALID_OVERRIDE_NAMED
+  dart2jsCode: "*fatal*"
 
 OverrideFewerNamedArguments:
   template: "The method '#name' has fewer named arguments than those of overridden method '#name2'."
   severity: ERROR_LEGACY_WARNING
+  analyzerCode: INVALID_OVERRIDE_NAMED
+  dart2jsCode: "*fatal*"
 
 OverrideFewerPositionalArguments:
   template: "The method '#name' has fewer positional arguments than those of overridden method '#name2'."
   severity: ERROR_LEGACY_WARNING
+  analyzerCode: INVALID_OVERRIDE_POSITIONAL
+  dart2jsCode: "*fatal*"
 
 OverrideMoreRequiredArguments:
   template: "The method '#name' has more required arguments than those of overridden method '#name2'."
   severity: ERROR_LEGACY_WARNING
+  analyzerCode: INVALID_OVERRIDE_REQUIRED
+  dart2jsCode: "*fatal*"
 
 OverrideTypeMismatchParameter:
   template: "The parameter '#name' of the method '#name2' has type #type, which does not match the corresponding type in the overridden method (#type2)."
@@ -1574,15 +1790,16 @@ OverrideTypeMismatchReturnType:
   analyzerCode: INVALID_METHOD_OVERRIDE
   dart2jsCode: "*ignored*"
 
-IllegalMethodName:
-  template: "'#name' isn't a legal method name."
-  tip: "Did you mean '#name2'?"
-
 PartOfSelf:
   template: "A file can't be a part of itself."
+  analyzerCode: PART_OF_NON_PART
+  script:
+    main.dart: "part 'main.dart';"
 
 TypeVariableDuplicatedName:
   template: "A type variable can't have the same name as another."
+  analyzerCode: DUPLICATE_DEFINITION
+  dart2jsCode: "*fatal*"
 
 TypeVariableDuplicatedNameCause:
   template: "The other type variable named '#name'."
@@ -1590,6 +1807,8 @@ TypeVariableDuplicatedNameCause:
 
 TypeVariableSameNameAsEnclosing:
   template: "A type variable can't have the same name as its enclosing declaration."
+  analyzerCode: CONFLICTING_TYPE_VARIABLE_AND_CLASS
+  dart2jsCode: "*fatal*"
 
 ExpectedEnumBody:
   template: "Expected a enum body, but got '#lexeme'."
@@ -1645,9 +1864,13 @@ OperatorWithOptionalFormals:
 
 PlatformPrivateLibraryAccess:
   template: "Can't access platform private library."
+  analyzerCode: IMPORT_INTERNAL_LIBRARY
+  dart2jsCode: "*fatal*"
 
 TypedefNotFunction:
   template: "Can't create typedef from non-function type."
+  analyzerCode: INVALID_GENERIC_FUNCTION_TYPE
+  dart2jsCode: "*fatal*"
 
 LibraryDirectiveNotFirst:
   template: "The library directive must appear before all other directives."
@@ -1702,6 +1925,25 @@ PartOfTwice:
 
 PartTwice:
   template: "Can't use '#uri' as a part more than once."
+  analyzerCode: DUPLICATE_PART
+  script:
+    part.dart: "part of 'main.dart';"
+    main.dart: "part 'part.dart'; part 'part.dart';"
+
+PartOfTwoLibraries:
+  template: "A file can't be part of more than one library."
+  tip: "Try moving the shared declarations into the libraries, or into a new library."
+  severity: ERROR
+  analyzerCode: PART_OF_DIFFERENT_LIBRARY
+  dart2jsCode: "*fatal*"
+  script:
+    main.dart: "library lib; import 'lib.dart'; part 'part.dart';"
+    lib.dart: "library lib; part 'part.dart';"
+    part.dart: "part of lib;"
+
+PartOfTwoLibrariesContext:
+  template: "Used as a part in this library."
+  severity: CONTEXT
 
 FactoryTopLevelDeclaration:
   template: "Top-level declarations can't be declared to be 'factory'."
@@ -1755,12 +1997,18 @@ MissingTypedefParameters:
 
 MissingPartOf:
   template: "Can't use '#uri' as a part, because it has no 'part of' declaration."
+  analyzerCode: PART_OF_NON_PART
+  script:
+    part.dart: ""
+    main.dart: "part 'part.dart';"
 
 SupertypeIsFunction:
   template: "Can't use a function type as supertype."
 
 DeferredPrefixDuplicated:
   template: "Can't use the name '#name' for a deferred library, as the name is used elsewhere."
+  analyzerCode: SHARED_DEFERRED_PREFIX
+  dart2jsCode: "*fatal*"
 
 DeferredPrefixDuplicatedCause:
   template: "'#name' is used here."
@@ -1781,6 +2029,8 @@ DuplicatedDefinition:
 DuplicatedName:
   template: "'#name' is already declared in this scope."
   severity: ERROR
+  analyzerCode: DUPLICATE_DEFINITION
+  dart2jsCode: "*fatal*"
 
 DuplicatedNameCause:
   template: "Previous declaration of '#name'."
@@ -1796,10 +2046,14 @@ DuplicatedNamePreviouslyUsed:
 
 DuplicatedNamePreviouslyUsedCause:
   template: "Previous use of '#name'."
+  analyzerCode: REFERENCED_BEFORE_DECLARATION
   severity: CONTEXT
 
 DuplicatedParameterName:
   template: "Duplicated parameter name '#name'."
+  severity: ERROR
+  analyzerCode: DUPLICATE_DEFINITION
+  dart2jsCode: "*fatal*"
 
 DuplicatedParameterNameCause:
   template: "Other parameter named '#name'."
@@ -1810,6 +2064,8 @@ MemberWithSameNameAsClass:
 
 EnumConstantSameNameAsEnclosing:
   template: "Name of enum constant '#name' can't be the same as the enum's own name."
+  analyzerCode: ENUM_CONSTANT_WITH_ENUM_NAME
+  dart2jsCode: "*fatal*"
 
 MissingOperatorKeyword:
   template: "Operator declarations must be preceeded by the keyword 'operator'."
@@ -1831,33 +2087,48 @@ OperatorParameterMismatch0:
 
 OperatorParameterMismatch1:
   template: "Operator '#name' should have exactly one parameter."
+  analyzerCode: WRONG_NUMBER_OF_PARAMETERS_FOR_OPERATOR
+  dart2jsCode: "*fatal*"
 
 OperatorParameterMismatch2:
   template: "Operator '#name' should have exactly two parameters."
+  analyzerCode: WRONG_NUMBER_OF_PARAMETERS_FOR_OPERATOR
+  dart2jsCode: "*fatal*"
 
 OperatorMinusParameterMismatch:
   template: "Operator '#name' should have zero or one parameter."
   tip: >-
     With zero parameters, it has the syntactic form '-a', formally known as 'unary-'.
     With one parameter, it has the syntactic form 'a - b', formally known as '-'.
+  analyzerCode: WRONG_NUMBER_OF_PARAMETERS_FOR_OPERATOR_MINUS
+  dart2jsCode: "*fatal*"
 
 SupertypeIsIllegal:
   template: "The type '#name' can't be used as supertype."
+  severity: ERROR
+  analyzerCode: EXTENDS_NON_CLASS
+  dart2jsCode: "*fatal*"
 
 SupertypeIsTypeVariable:
   template: "The type variable '#name' can't be used as supertype."
+  severity: ERROR
+  analyzerCode: EXTENDS_NON_CLASS
+  dart2jsCode: "*fatal*"
 
 PartOfLibraryNameMismatch:
   template: "Using '#uri' as part of '#name' but its 'part of' declaration says '#name2'."
+  analyzerCode: PART_OF_DIFFERENT_LIBRARY
   severity: ERROR_LEGACY_WARNING
 
 PartOfUseUri:
   template: "Using '#uri' as part of '#uri2' but its 'part of' declaration says '#name'."
   tip: "Try changing the 'part of' declaration to use a relative file name."
+  analyzerCode: PART_OF_UNNAMED_LIBRARY
   severity: ERROR_LEGACY_WARNING
 
 PartOfUriMismatch:
   template: "Using '#uri' as part of '#uri2' but its 'part of' declaration says '#uri3'."
+  analyzerCode: PART_OF_DIFFERENT_LIBRARY
   severity: ERROR_LEGACY_WARNING
 
 MissingMain:
@@ -1883,9 +2154,19 @@ SdkSpecificationNotFound:
 
 ThisAccessInFieldInitializer:
   template: "Can't access 'this' in a field initializer to read '#name'."
+  analyzerCode: THIS_ACCESS_FROM_INITIALIZER
+  dart2jsCode: "*fatal*"
+
+ThisOrSuperAccessInFieldInitializer:
+  template: "Can't access '#string' in a field initializer."
+  analyzerCode: THIS_ACCESS_FROM_INITIALIZER
+  dart2jsCode: "*fatal*"
 
 ThisAsIdentifier:
   template: "Expected identifier, but got 'this'."
+  severity: ERROR
+  analyzerCode: INVALID_REFERENCE_TO_THIS
+  dart2jsCode: "*fatal*"
 
 SuperAsIdentifier:
   template: "Expected identifier, but got 'super'."
@@ -1893,6 +2174,8 @@ SuperAsIdentifier:
 SuperAsExpression:
   template: "Can't use 'super' as an expression."
   tip: "To delegate a constructor to a super constructor, put the super call as an initializer."
+  analyzerCode: SUPER_AS_EXPRESSION
+  dart2jsCode: "*fatal*"
 
 SwitchHasCaseAfterDefault:
   template: "The default case should be the last case in a switch statement."
@@ -1913,18 +2196,30 @@ SwitchHasMultipleDefaults:
 SwitchCaseFallThrough:
   template: "Switch case may fall through to the next case."
   severity: ERROR_LEGACY_WARNING
+  analyzerCode: CASE_BLOCK_NOT_TERMINATED
+  dart2jsCode: "*fatal*"
 
 FinalInstanceVariableAlreadyInitialized:
   template: "'#name' is a final instance variable that has already been initialized."
   severity: ERROR_LEGACY_WARNING
+  analyzerCode: FINAL_INITIALIZED_MULTIPLE_TIMES
+  dart2jsCode: "*fatal*"
 
 FinalInstanceVariableAlreadyInitializedCause:
   template: "'#name' was initialized here."
   severity: CONTEXT
 
+TypeVariableInConstExpression:
+  template: "Type variable '#name' can't be used as a constant expression '#type'."
+  severity: ERROR
+  analyzerCode: TYPE_PARAMETER_IN_CONST_EXPRESSION
+  dart2jsCode: "*fatal*"
+
 TypeVariableInStaticContext:
   template: "Type variables can't be used in static members."
   severity: ERROR_LEGACY_WARNING
+  analyzerCode: TYPE_PARAMETER_REFERENCED_BY_STATIC
+  dart2jsCode: "*fatal*"
 
 SuperclassMethodArgumentMismatch:
   template: "Superclass doesn't have a method named '#name' with matching arguments."
@@ -1932,10 +2227,12 @@ SuperclassMethodArgumentMismatch:
 
 SuperclassHasNoGetter:
   template: "Superclass has no getter named '#name'."
+  analyzerCode: UNDEFINED_SUPER_GETTER
   severity: ERROR_LEGACY_WARNING
 
 SuperclassHasNoSetter:
   template: "Superclass has no setter named '#name'."
+  analyzerCode: UNDEFINED_SUPER_SETTER
   severity: ERROR_LEGACY_WARNING
 
 SuperclassHasNoMethod:
@@ -1951,22 +2248,24 @@ SuperclassHasNoDefaultConstructor:
 
 ConstConstructorNonFinalField:
   template: "Constructor is marked 'const' so all fields must be final."
+  analyzerCode: CONST_CONSTRUCTOR_WITH_NON_FINAL_FIELD
+  dart2jsCode: "*fatal*"
 
 ConstConstructorNonFinalFieldCause:
   template: "Field isn't final, but constructor is 'const'."
   severity: CONTEXT
+
+ConstConstructorInSubclassOfMixinApplication:
+  template: "Can't extend a mixin application and be 'const'."
+  severity: ERROR
+  analyzerCode: CONST_CONSTRUCTOR_IN_SUBCLASS_OF_MIXIN_APPLICATION
+  dart2jsCode: "*fatal*"
 
 AccessError:
   template: "Access error: '#name'."
 
 ExpressionNotMetadata:
   template: "This can't be used as metadata; metadata should be a reference to a compile-time constant variable, or a call to a constant constructor."
-
-AnnotationOnEnumConstant:
-  template: "Enum constants can't have annotations."
-  tip: "Try removing the annotation."
-  analyzerCode: ANNOTATION_ON_ENUM_CONSTANT
-  dart2jsCode: "*fatal*"
 
 ExpectedAnInitializer:
   template: "Expected an initializer."
@@ -1991,8 +2290,15 @@ RedirectingConstructorWithBody:
   script:
     - "class C { C() : this.x() {} }"
 
+CannotAssignToParenthesizedExpression:
+  template: "Can't assign to a parenthesized expression."
+  analyzerCode: ASSIGNMENT_TO_PARENTHESIZED_EXPRESSION
+  dart2jsCode: "*fatal*"
+
 NotAnLvalue:
   template: "Can't assign to this."
+  analyzerCode: NOT_AN_LVALUE
+  dart2jsCode: "*fatal*"
 
 IllegalAssignmentToNonAssignable:
   template: "Illegal assignment to non-assignable expression."
@@ -2056,6 +2362,12 @@ ExternalFactoryRedirection:
   template: "A redirecting factory can't be external."
   tip: "Try removing the 'external' modifier."
   analyzerCode: EXTERNAL_CONSTRUCTOR_WITH_BODY
+  dart2jsCode: "*ignored*"
+
+ArgumentTypeNotAssignable:
+  template: "The argument type '#type' can't be assigned to the parameter type '#type2'."
+  tip: "Try changing the type of the parameter, or casting the argument to '#type2'."
+  analyzerCode: ARGUMENT_TYPE_NOT_ASSIGNABLE
   dart2jsCode: "*ignored*"
 
 InvalidAssignment:
@@ -2133,6 +2445,12 @@ InvalidCastTopLevelFunction:
   analyzerCode: INVALID_CAST_FUNCTION
   dart2jsCode: "*ignored*"
 
+InvalidUseOfNullAwareAccess:
+  template: "Cannot use '?.' here."
+  tip: "Try using '.'."
+  analyzerCode: INVALID_USE_OF_NULL_AWARE_ACCESS
+  dart2jsCode: "*fatal*"
+
 UndefinedGetter:
   template: "The getter '#name' isn't defined for the class '#type'."
   tip: "Try correcting the name to the name of an existing getter, or defining a getter or field named '#name'."
@@ -2171,34 +2489,40 @@ UndefinedMethod:
 
 SourceOutlineSummary:
   template: |
-    Built outlines for #count compilation units (#count2 bytes) in #string, that is,
-    #string2 bytes/ms, and
-    #string3 ms/compilation unit.
+    Built outlines for #count compilation units (#count2 bytes) in #num1%.3ms, that is,
+    #num2%12.3 bytes/ms, and
+    #num3%12.3 ms/compilation unit.
 
 SourceBodySummary:
   template: |
-    Built bodies for #count compilation units (#count2 bytes) in #string, that is,
-    #string2 bytes/ms, and
-    #string3 ms/compilation unit.
+    Built bodies for #count compilation units (#count2 bytes) in #num1%.3ms, that is,
+    #num2%12.3 bytes/ms, and
+    #num3%12.3 ms/compilation unit.
 
 DillOutlineSummary:
   template: |
-    Indexed #count libraries (#count2 bytes) in #string, that is,
-    #string2 bytes/ms, and
-    #string3 ms/libraries.
+    Indexed #count libraries (#count2 bytes) in #num1%.3ms, that is,
+    #num2%12.3 bytes/ms, and
+    #num3%12.3 ms/libraries.
 
 CantInferTypeDueToInconsistentOverrides:
   template: "Can't infer the type of '#string': overridden members must all have the same type."
   tip: "Specify the type explicitly."
+  severity: ERROR
+  analyzerCode: INVALID_METHOD_OVERRIDE
+  dart2jsCode: "*fatal*"
 
 CantInferTypeDueToCircularity:
   template: "Can't infer the type of '#string': circularity found during type inference."
   tip: "Specify the type explicitly."
+  analyzerCode: RECURSIVE_COMPILE_TIME_CONSTANT
   severity: ERROR
 
 AmbiguousSupertypes:
   template: "'#name' can't implement both '#type' and '#type2'"
   severity: ERROR
+  analyzerCode: AMBIGUOUS_SUPERTYPES
+  dart2jsCode: "*fatal*"
 
 CantUseSuperBoundedTypeForInstanceCreation:
   template: "Can't use a super-bounded type for instance creation. Got '#type'."
@@ -2206,16 +2530,204 @@ CantUseSuperBoundedTypeForInstanceCreation:
   severity: ERROR
 
 MixinInferenceNoMatchingClass:
-  template: |
-    Type parameters could not be inferred for the mixin '#name' because
-    '#name2' does not implement the mixin's supertype constraint '#type'.
+  template: "Type parameters could not be inferred for the mixin '#name' because '#name2' does not implement the mixin's supertype constraint '#type'."
   severity: ERROR
+  analyzerCode: MIXIN_INFERENCE_NO_POSSIBLE_SUBSTITUTION
+  dart2jsCode: "*fatal*"
 
 ImplicitCallOfNonMethod:
-  template: "Can't invoke the type '#type' because its declaration of `.call` is not a method."
-  tip: "Change .call to a method or explicitly invoke .call."
+  template: "Cannot invoke an instance of '#type' because it declares 'call' to be something other than a method."
+  tip: "Try changing 'call' to a method or explicitly invoke 'call'."
   severity: ERROR
+  analyzerCode: IMPLICIT_CALL_OF_NON_METHOD
+  dart2jsCode: "*fatal*"
 
 ExpectedOneExpression:
   template: "Expected one expression, but found additional input."
   severity: ERROR
+
+ForInLoopNotAssignable:
+  template: "Can't assign to this, so it can't be used in a for-in loop."
+  severity: ERROR
+  statement: "for (1 in []) {}"
+
+ForInLoopExactlyOneVariable:
+  template: "A for-in loop can't have more than one loop variable."
+  severity: ERROR
+  statement: "for (var x, y in []) {}"
+
+ForInLoopWithConstVariable:
+  template: "A for-in loop-variable can't be 'const'."
+  tip: "Try removing the 'const' modifier."
+  analyzerCode: FOR_IN_WITH_CONST_VARIABLE
+  dart2jsCode: "*fatal*"
+
+ForInLoopElementTypeNotAssignable:
+  template: "A value of type '#type' can't be assigned to a variable of type '#type2'."
+  tip: "Try changing the type of the variable."
+  analyzerCode: FOR_IN_OF_INVALID_ELEMENT_TYPE
+  dart2jsCode: "*fatal*"
+
+ForInLoopTypeNotIterable:
+  template: "The type '#type' used in the 'for' loop must implement '#type2'."
+  analyzerCode: FOR_IN_OF_INVALID_TYPE
+  dart2jsCode: "*fatal*"
+
+InitializingFormalTypeMismatch:
+  template: "The type of parameter '#name' (#type) is not a subtype of the corresponding field's type (#type2)."
+  tip: "Try changing the type of parameter '#name' to a subtype of #type2."
+  severity: ERROR_LEGACY_WARNING
+  analyzerCode: INVALID_PARAMETER_DECLARATION
+  dart2jsCode: "*fatal*"
+  script: >
+    class C {
+      int x;
+      C(num this.x);
+    }
+
+InitializingFormalTypeMismatchField:
+  template: "The field that corresponds to the parameter."
+  severity: CONTEXT
+
+UseOfDeprecatedIdentifier:
+  template: "'#name' is deprecated."
+  severity: IGNORED
+
+InitializeFromDillNotSelfContained:
+  template: "Tried to initialize from a previous compilation (#string), but the file was not self-contained. This might be a bug. The Dart team would greatly appreciate if you would take a moment to report this problem at http://dartbug.com/new."
+  severity: WARNING
+  frontendInternal: true
+  external: test/incremental_load_from_invalid_dill_test.dart
+
+InitializeFromDillUnknownProblem:
+  template: "Tried to initialize from a previous compilation (#string), but couldn't. Error message was '#string2'. This might be a bug. The Dart team would greatly appreciate if you would take a moment to report this problem at http://dartbug.com/new."
+  severity: WARNING
+  frontendInternal: true
+  external: test/incremental_load_from_invalid_dill_test.dart
+
+MissingExplicitTypeArguments:
+  template: "No type arguments provided, #count possible."
+  severity: IGNORED
+
+WebLiteralCannotBeRepresentedExactly:
+  template: "The integer literal #string can't be represented exactly in JavaScript."
+  tip: "Try changing the literal to something that can be represented in Javascript. In Javascript #string2 is the nearest value that can be represented exactly."
+  severity: ERROR
+  dart2jsCode: "*fatal*"
+
+BoundIssueViaRawTypeWithNonSimpleBounds:
+  template: "Generic type '#name' can't be used without type arguments in a type variable bound."
+  tip: "Try providing type arguments to '#name' here."
+  severity: ERROR
+  analyzerCode: SNOT_INSTANTIATED_BOUND
+  dart2jsCode: "*fatal*"
+  script: >
+    class Hest<X extends Hest<X>> {}
+    class Fisk<Y extends Hest> {}
+
+NonSimpleBoundViaVariable:
+  template: "Bound of this variable references variable '#name' from the same declaration."
+  severity: CONTEXT
+
+BoundIssueViaLoopNonSimplicity:
+  template: "Generic type '#name' can't be used without type arguments in the bounds of its own type variables."
+  tip: "Try providing type arguments to '#name' here."
+  severity: ERROR
+  analyzerCode: NOT_INSTANTIATED_BOUND
+  dart2jsCode: "*fatal*"
+  script: >
+    class Hest<X extends Hest> {}
+
+BoundIssueViaCycleNonSimplicity:
+  template: "Generic type '#name' can't be used without type arguments in the bounds of its own type variables. It is referenced indirectly through '#name2'."
+  tip: "Try providing type arguments to '#name2' here or to some other raw types in the bounds along the reference chain."
+  severity: ERROR
+  analyzerCode: NOT_INSTANTIATED_BOUND
+  dart2jsCode: "*fatal*"
+  script: >
+    class Hest<X extends Fisk> {}
+    class Fisk<Y extends Hest> {}
+
+NonSimpleBoundViaReference:
+  template: "Bound of this variable references raw type '#name'."
+  severity: CONTEXT
+
+CantUsePrefixAsExpression:
+  template: "A prefix can't be used as an expression."
+  severity: ERROR
+  analyzerCode: PREFIX_IDENTIFIER_NOT_FOLLOWED_BY_DOT
+  dart2jsCode: "*fatal*"
+  script: |
+    import "dart:core" as prefix;
+
+    main() {
+      for (prefix in []) {}
+    }
+
+CantUsePrefixWithNullAware:
+  template: "A prefix can't be used with null-aware operators."
+  tip: "It should be safe to remove the '?' as a prefix is never null."
+  severity: ERROR
+  analyzerCode: PREFIX_IDENTIFIER_NOT_FOLLOWED_BY_DOT
+  dart2jsCode: "*fatal*"
+  script: |
+    import "dart:core" as prefix;
+
+    main() {
+      prefix?.Object;
+    }
+
+CantUseDeferredPrefixAsConstant:
+  template: >
+    '#lexeme' can't be used in a constant expression because it's marked as
+    'deferred' which means it isn't available until loaded.
+  tip: >
+    Try moving the constant from the deferred library, or removing 'deferred'
+    from the import.
+  analyzerCode: CONST_DEFERRED_CLASS
+  dart2jsCode: "*fatal*"
+  severity: ERROR
+  script: |
+    import "dart:core" deferred as prefix;
+
+    main() {
+      const prefix.Object();
+    }
+
+CyclicRedirectingFactoryConstructors:
+  template: "Cyclic definition of factory '#name'."
+  analyzerCode: RECURSIVE_FACTORY_REDIRECT
+  dart2jsCode: "*fatal*"
+  severity: ERROR
+  script: |
+    class Foo {
+      factory Foo.foo() = Foo.bar;
+      factory Foo.bar() = Foo.foo;
+    }
+    main() { var foo = new Foo.foo(); }
+
+GenericFunctionTypeInBound:
+  template: "Type variables can't have generic function types in their bounds."
+  analyzerCode: GENERIC_FUNCTION_TYPE_CANNOT_BE_BOUND
+  dart2jsCode: "*fatal*"
+  severity: ERROR
+  script: |
+    class Hest<X extends Y Function<Y>(Y)> {}
+
+VoidExpression:
+  template: "This expression has type 'void' and can't be used."
+  severity: WARNING
+  analyzerCode: USE_OF_VOID_RESULT
+  dart2jsCode: "*fatal*"
+  statement: |
+    {
+      void x;
+      var y = x;
+    }
+
+ReturnFromVoidFunction:
+  template: "Can't return a value from a void function."
+  severity: WARNING
+  analyzerCode: RETURN_OF_INVALID_TYPE
+  dart2jsCode: "*fatal*"
+  declaration: "void foo() { return 1; }"

@@ -6,7 +6,29 @@ library fasta.kernel_library_builder;
 
 import 'dart:convert' show jsonEncode;
 
-import 'package:kernel/ast.dart';
+import 'package:kernel/ast.dart'
+    show
+        Arguments,
+        Class,
+        ConstructorInvocation,
+        DartType,
+        Expression,
+        Field,
+        Library,
+        LibraryDependency,
+        LibraryPart,
+        Member,
+        Name,
+        Procedure,
+        ProcedureKind,
+        StaticInvocation,
+        StringLiteral,
+        TreeNode,
+        Typedef,
+        VariableDeclaration,
+        VoidType;
+
+import 'package:kernel/clone.dart' show CloneVisitor;
 
 import '../../scanner/token.dart' show Token;
 
@@ -14,8 +36,10 @@ import '../export.dart' show Export;
 
 import '../fasta_codes.dart'
     show
+        LocatedMessage,
         Message,
         messageConflictsWithTypeVariableCause,
+        messageGenericFunctionTypeInBound,
         messageTypeVariableDuplicatedName,
         messageTypeVariableSameNameAsEnclosing,
         noLength,
@@ -39,7 +63,7 @@ import '../loader.dart' show Loader;
 import '../modifier.dart'
     show abstractMask, namedMixinApplicationMask, staticMask;
 
-import '../problems.dart' show unhandled;
+import '../problems.dart' show unexpected, unhandled;
 
 import '../source/source_class_builder.dart' show SourceClassBuilder;
 
@@ -49,10 +73,11 @@ import '../source/source_library_builder.dart'
 import 'kernel_builder.dart'
     show
         AccessErrorBuilder,
-        Builder,
         BuiltinTypeBuilder,
         ClassBuilder,
         ConstructorReferenceBuilder,
+        Declaration,
+        DynamicTypeBuilder,
         FormalParameterBuilder,
         InvalidTypeBuilder,
         KernelClassBuilder,
@@ -79,6 +104,7 @@ import 'kernel_builder.dart'
         QualifiedName,
         Scope,
         TypeBuilder,
+        TypeDeclarationBuilder,
         TypeVariableBuilder,
         UnresolvedType,
         VoidTypeBuilder,
@@ -87,7 +113,12 @@ import 'kernel_builder.dart'
 
 import 'metadata_collector.dart';
 
-import 'type_algorithms.dart' show calculateBounds;
+import 'type_algorithms.dart'
+    show
+        calculateBounds,
+        findGenericFunctionTypes,
+        getNonSimplicityIssuesForDeclaration,
+        getNonSimplicityIssuesForTypeVariables;
 
 class KernelLibraryBuilder
     extends SourceLibraryBuilder<KernelTypeBuilder, Library> {
@@ -99,6 +130,12 @@ class KernelLibraryBuilder
 
   final List<KernelTypeVariableBuilder> boundlessTypeVariables =
       <KernelTypeVariableBuilder>[];
+
+  // A list of alternating forwarders and the procedures they were generated
+  // for.  Note that it may not include a forwarder-origin pair in cases when
+  // the former does not need to be updated after the body of the latter was
+  // built.
+  final List<Procedure> forwardersOrigins = <Procedure>[];
 
   /// Exports that can't be serialized.
   ///
@@ -125,6 +162,16 @@ class KernelLibraryBuilder
 
   Uri get uri => library.importUri;
 
+  void becomeCoreLibrary(dynamicType) {
+    if (scope.local["dynamic"] == null) {
+      addBuilder(
+          "dynamic",
+          new DynamicTypeBuilder<KernelTypeBuilder, DartType>(
+              dynamicType, this, -1),
+          -1);
+    }
+  }
+
   KernelTypeBuilder addNamedType(
       Object name, List<KernelTypeBuilder> arguments, int charOffset) {
     return addType(new KernelNamedTypeBuilder(name, arguments), charOffset);
@@ -138,7 +185,8 @@ class KernelLibraryBuilder
 
   KernelTypeBuilder addVoidType(int charOffset) {
     return addNamedType("void", null, charOffset)
-      ..bind(new VoidTypeBuilder(const VoidType(), this, charOffset));
+      ..bind(new VoidTypeBuilder<KernelTypeBuilder, VoidType>(
+          const VoidType(), this, charOffset));
   }
 
   void addClass(
@@ -149,6 +197,7 @@ class KernelLibraryBuilder
       List<TypeVariableBuilder> typeVariables,
       KernelTypeBuilder supertype,
       List<KernelTypeBuilder> interfaces,
+      int startCharOffset,
       int charOffset,
       int charEndOffset,
       int supertypeOffset) {
@@ -180,6 +229,7 @@ class KernelLibraryBuilder
         constructorScope,
         this,
         new List<ConstructorReferenceBuilder>.from(constructorReferences),
+        startCharOffset,
         charOffset,
         charEndOffset);
     loader.target.metadataCollector
@@ -221,7 +271,7 @@ class KernelLibraryBuilder
   }
 
   Map<String, TypeVariableBuilder> checkTypeVariables(
-      List<TypeVariableBuilder> typeVariables, Builder owner) {
+      List<TypeVariableBuilder> typeVariables, Declaration owner) {
     if (typeVariables?.isEmpty ?? true) return null;
     Map<String, TypeVariableBuilder> typeVariablesByName =
         <String, TypeVariableBuilder>{};
@@ -410,6 +460,10 @@ class KernelLibraryBuilder
             }
           }
         }
+        final int startCharOffset =
+            (isNamedMixinApplication ? metadata : null) == null
+                ? charOffset
+                : metadata.first.charOffset;
         SourceClassBuilder application = new SourceClassBuilder(
             isNamedMixinApplication ? metadata : null,
             isNamedMixinApplication
@@ -426,6 +480,7 @@ class KernelLibraryBuilder
                 isModifiable: false),
             this,
             <ConstructorReferenceBuilder>[],
+            startCharOffset,
             charOffset,
             TreeNode.noOffset,
             null,
@@ -437,8 +492,7 @@ class KernelLibraryBuilder
         // TODO(ahe, kmillikin): Should always be true?
         // pkg/analyzer/test/src/summary/resynthesize_kernel_test.dart can't
         // handle that :(
-        application.cls.isSyntheticMixinImplementation =
-            !isNamedMixinApplication;
+        application.cls.isAnonymousMixin = !isNamedMixinApplication;
         addBuilder(fullname, application, charOffset);
         supertype =
             addNamedType(fullname, applicationTypeArguments, charOffset);
@@ -468,7 +522,7 @@ class KernelLibraryBuilder
         typeVariables: typeVariables,
         modifiers: modifiers,
         interfaces: interfaces);
-    checkTypeVariables(typeVariables, supertype.builder);
+    checkTypeVariables(typeVariables, supertype.declaration);
   }
 
   @override
@@ -497,6 +551,7 @@ class KernelLibraryBuilder
       String constructorName,
       List<TypeVariableBuilder> typeVariables,
       List<FormalParameterBuilder> formals,
+      int startCharOffset,
       int charOffset,
       int charOpenParenOffset,
       int charEndOffset,
@@ -510,6 +565,7 @@ class KernelLibraryBuilder
         typeVariables,
         formals,
         this,
+        startCharOffset,
         charOffset,
         charOpenParenOffset,
         charEndOffset,
@@ -533,6 +589,7 @@ class KernelLibraryBuilder
       List<TypeVariableBuilder> typeVariables,
       List<FormalParameterBuilder> formals,
       ProcedureKind kind,
+      int startCharOffset,
       int charOffset,
       int charOpenParenOffset,
       int charEndOffset,
@@ -548,6 +605,7 @@ class KernelLibraryBuilder
         formals,
         kind,
         this,
+        startCharOffset,
         charOffset,
         charOpenParenOffset,
         charEndOffset,
@@ -565,9 +623,10 @@ class KernelLibraryBuilder
       String documentationComment,
       List<MetadataBuilder> metadata,
       int modifiers,
-      ConstructorReferenceBuilder constructorNameReference,
+      Object name,
       List<FormalParameterBuilder> formals,
       ConstructorReferenceBuilder redirectionTarget,
+      int startCharOffset,
       int charOffset,
       int charOpenParenOffset,
       int charEndOffset,
@@ -577,19 +636,17 @@ class KernelLibraryBuilder
     // Nested declaration began in `OutlineBuilder.beginFactoryMethod`.
     DeclarationBuilder<KernelTypeBuilder> factoryDeclaration =
         endNestedDeclaration("#factory_method");
-    Object name = constructorNameReference.name;
 
     // Prepare the simple procedure name.
     String procedureName;
     String constructorName =
-        computeAndValidateConstructorName(name, charOffset);
+        computeAndValidateConstructorName(name, charOffset, isFactory: true);
     if (constructorName != null) {
       procedureName = constructorName;
     } else {
       procedureName = name;
     }
 
-    assert(constructorNameReference.suffix == null);
     KernelProcedureBuilder procedure;
     if (redirectionTarget != null) {
       procedure = new KernelRedirectingFactoryBuilder(
@@ -602,6 +659,7 @@ class KernelLibraryBuilder
               factoryDeclaration),
           formals,
           this,
+          startCharOffset,
           charOffset,
           charOpenParenOffset,
           charEndOffset,
@@ -619,6 +677,7 @@ class KernelLibraryBuilder
           formals,
           ProcedureKind.Factory,
           this,
+          startCharOffset,
           charOffset,
           charOpenParenOffset,
           charEndOffset,
@@ -716,34 +775,34 @@ class KernelLibraryBuilder
   }
 
   @override
-  void buildBuilder(Builder builder, LibraryBuilder coreLibrary) {
+  void buildBuilder(Declaration declaration, LibraryBuilder coreLibrary) {
     Class cls;
     Member member;
     Typedef typedef;
-    if (builder is SourceClassBuilder) {
-      cls = builder.build(this, coreLibrary);
-    } else if (builder is KernelFieldBuilder) {
-      member = builder.build(this)..isStatic = true;
-    } else if (builder is KernelProcedureBuilder) {
-      member = builder.build(this)..isStatic = true;
-    } else if (builder is KernelFunctionTypeAliasBuilder) {
-      typedef = builder.build(this);
-    } else if (builder is KernelEnumBuilder) {
-      cls = builder.build(this, coreLibrary);
-    } else if (builder is PrefixBuilder) {
+    if (declaration is SourceClassBuilder) {
+      cls = declaration.build(this, coreLibrary);
+    } else if (declaration is KernelFieldBuilder) {
+      member = declaration.build(this)..isStatic = true;
+    } else if (declaration is KernelProcedureBuilder) {
+      member = declaration.build(this)..isStatic = true;
+    } else if (declaration is KernelFunctionTypeAliasBuilder) {
+      typedef = declaration.build(this);
+    } else if (declaration is KernelEnumBuilder) {
+      cls = declaration.build(this, coreLibrary);
+    } else if (declaration is PrefixBuilder) {
       // Ignored. Kernel doesn't represent prefixes.
       return;
-    } else if (builder is BuiltinTypeBuilder) {
+    } else if (declaration is BuiltinTypeBuilder) {
       // Nothing needed.
       return;
     } else {
-      unhandled("${builder.runtimeType}", "buildBuilder", builder.charOffset,
-          builder.fileUri);
+      unhandled("${declaration.runtimeType}", "buildBuilder",
+          declaration.charOffset, declaration.fileUri);
       return;
     }
-    if (builder.isPatch) {
-      // The kernel node of a patch is shared with the origin builder. We have
-      // two builders: the origin, and the patch, but only one kernel node
+    if (declaration.isPatch) {
+      // The kernel node of a patch is shared with the origin declaration. We
+      // have two builders: the origin, and the patch, but only one kernel node
       // (which corresponds to the final output). Consequently, the node
       // shouldn't be added to its apparent kernel parent as this would create
       // a duplicate entry in the parent's list of children/members.
@@ -759,7 +818,7 @@ class KernelLibraryBuilder
   }
 
   void addNativeDependency(Uri nativeImportUri) {
-    Builder constructor = loader.getNativeAnnotation();
+    Declaration constructor = loader.getNativeAnnotation();
     Arguments arguments =
         new Arguments(<Expression>[new StringLiteral("$nativeImportUri")]);
     Expression annotation;
@@ -854,16 +913,16 @@ class KernelLibraryBuilder
   }
 
   @override
-  Builder buildAmbiguousBuilder(
-      String name, Builder builder, Builder other, int charOffset,
+  Declaration computeAmbiguousDeclaration(
+      String name, Declaration declaration, Declaration other, int charOffset,
       {bool isExport: false, bool isImport: false}) {
     // TODO(ahe): Can I move this to Scope or Prefix?
-    if (builder == other) return builder;
-    if (builder is InvalidTypeBuilder) return builder;
+    if (declaration == other) return declaration;
+    if (declaration is InvalidTypeBuilder) return declaration;
     if (other is InvalidTypeBuilder) return other;
-    if (builder is AccessErrorBuilder) {
-      AccessErrorBuilder error = builder;
-      builder = error.builder;
+    if (declaration is AccessErrorBuilder) {
+      AccessErrorBuilder error = declaration;
+      declaration = error.builder;
     }
     if (other is AccessErrorBuilder) {
       AccessErrorBuilder error = other;
@@ -871,28 +930,28 @@ class KernelLibraryBuilder
     }
     bool isLocal = false;
     bool isLoadLibrary = false;
-    Builder preferred;
+    Declaration preferred;
     Uri uri;
     Uri otherUri;
     Uri preferredUri;
     Uri hiddenUri;
-    if (scope.local[name] == builder) {
+    if (scope.local[name] == declaration) {
       isLocal = true;
-      preferred = builder;
-      hiddenUri = other.computeLibraryUri();
+      preferred = declaration;
+      hiddenUri = computeLibraryUri(other);
     } else {
-      uri = builder.computeLibraryUri();
-      otherUri = other.computeLibraryUri();
-      if (builder is LoadLibraryBuilder) {
+      uri = computeLibraryUri(declaration);
+      otherUri = computeLibraryUri(other);
+      if (declaration is LoadLibraryBuilder) {
         isLoadLibrary = true;
-        preferred = builder;
+        preferred = declaration;
         preferredUri = otherUri;
       } else if (other is LoadLibraryBuilder) {
         isLoadLibrary = true;
         preferred = other;
         preferredUri = uri;
       } else if (otherUri?.scheme == "dart" && uri?.scheme != "dart") {
-        preferred = builder;
+        preferred = declaration;
         preferredUri = uri;
         hiddenUri = otherUri;
       } else if (uri?.scheme == "dart" && otherUri?.scheme != "dart") {
@@ -919,14 +978,15 @@ class KernelLibraryBuilder
       }
       return preferred;
     }
-    if (builder.next == null && other.next == null) {
-      if (isImport && builder is PrefixBuilder && other is PrefixBuilder) {
+    if (declaration.next == null && other.next == null) {
+      if (isImport && declaration is PrefixBuilder && other is PrefixBuilder) {
         // Handles the case where the same prefix is used for different
         // imports.
-        return builder
+        return declaration
           ..exportScope.merge(other.exportScope,
-              (String name, Builder existing, Builder member) {
-            return buildAmbiguousBuilder(name, existing, member, charOffset,
+              (String name, Declaration existing, Declaration member) {
+            return computeAmbiguousDeclaration(
+                name, existing, member, charOffset,
                 isExport: isExport, isImport: isImport);
           });
       }
@@ -954,6 +1014,55 @@ class KernelLibraryBuilder
     return total;
   }
 
+  int finishForwarders() {
+    int count = 0;
+    CloneVisitor cloner = new CloneVisitor();
+    for (int i = 0; i < forwardersOrigins.length; i += 2) {
+      Procedure forwarder = forwardersOrigins[i];
+      Procedure origin = forwardersOrigins[i + 1];
+
+      int positionalCount = origin.function.positionalParameters.length;
+      if (forwarder.function.positionalParameters.length != positionalCount) {
+        return unexpected(
+            "$positionalCount",
+            "${forwarder.function.positionalParameters.length}",
+            origin.fileOffset,
+            origin.fileUri);
+      }
+      for (int j = 0; j < positionalCount; ++j) {
+        VariableDeclaration forwarderParameter =
+            forwarder.function.positionalParameters[j];
+        VariableDeclaration originParameter =
+            origin.function.positionalParameters[j];
+        if (originParameter.initializer != null) {
+          forwarderParameter.initializer =
+              cloner.clone(originParameter.initializer);
+          forwarderParameter.initializer.parent = forwarderParameter;
+        }
+      }
+
+      Map<String, VariableDeclaration> originNamedMap =
+          <String, VariableDeclaration>{};
+      for (VariableDeclaration originNamed in origin.function.namedParameters) {
+        originNamedMap[originNamed.name] = originNamed;
+      }
+      for (VariableDeclaration forwarderNamed
+          in forwarder.function.namedParameters) {
+        VariableDeclaration originNamed = originNamedMap[forwarderNamed.name];
+        if (originNamed == null) {
+          return unhandled(
+              "null", forwarder.name.name, origin.fileOffset, origin.fileUri);
+        }
+        forwarderNamed.initializer = cloner.clone(originNamed.initializer);
+        forwarderNamed.initializer.parent = forwarderNamed;
+      }
+
+      ++count;
+    }
+    forwardersOrigins.clear();
+    return count;
+  }
+
   void addNativeMethod(KernelFunctionBuilder method) {
     nativeMethods.add(method);
   }
@@ -976,7 +1085,8 @@ class KernelLibraryBuilder
       boundlessTypeVariables.add(newVariable);
     }
     for (TypeBuilder newType in newTypes) {
-      declaration.addType(new UnresolvedType(newType, -1, null));
+      declaration
+          .addType(new UnresolvedType<KernelTypeBuilder>(newType, -1, null));
     }
     return copy;
   }
@@ -990,47 +1100,99 @@ class KernelLibraryBuilder
     return count;
   }
 
-  int instantiateToBound(TypeBuilder dynamicType, TypeBuilder bottomType,
+  int computeDefaultTypes(TypeBuilder dynamicType, TypeBuilder bottomType,
       ClassBuilder objectClass) {
     int count = 0;
 
+    int computeDefaultTypesForVariables(
+        List<TypeVariableBuilder<TypeBuilder, Object>> variables,
+        bool strongMode) {
+      if (variables == null) return 0;
+
+      bool haveErroneousBounds = false;
+      if (strongMode) {
+        for (int i = 0; i < variables.length; ++i) {
+          TypeVariableBuilder<TypeBuilder, Object> variable = variables[i];
+          List<TypeBuilder> genericFunctionTypes = <TypeBuilder>[];
+          findGenericFunctionTypes(variable.bound,
+              result: genericFunctionTypes);
+          if (genericFunctionTypes.length > 0) {
+            haveErroneousBounds = true;
+            addProblem(messageGenericFunctionTypeInBound, variable.charOffset,
+                variable.name.length, variable.fileUri);
+          }
+        }
+
+        if (!haveErroneousBounds) {
+          List<KernelTypeBuilder> calculatedBounds =
+              calculateBounds(variables, dynamicType, bottomType, objectClass);
+          for (int i = 0; i < variables.length; ++i) {
+            variables[i].defaultType = calculatedBounds[i];
+          }
+        }
+      }
+
+      if (!strongMode || haveErroneousBounds) {
+        // In Dart 1, put `dynamic` everywhere.
+        for (int i = 0; i < variables.length; ++i) {
+          variables[i].defaultType = dynamicType;
+        }
+      }
+
+      return variables.length;
+    }
+
+    void reportIssues(List<Object> issues) {
+      for (int i = 0; i < issues.length; i += 3) {
+        TypeDeclarationBuilder<TypeBuilder, Object> declaration = issues[i];
+        Message message = issues[i + 1];
+        List<LocatedMessage> context = issues[i + 2];
+
+        addProblem(message, declaration.charOffset, declaration.name.length,
+            declaration.fileUri,
+            context: context);
+      }
+    }
+
+    bool strongMode = loader.target.strongMode;
     for (var declaration in libraryDeclaration.members.values) {
       if (declaration is KernelClassBuilder) {
-        if (declaration.typeVariables != null) {
-          List<KernelTypeBuilder> calculatedBounds;
-          if (loader.target.strongMode) {
-            calculatedBounds = calculateBounds(declaration.typeVariables,
-                dynamicType, bottomType, objectClass);
-          } else {
-            calculatedBounds =
-                new List<KernelTypeBuilder>(declaration.typeVariables.length);
-            for (int i = 0; i < calculatedBounds.length; ++i) {
-              calculatedBounds[i] = dynamicType;
-            }
-          }
-          for (int i = 0; i < calculatedBounds.length; ++i) {
-            declaration.typeVariables[i].defaultType = calculatedBounds[i];
-          }
-          count += calculatedBounds.length;
+        {
+          List<Object> issues = strongMode
+              ? getNonSimplicityIssuesForDeclaration(declaration)
+              : const <Object>[];
+          reportIssues(issues);
+          // In case of issues, use non-strong mode for error recovery.
+          count += computeDefaultTypesForVariables(
+              declaration.typeVariables, strongMode && issues.length == 0);
         }
+        declaration.forEach((String name, Declaration member) {
+          if (member is KernelProcedureBuilder) {
+            List<Object> issues = strongMode
+                ? getNonSimplicityIssuesForTypeVariables(member.typeVariables)
+                : const <Object>[];
+            reportIssues(issues);
+            // In case of issues, use non-strong mode for error recovery.
+            count += computeDefaultTypesForVariables(
+                member.typeVariables, strongMode && issues.length == 0);
+          }
+        });
       } else if (declaration is KernelFunctionTypeAliasBuilder) {
-        if (declaration.typeVariables != null) {
-          List<KernelTypeBuilder> calculatedBounds;
-          if (loader.target.strongMode) {
-            calculatedBounds = calculateBounds(declaration.typeVariables,
-                dynamicType, bottomType, objectClass);
-          } else {
-            calculatedBounds =
-                new List<KernelTypeBuilder>(declaration.typeVariables.length);
-            for (int i = 0; i < calculatedBounds.length; ++i) {
-              calculatedBounds[i] = dynamicType;
-            }
-          }
-          for (int i = 0; i < calculatedBounds.length; ++i) {
-            declaration.typeVariables[i].defaultType = calculatedBounds[i];
-          }
-          count += calculatedBounds.length;
-        }
+        List<Object> issues = strongMode
+            ? getNonSimplicityIssuesForDeclaration(declaration)
+            : const <Object>[];
+        reportIssues(issues);
+        // In case of issues, use non-strong mode for error recovery.
+        count += computeDefaultTypesForVariables(
+            declaration.typeVariables, strongMode && issues.length == 0);
+      } else if (declaration is KernelFunctionBuilder) {
+        List<Object> issues = strongMode
+            ? getNonSimplicityIssuesForTypeVariables(declaration.typeVariables)
+            : const <Object>[];
+        reportIssues(issues);
+        // In case of issues, use non-strong mode for error recovery.
+        count += computeDefaultTypesForVariables(
+            declaration.typeVariables, strongMode && issues.length == 0);
       }
     }
 
@@ -1047,7 +1209,7 @@ class KernelLibraryBuilder
   @override
   void addImportsToScope() {
     super.addImportsToScope();
-    exportScope.forEach((String name, Builder member) {
+    exportScope.forEach((String name, Declaration member) {
       if (member.parent != this) {
         switch (name) {
           case "dynamic":
@@ -1071,9 +1233,9 @@ class KernelLibraryBuilder
   @override
   void applyPatches() {
     if (!isPatch) return;
-    origin.forEach((String name, Builder member) {
+    origin.forEach((String name, Declaration member) {
       bool isSetter = member.isSetter;
-      Builder patch = isSetter ? scope.setters[name] : scope.local[name];
+      Declaration patch = isSetter ? scope.setters[name] : scope.local[name];
       if (patch != null) {
         // [patch] has the same name as a [member] in [origin] library, so it
         // must be a patch to [member].
@@ -1090,7 +1252,7 @@ class KernelLibraryBuilder
         }
       }
     });
-    forEach((String name, Builder member) {
+    forEach((String name, Declaration member) {
       // We need to inject all non-patch members into the origin library. This
       // should only apply to private members.
       if (member.isPatch) {
@@ -1106,13 +1268,13 @@ class KernelLibraryBuilder
   int finishPatchMethods() {
     if (!isPatch) return 0;
     int count = 0;
-    forEach((String name, Builder member) {
+    forEach((String name, Declaration member) {
       count += member.finishPatch();
     });
     return count;
   }
 
-  void injectMemberFromPatch(String name, Builder member) {
+  void injectMemberFromPatch(String name, Declaration member) {
     if (member.isSetter) {
       assert(scope.setters[name] == null);
       scopeBuilder.addSetter(name, member);
@@ -1122,7 +1284,7 @@ class KernelLibraryBuilder
     }
   }
 
-  void exportMemberFromPatch(String name, Builder member) {
+  void exportMemberFromPatch(String name, Declaration member) {
     if (uri.scheme != "dart" || !uri.path.startsWith("_")) {
       addCompileTimeError(templatePatchInjectionFailed.withArguments(name, uri),
           member.charOffset, noLength, member.fileUri);
@@ -1137,4 +1299,14 @@ class KernelLibraryBuilder
         (!member.isSetter && scope.local[name] == null));
     addToExportScope(name, member);
   }
+}
+
+Uri computeLibraryUri(Declaration declaration) {
+  Declaration current = declaration;
+  do {
+    if (current is LibraryBuilder) return current.uri;
+    current = current.parent;
+  } while (current != null);
+  return unhandled("no library parent", "${declaration.runtimeType}",
+      declaration.charOffset, declaration.fileUri);
 }

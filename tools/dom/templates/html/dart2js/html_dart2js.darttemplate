@@ -5,7 +5,6 @@
 // DO NOT EDIT - unless you are editing documentation as per:
 // https://code.google.com/p/dart/wiki/ContributingHTMLDocumentation
 // Auto-generated dart:html library.
-
 /**
  * HTML elements and other resources for web-based applications that need to
  * interact with the browser and the DOM (Document Object Model).
@@ -16,19 +15,7 @@
  * check out the [Element] class, the base class for many of the HTML
  * DOM types.
  *
- * ## Other resources
- *
- * * If you've never written a web app before, try our
- * tutorials&mdash;[A Game of Darts](http://dartlang.org/docs/tutorials).
- *
- * * To see some web-based Dart apps in action and to play with the code,
- * download
- * [Dart Editor](http://www.dartlang.org/#get-started)
- * and run its built-in examples.
- *
- * * For even more examples, see
- * [Dart HTML5 Samples](https://github.com/dart-lang/dart-html5-samples)
- * on Github.
+ * For information on writing web apps with Dart, see https://webdev.dartlang.org.
  *
  * {@category Web}
  */
@@ -121,6 +108,34 @@ Window get window => JS('Window', 'window');
 HtmlDocument get document =>
     JS('returns:HtmlDocument;depends:none;effects:none;gvn:true', 'document');
 
+// Supoort to convert JS Promise to a Dart Future.
+Future<T> promiseToFuture<T>(jsPromise) {
+  var completer = new Completer<T>();
+
+  var thenSuccessCode = (promiseValue) => completer.complete(promiseValue);
+  var thenErrorCode = (promiseError) => completer.completeError(promiseError);
+
+  JS("", "#.then(#, #)", jsPromise, convertDartClosureToJS(thenSuccessCode, 1),
+      convertDartClosureToJS(thenErrorCode, 1));
+
+  return completer.future;
+}
+
+// Supoort to convert JS Promise to a Dart Future<Map<String, dynamic>>.  Each property of the JS
+// object is added to the Map as a key of type String with a value of type dynamic.
+Future<Map<String, dynamic>> promiseToFutureAsMap(jsPromise) {
+  var completer = new Completer<Map<String, dynamic>>();
+
+  var thenSuccessCode = (promiseValue) =>
+      completer.complete(convertNativeToDart_Dictionary(promiseValue));
+  var thenErrorCode = (promiseError) => completer.completeError(promiseError);
+
+  JS("", "#.then(#, #)", jsPromise, convertDartClosureToJS(thenSuccessCode, 1),
+      convertDartClosureToJS(thenErrorCode, 1));
+
+  return completer.future;
+}
+
 // Workaround for tags like <cite> that lack their own Element subclass --
 // Dart issue 1990.
 @Native("HTMLElement")
@@ -135,7 +150,6 @@ class HtmlElement extends Element implements NoncedElement {
   HtmlElement.created() : super.created();
 
   // From NoncedElement
-  @DomName('HTMLElement.nonce')
   String nonce;
 }
 
@@ -143,8 +157,5 @@ class HtmlElement extends Element implements NoncedElement {
  * Emitted for any setlike IDL entry needs a callback signature.
  * Today there is only one.
  */
-@DomName('FontFaceSetForEachCallback')
-@Experimental() // untriaged
 typedef void FontFaceSetForEachCallback(
     FontFace fontFace, FontFace fontFaceAgain, FontFaceSet set);
-

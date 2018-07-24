@@ -448,7 +448,6 @@ class BackendImpacts {
     return _typeVariableExpression ??= new BackendImpact(staticUses: [
       _commonElements.setRuntimeTypeInfo,
       _commonElements.getRuntimeTypeInfo,
-      _commonElements.runtimeTypeToString,
       _commonElements.createRuntimeType
     ], otherImpacts: [
       listValues,
@@ -720,9 +719,12 @@ class BackendImpacts {
   BackendImpact _noSuchMethodSupport;
 
   BackendImpact get noSuchMethodSupport {
-    return _noSuchMethodSupport ??= new BackendImpact(
-        staticUses: [_commonElements.createInvocationMirror],
-        dynamicUses: [Selectors.noSuchMethod_]);
+    return _noSuchMethodSupport ??= new BackendImpact(staticUses: [
+      _commonElements.createInvocationMirror,
+      _commonElements.createUnmangledInvocationMirror
+    ], dynamicUses: [
+      Selectors.noSuchMethod_
+    ]);
   }
 
   BackendImpact _loadLibrary;
@@ -766,17 +768,15 @@ class BackendImpacts {
     ]);
   }
 
-  BackendImpact _genericInstantiation;
+  Map<int, BackendImpact> _genericInstantiation = <int, BackendImpact>{};
 
-  BackendImpact get genericInstantiation =>
-      _genericInstantiation ??= new BackendImpact(staticUses: [
-        _commonElements.instantiate1,
-        _commonElements.instantiate2,
-        _commonElements.instantiate3,
+  BackendImpact getGenericInstantiation(int typeArgumentCount) =>
+      _genericInstantiation[typeArgumentCount] ??=
+          new BackendImpact(staticUses: [
+        _commonElements.getInstantiateFunction(typeArgumentCount),
         _commonElements.instantiatedGenericFunctionType,
+        _commonElements.extractFunctionTypeObjectFromInternal,
       ], instantiatedClasses: [
-        _commonElements.instantiation1Class,
-        _commonElements.instantiation2Class,
-        _commonElements.instantiation3Class,
+        _commonElements.getInstantiationClass(typeArgumentCount),
       ]);
 }

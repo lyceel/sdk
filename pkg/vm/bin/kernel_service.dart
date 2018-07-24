@@ -21,10 +21,12 @@
 library runtime.tools.kernel_service;
 
 import 'dart:async' show Future, ZoneSpecification, runZoned;
+import 'dart:convert' show utf8;
 import 'dart:io' show Platform, stderr hide FileSystemEntity;
 import 'dart:isolate';
 import 'dart:typed_data' show Uint8List;
 
+import 'package:build_integration/file_system/multi_root.dart';
 import 'package:front_end/src/api_prototype/file_system.dart';
 import 'package:front_end/src/api_prototype/front_end.dart';
 import 'package:front_end/src/api_prototype/memory_file_system.dart';
@@ -37,8 +39,9 @@ import 'package:kernel/kernel.dart' show Component, Procedure;
 import 'package:kernel/target/targets.dart' show TargetFlags;
 import 'package:kernel/target/vm.dart' show VmTarget;
 import 'package:vm/incremental_compiler.dart';
+import 'package:vm/http_filesystem.dart';
 
-const bool verbose = const bool.fromEnvironment('DFE_VERBOSE');
+final bool verbose = new bool.fromEnvironment('DFE_VERBOSE');
 const String platformKernelFile = 'virtual_platform_kernel.dill';
 
 // NOTE: Any changes to these tags need to be reflected in kernel_isolate.cc
@@ -51,11 +54,15 @@ const String platformKernelFile = 'virtual_platform_kernel.dill';
 //   3 - APP JIT snapshot training run for kernel_service.
 //   4 - Compile an individual expression in some context (for debugging
 //       purposes).
+//   5 - List program dependencies (for creating depfiles)
+//   6 - Isolate shutdown that potentially should result in compiler cleanup.
 const int kCompileTag = 0;
 const int kUpdateSourcesTag = 1;
 const int kAcceptTag = 2;
 const int kTrainTag = 3;
 const int kCompileExpressionTag = 4;
+const int kListDependenciesTag = 5;
+const int kNotifyIsolateShutdownTag = 6;
 
 bool allowDartInternalImport = false;
 
@@ -106,14 +113,12 @@ abstract class Compiler {
             printMessage = false; // errors are printed by VM
             errors.add(message.formatted);
             break;
-          case Severity.nit:
-            printMessage = false;
-            break;
           case Severity.warning:
             printMessage = !suppressWarnings;
             break;
           case Severity.errorLegacyWarning:
           case Severity.context:
+          case Severity.ignored:
             throw "Unexpected severity: $severity";
         }
         if (printMessage) {
@@ -178,12 +183,14 @@ class SingleShotCompilerWrapper extends Compiler {
   Future<Component> compileInternal(Uri script) async {
     return requireMain
         ? kernelForProgram(script, options)
-        : kernelForComponent([script], options..chaseDependencies = true);
+        : kernelForComponent([script], options);
   }
 }
 
+// TODO(33428): This state is leaked on isolate shutdown.
 final Map<int, IncrementalCompilerWrapper> isolateCompilers =
     new Map<int, IncrementalCompilerWrapper>();
+final Map<int, List<Uri>> isolateDependencies = new Map<int, List<Uri>>();
 
 IncrementalCompilerWrapper lookupIncrementalCompiler(int isolateId) {
   return isolateCompilers[isolateId];
@@ -194,15 +201,16 @@ Future<Compiler> lookupOrBuildNewIncrementalCompiler(int isolateId,
     {bool strongMode: false,
     bool suppressWarnings: false,
     bool syncAsync: false,
-    String packageConfig: null}) async {
+    String packageConfig: null,
+    String multirootFilepaths,
+    String multirootScheme}) async {
   IncrementalCompilerWrapper compiler = lookupIncrementalCompiler(isolateId);
   if (compiler != null) {
     updateSources(compiler, sourceFiles);
     invalidateSources(compiler, sourceFiles);
   } else {
-    final FileSystem fileSystem = sourceFiles.isEmpty && platformKernel == null
-        ? StandardFileSystem.instance
-        : _buildFileSystem(sourceFiles, platformKernel);
+    FileSystem fileSystem = _buildFileSystem(
+        sourceFiles, platformKernel, multirootFilepaths, multirootScheme);
 
     // TODO(aam): IncrementalCompilerWrapper instance created below have to be
     // destroyed when corresponding isolate is shut down. To achieve that kernel
@@ -262,7 +270,8 @@ Future _processExpressionCompilationRequest(request) async {
 
   if (compiler == null) {
     port.send(new CompilationResult.errors(
-        ["No incremental compiler available for this isolate."]).toResponse());
+            ["No incremental compiler available for this isolate."], null)
+        .toResponse());
     return;
   }
 
@@ -274,14 +283,15 @@ Future _processExpressionCompilationRequest(request) async {
         expression, definitions, typeDefinitions, libraryUri, klass, isStatic);
 
     if (procedure == null) {
-      port.send(new CompilationResult.errors(["Invalid scope."]).toResponse());
+      port.send(
+          new CompilationResult.errors(["Invalid scope."], null).toResponse());
       return;
     }
 
     if (compiler.errors.isNotEmpty) {
       // TODO(sigmund): the compiler prints errors to the console, so we
       // shouldn't print those messages again here.
-      result = new CompilationResult.errors(compiler.errors);
+      result = new CompilationResult.errors(compiler.errors, null);
     } else {
       result = new CompilationResult.ok(serializeProcedure(procedure));
     }
@@ -292,6 +302,62 @@ Future _processExpressionCompilationRequest(request) async {
   port.send(result.toResponse());
 }
 
+void _recordDependencies(
+    int isolateId, Component component, String packageConfig) {
+  final dependencies = isolateDependencies[isolateId] ??= new List<Uri>();
+
+  if (component != null) {
+    for (var lib in component.libraries) {
+      if (lib.importUri.scheme == "dart") continue;
+
+      dependencies.add(lib.fileUri);
+      for (var part in lib.parts) {
+        final fileUri = lib.fileUri.resolve(part.partUri);
+        if (fileUri.scheme != "" && fileUri.scheme != "file") {
+          // E.g. part 'package:foo/foo.dart';
+          // Maybe the front end should resolve this?
+          continue;
+        }
+        dependencies.add(fileUri);
+      }
+    }
+  }
+
+  if (packageConfig != null) {
+    dependencies.add(Uri.parse(packageConfig));
+  }
+}
+
+String _escapeDependency(Uri uri) {
+  return uri.toFilePath().replaceAll("\\", "\\\\").replaceAll(" ", "\\ ");
+}
+
+List<int> _serializeDependencies(List<Uri> uris) {
+  return utf8.encode(uris.map(_escapeDependency).join(" "));
+}
+
+Future _processListDependenciesRequest(request) async {
+  final SendPort port = request[1];
+  final int isolateId = request[6];
+
+  final List<Uri> dependencies = isolateDependencies[isolateId] ?? <Uri>[];
+
+  CompilationResult result;
+  try {
+    result = new CompilationResult.ok(_serializeDependencies(dependencies));
+  } catch (error, stack) {
+    result = new CompilationResult.crash(error, stack);
+  }
+
+  port.send(result.toResponse());
+}
+
+Future _processIsolateShutdownNotification(request) async {
+  final int isolateId = request[1];
+  isolateCompilers.remove(isolateId);
+  isolateDependencies.remove(isolateId);
+}
+
 Future _processLoadRequest(request) async {
   if (verbose) print("DFE: request: $request");
 
@@ -299,6 +365,16 @@ Future _processLoadRequest(request) async {
 
   if (tag == kCompileExpressionTag) {
     await _processExpressionCompilationRequest(request);
+    return;
+  }
+
+  if (tag == kListDependenciesTag) {
+    await _processListDependenciesRequest(request);
+    return;
+  }
+
+  if (tag == kNotifyIsolateShutdownTag) {
+    await _processIsolateShutdownNotification(request);
     return;
   }
 
@@ -313,6 +389,8 @@ Future _processLoadRequest(request) async {
   final bool suppressWarnings = request[8];
   final bool syncAsync = request[9];
   final String packageConfig = request[10];
+  final String multirootFilepaths = request[11];
+  final String multirootScheme = request[12];
 
   Uri platformKernelPath = null;
   List<int> platformKernel = null;
@@ -365,13 +443,14 @@ Future _processLoadRequest(request) async {
         strongMode: strong,
         suppressWarnings: suppressWarnings,
         syncAsync: syncAsync,
-        packageConfig: packageConfig);
+        packageConfig: packageConfig,
+        multirootFilepaths: multirootFilepaths,
+        multirootScheme: multirootScheme);
   } else {
-    final FileSystem fileSystem = sourceFiles.isEmpty && platformKernel == null
-        ? StandardFileSystem.instance
-        : _buildFileSystem(sourceFiles, platformKernel);
+    FileSystem fileSystem = _buildFileSystem(
+        sourceFiles, platformKernel, multirootFilepaths, multirootScheme);
     compiler = new SingleShotCompilerWrapper(fileSystem, platformKernelPath,
-        requireMain: sourceFiles.isEmpty,
+        requireMain: false,
         strongMode: strong,
         suppressWarnings: suppressWarnings,
         syncAsync: syncAsync,
@@ -387,8 +466,15 @@ Future _processLoadRequest(request) async {
     Component component = await compiler.compile(script);
 
     if (compiler.errors.isNotEmpty) {
-      result = new CompilationResult.errors(compiler.errors);
+      if (component != null) {
+        result = new CompilationResult.errors(compiler.errors,
+            serializeComponent(component, filter: (lib) => !lib.isExternal));
+      } else {
+        result = new CompilationResult.errors(compiler.errors, null);
+      }
     } else {
+      // Record dependencies only if compilation was error free.
+      _recordDependencies(isolateId, component, packageConfig);
       // We serialize the component excluding vm_platform.dill because the VM has
       // these sources built-in. Everything loaded as a summary in
       // [kernelForProgram] is marked `external`, so we can use that bit to
@@ -415,33 +501,49 @@ Future _processLoadRequest(request) async {
       inputFileUri,
       inputFileUri,
       null,
-      new CompilationResult.errors(<String>["unknown tag"]).payload
+      new CompilationResult.errors(<String>["unknown tag"], null).payload
     ]);
   }
 }
 
-/// Creates a file system containing the files specified in [namedSources] and
+/// Creates a file system containing the files specified in [sourceFiles] and
 /// that delegates to the underlying file system for any other file request.
-/// The [namedSources] list interleaves file name string and
+/// The [sourceFiles] list interleaves file name string and
 /// raw file content Uint8List.
 ///
 /// The result can be used instead of StandardFileSystem.instance by the
 /// frontend.
-FileSystem _buildFileSystem(List namedSources, List<int> platformKernel) {
-  MemoryFileSystem fileSystem = new MemoryFileSystem(Uri.parse('file:///'));
-  if (namedSources != null) {
-    for (int i = 0; i < namedSources.length ~/ 2; i++) {
-      fileSystem
-          .entityForUri(Uri.parse(namedSources[i * 2]))
-          .writeAsBytesSync(namedSources[i * 2 + 1]);
+FileSystem _buildFileSystem(List sourceFiles, List<int> platformKernel,
+    String multirootFilepaths, String multirootScheme) {
+  FileSystem fileSystem = new HttpAwareFileSystem(StandardFileSystem.instance);
+
+  if (!sourceFiles.isEmpty || platformKernel != null) {
+    MemoryFileSystem memoryFileSystem =
+        new MemoryFileSystem(Uri.parse('file:///'));
+    if (sourceFiles != null) {
+      for (int i = 0; i < sourceFiles.length ~/ 2; i++) {
+        memoryFileSystem
+            .entityForUri(Uri.parse(sourceFiles[i * 2]))
+            .writeAsBytesSync(sourceFiles[i * 2 + 1]);
+      }
     }
+    if (platformKernel != null) {
+      memoryFileSystem
+          .entityForUri(Uri.parse(platformKernelFile))
+          .writeAsBytesSync(platformKernel);
+    }
+    fileSystem = new HybridFileSystem(memoryFileSystem, fileSystem);
   }
-  if (platformKernel != null) {
-    fileSystem
-        .entityForUri(Uri.parse(platformKernelFile))
-        .writeAsBytesSync(platformKernel);
+
+  if (multirootFilepaths != null) {
+    List<Uri> list = multirootFilepaths
+        .split(',')
+        .map((String s) => Uri.base.resolveUri(new Uri.file(s)))
+        .toList();
+    fileSystem = new MultiRootFileSystem(
+        multirootScheme ?? "org-dartlang-root", list, fileSystem);
   }
-  return new HybridFileSystem(fileSystem);
+  return fileSystem;
 }
 
 train(String scriptUri, String platformKernelPath) {
@@ -473,6 +575,8 @@ train(String scriptUri, String platformKernelPath) {
     false /* suppress warnings */,
     false /* synchronous async */,
     null /* package_config */,
+    null /* multirootFilepaths */,
+    null /* multirootScheme */,
   ];
   _processLoadRequest(request);
 }
@@ -509,7 +613,8 @@ abstract class CompilationResult {
 
   factory CompilationResult.ok(Uint8List bytes) = _CompilationOk;
 
-  factory CompilationResult.errors(List<String> errors) = _CompilationError;
+  factory CompilationResult.errors(List<String> errors, Uint8List bytes) =
+      _CompilationError;
 
   factory CompilationResult.crash(Object exception, StackTrace stack) =
       _CompilationCrash;
@@ -545,9 +650,10 @@ abstract class _CompilationFail extends CompilationResult {
 }
 
 class _CompilationError extends _CompilationFail {
+  final Uint8List bytes;
   final List<String> errors;
 
-  _CompilationError(this.errors);
+  _CompilationError(this.errors, this.bytes);
 
   @override
   Status get status => Status.error;
@@ -556,6 +662,8 @@ class _CompilationError extends _CompilationFail {
   String get errorString => errors.take(10).join('\n');
 
   String toString() => "_CompilationError(${errorString})";
+
+  List toResponse() => [status.index, payload, bytes];
 }
 
 class _CompilationCrash extends _CompilationFail {

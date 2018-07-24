@@ -13,9 +13,9 @@ import '../js/js.dart' show js;
 import '../js_emitter/code_emitter_task.dart';
 import '../options.dart';
 import '../universe/world_builder.dart';
+import 'allocator_analysis.dart' show JAllocatorAnalysis;
 import 'constant_system_javascript.dart';
 import 'js_backend.dart';
-import 'namer.dart';
 import 'runtime_types.dart';
 
 typedef jsAst.Expression _ConstantReferenceGenerator(ConstantValue constant);
@@ -40,7 +40,7 @@ class ConstantEmitter implements ConstantValueVisitor<jsAst.Expression, Null> {
   final CodegenWorldBuilder _worldBuilder;
   final RuntimeTypesNeed _rtiNeed;
   final RuntimeTypesEncoder _rtiEncoder;
-  final Namer _namer;
+  final JAllocatorAnalysis _allocatorAnalysis;
   final CodeEmitterTask _task;
   final _ConstantReferenceGenerator constantReferenceGenerator;
   final _ConstantListGenerator makeConstantList;
@@ -56,7 +56,7 @@ class ConstantEmitter implements ConstantValueVisitor<jsAst.Expression, Null> {
       this._worldBuilder,
       this._rtiNeed,
       this._rtiEncoder,
-      this._namer,
+      this._allocatorAnalysis,
       this._task,
       this.constantReferenceGenerator,
       this.makeConstantList);
@@ -120,7 +120,7 @@ class ConstantEmitter implements ConstantValueVisitor<jsAst.Expression, Null> {
 
   @override
   jsAst.Expression visitInt(IntConstantValue constant, [_]) {
-    int value = constant.intValue;
+    BigInt value = constant.intValue;
     // Since we are in JavaScript we can shorten long integers to their shorter
     // exponential representation, for example: "1e4" is shorter than "10000".
     //
@@ -131,9 +131,9 @@ class ConstantEmitter implements ConstantValueVisitor<jsAst.Expression, Null> {
     String representation = value.toString();
     String alternative = null;
     int cutoff = _options.enableMinification ? 10000 : 1e10.toInt();
-    if (value.abs() >= cutoff) {
-      alternative =
-          _shortenExponentialRepresentation(value.toStringAsExponential());
+    if (value.abs() >= new BigInt.from(cutoff)) {
+      alternative = _shortenExponentialRepresentation(
+          value.toDouble().toStringAsExponential());
     }
     if (alternative != null && alternative.length < representation.length) {
       representation = alternative;
@@ -277,19 +277,21 @@ class ConstantEmitter implements ConstantValueVisitor<jsAst.Expression, Null> {
 
   @override
   jsAst.Expression visitType(TypeConstantValue constant, [_]) {
-    DartType type = constant.representedType;
-    jsAst.Name typeName;
-    Entity element;
-    if (type is InterfaceType) {
-      element = type.element;
-    } else if (type is TypedefType) {
-      element = type.element;
-    } else {
-      assert(type is DynamicType);
+    DartType type = constant.representedType.unaliased;
+
+    jsAst.Expression unexpected(TypeVariableType _variable) {
+      TypeVariableType variable = _variable;
+      throw failedAt(
+          NO_LOCATION_SPANNABLE,
+          "Unexpected type variable '${variable}'"
+          " in constant '${constant.toDartText()}'");
     }
-    typeName = _namer.runtimeTypeName(element);
-    return new jsAst.Call(getHelperProperty(_commonElements.createRuntimeType),
-        [js.quoteName(typeName)]);
+
+    jsAst.Expression rti =
+        _rtiEncoder.getTypeRepresentation(_emitter, type, unexpected);
+
+    return new jsAst.Call(
+        getHelperProperty(_commonElements.createRuntimeType), [rti]);
   }
 
   @override
@@ -325,7 +327,9 @@ class ConstantEmitter implements ConstantValueVisitor<jsAst.Expression, Null> {
         _emitter.constructorAccess(constant.type.element);
     List<jsAst.Expression> fields = <jsAst.Expression>[];
     _worldBuilder.forEachInstanceField(element, (_, FieldEntity field) {
-      fields.add(constantReferenceGenerator(constant.fields[field]));
+      if (!_allocatorAnalysis.isInitializedInAllocator(field)) {
+        fields.add(constantReferenceGenerator(constant.fields[field]));
+      }
     });
     if (_rtiNeed.classNeedsTypeArguments(constant.type.element)) {
       fields.add(_reifiedTypeArguments(constant, constant.type.typeArguments));
@@ -336,24 +340,8 @@ class ConstantEmitter implements ConstantValueVisitor<jsAst.Expression, Null> {
   @override
   jsAst.Expression visitInstantiation(InstantiationConstantValue constant,
       [_]) {
-    // TODO(johnniwinther,sra): Support arbitrary type argument count.
-    ClassEntity cls;
-    switch (constant.typeArguments.length) {
-      case 1:
-        cls = _commonElements.instantiation1Class;
-        break;
-      case 2:
-        cls = _commonElements.instantiation2Class;
-        break;
-      case 3:
-        cls = _commonElements.instantiation3Class;
-        break;
-      default:
-        failedAt(
-            NO_LOCATION_SPANNABLE,
-            "Unsupported instantiation argument count: "
-            "${constant.typeArguments.length}");
-    }
+    ClassEntity cls =
+        _commonElements.getInstantiationClass(constant.typeArguments.length);
     List<jsAst.Expression> fields = <jsAst.Expression>[
       constantReferenceGenerator(constant.function),
       _reifiedTypeArguments(constant, constant.typeArguments)

@@ -65,6 +65,11 @@ class EditDomainHandler extends AbstractRequestHandler {
   SearchEngine searchEngine;
 
   /**
+   * The workspace for rename refactorings.
+   */
+  RefactoringWorkspace refactoringWorkspace;
+
+  /**
    * The object used to manage uncompleted refactorings.
    */
   _RefactoringManager refactoringManager;
@@ -74,6 +79,8 @@ class EditDomainHandler extends AbstractRequestHandler {
    */
   EditDomainHandler(AnalysisServer server) : super(server) {
     searchEngine = server.searchEngine;
+    refactoringWorkspace =
+        new RefactoringWorkspace(server.driverMap.values, searchEngine);
     _newRefactoringManager();
   }
 
@@ -141,6 +148,8 @@ class EditDomainHandler extends AbstractRequestHandler {
   }
 
   Future getAssists(Request request) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     EditGetAssistsParams params = new EditGetAssistsParams.fromRequest(request);
     String file = params.file;
     int offset = params.offset;
@@ -203,6 +212,8 @@ class EditDomainHandler extends AbstractRequestHandler {
   }
 
   Future getFixes(Request request) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     EditGetFixesParams params = new EditGetFixesParams.fromRequest(request);
     String file = params.file;
     int offset = params.offset;
@@ -250,6 +261,8 @@ class EditDomainHandler extends AbstractRequestHandler {
   }
 
   Future getPostfixCompletion(Request request) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     server.options.analytics?.sendEvent('edit', 'getPostfixCompletion');
 
     var params = new EditGetPostfixCompletionParams.fromRequest(request);
@@ -286,6 +299,8 @@ class EditDomainHandler extends AbstractRequestHandler {
   }
 
   Future getStatementCompletion(Request request) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     var params = new EditGetStatementCompletionParams.fromRequest(request);
     SourceChange change;
 
@@ -366,6 +381,8 @@ class EditDomainHandler extends AbstractRequestHandler {
    * Implement the `edit.importElements` request.
    */
   Future<Null> importElements(Request request) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     EditImportElementsParams params =
         new EditImportElementsParams.fromRequest(request);
     //
@@ -399,6 +416,8 @@ class EditDomainHandler extends AbstractRequestHandler {
   }
 
   Future isPostfixCompletionApplicable(Request request) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     var params = new EditGetPostfixCompletionParams.fromRequest(request);
     bool value = false;
 
@@ -429,6 +448,8 @@ class EditDomainHandler extends AbstractRequestHandler {
   }
 
   Future listPostfixCompletionTemplates(Request request) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     var templates = DartPostfixCompletion.ALL_TEMPLATES
         .map((pfc) =>
             new PostfixTemplateDescriptor(pfc.name, pfc.key, pfc.example))
@@ -440,6 +461,8 @@ class EditDomainHandler extends AbstractRequestHandler {
   }
 
   Future<Null> organizeDirectives(Request request) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     server.options.analytics?.sendEvent('edit', 'organizeDirectives');
 
     var params = new EditOrganizeDirectivesParams.fromRequest(request);
@@ -475,6 +498,8 @@ class EditDomainHandler extends AbstractRequestHandler {
   }
 
   Future<Null> sortMembers(Request request) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     var params = new EditSortMembersParams.fromRequest(request);
     // prepare file
     String file = params.file;
@@ -513,18 +538,26 @@ class EditDomainHandler extends AbstractRequestHandler {
    */
   Future<List<AnalysisErrorFixes>> _computeServerErrorFixes(
       AnalysisDriver driver, String file, int offset) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     List<AnalysisErrorFixes> errorFixesList = <AnalysisErrorFixes>[];
     AnalysisResult result = await server.getAnalysisResult(file);
     if (result != null) {
       CompilationUnit unit = result.unit;
       LineInfo lineInfo = result.lineInfo;
       int requestLine = lineInfo.getLocation(offset).lineNumber;
+      List<engine.AnalysisError> errorsCopy = new List.from(result.errors);
       for (engine.AnalysisError error in result.errors) {
         int errorLine = lineInfo.getLocation(error.offset).lineNumber;
         if (errorLine == requestLine) {
           AstProvider astProvider = new AstProviderForDriver(driver);
           DartFixContext context = new _DartFixContextImpl(
-              server.resourceProvider, result.driver, astProvider, unit, error);
+              server.resourceProvider,
+              result.driver,
+              astProvider,
+              unit,
+              error,
+              errorsCopy);
           List<Fix> fixes =
               await new DefaultFixContributor().internalComputeFixes(context);
           if (fixes.isNotEmpty) {
@@ -549,6 +582,8 @@ class EditDomainHandler extends AbstractRequestHandler {
   }
 
   Future _getAvailableRefactoringsImpl(Request request) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     // prepare parameters
     var params = new EditGetAvailableRefactoringsParams.fromRequest(request);
     String file = params.file;
@@ -556,22 +591,30 @@ class EditDomainHandler extends AbstractRequestHandler {
     int length = params.length;
     // add refactoring kinds
     List<RefactoringKind> kinds = <RefactoringKind>[];
-    // Try EXTRACT_WIDGETS.
+    // Check nodes.
     {
-      var unit = await server.getResolvedCompilationUnit(file);
-      var analysisSession = server.getAnalysisDriver(file)?.currentSession;
-      if (unit != null && analysisSession != null) {
-        var refactoring = new ExtractWidgetRefactoring(
-            searchEngine, analysisSession, unit, offset);
-        if (refactoring.isAvailable()) {
+      var analysisResult = await server.getAnalysisResult(file);
+      if (analysisResult != null) {
+        // TODO(scheglov) Update other refactorings to use ResolveResult.
+        var unit = analysisResult.unit;
+        // Try EXTRACT_LOCAL_VARIABLE.
+        if (new ExtractLocalRefactoring(analysisResult, offset, length)
+            .isAvailable()) {
+          kinds.add(RefactoringKind.EXTRACT_LOCAL_VARIABLE);
+        }
+        // Try EXTRACT_METHOD.
+        if (new ExtractMethodRefactoring(
+                searchEngine, server.getAstProvider(file), unit, offset, length)
+            .isAvailable()) {
+          kinds.add(RefactoringKind.EXTRACT_METHOD);
+        }
+        // Try EXTRACT_WIDGETS.
+        if (new ExtractWidgetRefactoring(
+                searchEngine, analysisResult.session, unit, offset, length)
+            .isAvailable()) {
           kinds.add(RefactoringKind.EXTRACT_WIDGET);
         }
       }
-    }
-    // try EXTRACT_*
-    if (length != 0) {
-      kinds.add(RefactoringKind.EXTRACT_LOCAL_VARIABLE);
-      kinds.add(RefactoringKind.EXTRACT_METHOD);
     }
     // check elements
     {
@@ -589,7 +632,7 @@ class EditDomainHandler extends AbstractRequestHandler {
         // try RENAME
         {
           RenameRefactoring renameRefactoring = new RenameRefactoring(
-              searchEngine, server.getAstProvider(file), element);
+              refactoringWorkspace, server.getAstProvider(file), element);
           if (renameRefactoring != null) {
             kinds.add(RefactoringKind.RENAME);
           }
@@ -614,7 +657,7 @@ class EditDomainHandler extends AbstractRequestHandler {
    * Initializes [refactoringManager] with a new instance.
    */
   void _newRefactoringManager() {
-    refactoringManager = new _RefactoringManager(server, searchEngine);
+    refactoringManager = new _RefactoringManager(server, refactoringWorkspace);
   }
 
   static int _getNumberOfScanParseErrors(List<engine.AnalysisError> errors) {
@@ -672,8 +715,11 @@ class _DartFixContextImpl implements DartFixContext {
   @override
   final engine.AnalysisError error;
 
+  @override
+  final List<engine.AnalysisError> errors;
+
   _DartFixContextImpl(this.resourceProvider, this.analysisDriver,
-      this.astProvider, this.unit, this.error);
+      this.astProvider, this.unit, this.error, this.errors);
 
   @override
   GetTopLevelDeclarations get getTopLevelDeclarations =>
@@ -695,6 +741,7 @@ class _RefactoringManager {
       const <RefactoringProblem>[];
 
   final AnalysisServer server;
+  final RefactoringWorkspace refactoringWorkspace;
   final SearchEngine searchEngine;
   StreamSubscription subscriptionToReset;
 
@@ -711,7 +758,8 @@ class _RefactoringManager {
   Request request;
   EditGetRefactoringResult result;
 
-  _RefactoringManager(this.server, this.searchEngine) {
+  _RefactoringManager(this.server, this.refactoringWorkspace)
+      : searchEngine = refactoringWorkspace.searchEngine {
     _reset();
   }
 
@@ -734,6 +782,7 @@ class _RefactoringManager {
         refactoring is ExtractMethodRefactoring ||
         refactoring is ExtractWidgetRefactoring ||
         refactoring is InlineMethodRefactoring ||
+        refactoring is MoveFileRefactoring ||
         refactoring is RenameRefactoring;
   }
 
@@ -762,6 +811,8 @@ class _RefactoringManager {
     }
 
     runZoned(() async {
+      // TODO(brianwilkerson) Determine whether this await is necessary.
+      await null;
       await _init(params.kind, params.file, params.offset, params.length);
       if (initStatus.hasFatalError) {
         feedback = null;
@@ -852,6 +903,8 @@ class _RefactoringManager {
    */
   Future _init(
       RefactoringKind kind, String file, int offset, int length) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     // check if we can continue with the existing Refactoring instance
     if (this.kind == kind &&
         this.file == file &&
@@ -889,9 +942,10 @@ class _RefactoringManager {
       }
     }
     if (kind == RefactoringKind.EXTRACT_LOCAL_VARIABLE) {
-      CompilationUnit unit = await server.getResolvedCompilationUnit(file);
-      if (unit != null) {
-        refactoring = new ExtractLocalRefactoring(unit, offset, length);
+      var analysisResult = await server.getAnalysisResult(file);
+      if (analysisResult != null) {
+        refactoring =
+            new ExtractLocalRefactoring(analysisResult, offset, length);
         feedback = new ExtractLocalVariableFeedback(
             <String>[], <int>[], <int>[],
             coveringExpressionOffsets: <int>[],
@@ -912,7 +966,7 @@ class _RefactoringManager {
       if (unit != null) {
         var analysisSession = server.getAnalysisDriver(file).currentSession;
         refactoring = new ExtractWidgetRefactoring(
-            searchEngine, analysisSession, unit, offset);
+            searchEngine, analysisSession, unit, offset, length);
         feedback = new ExtractWidgetFeedback();
       }
     }
@@ -978,7 +1032,7 @@ class _RefactoringManager {
 
         // do create the refactoring
         refactoring = new RenameRefactoring(
-            searchEngine, server.getAstProvider(file), element);
+            refactoringWorkspace, server.getAstProvider(file), element);
         feedback = new RenameFeedback(
             feedbackOffset, feedbackLength, 'kind', 'oldName');
       }
@@ -1105,6 +1159,12 @@ class _RefactoringManager {
       InlineMethodOptions inlineOptions = params.options;
       inlineRefactoring.deleteSource = inlineOptions.deleteSource;
       inlineRefactoring.inlineAll = inlineOptions.inlineAll;
+      return new RefactoringStatus();
+    }
+    if (refactoring is MoveFileRefactoring) {
+      MoveFileRefactoring moveRefactoring = this.refactoring;
+      MoveFileOptions moveOptions = params.options;
+      moveRefactoring.newFile = moveOptions.newFile;
       return new RefactoringStatus();
     }
     if (refactoring is RenameRefactoring) {

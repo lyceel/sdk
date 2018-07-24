@@ -20,17 +20,17 @@ void main() {
       return elementEnvironment.lookupLibrary(Uri.parse(name));
     }
 
-    var outputUnitForEntity =
-        compiler.backend.outputUnitData.outputUnitForEntity;
+    var outputUnitForMember =
+        compiler.backend.outputUnitData.outputUnitForMember;
 
     dynamic lib = lookupLibrary("memory:lib.dart");
     var a = elementEnvironment.lookupLibraryMember(lib, "a");
     var b = elementEnvironment.lookupLibraryMember(lib, "b");
     var c = elementEnvironment.lookupLibraryMember(lib, "c");
     var d = elementEnvironment.lookupLibraryMember(lib, "d");
-    Expect.equals(outputUnitForEntity(a), outputUnitForEntity(b));
-    Expect.equals(outputUnitForEntity(a), outputUnitForEntity(c));
-    Expect.equals(outputUnitForEntity(a), outputUnitForEntity(d));
+    Expect.equals(outputUnitForMember(a), outputUnitForMember(b));
+    Expect.equals(outputUnitForMember(a), outputUnitForMember(c));
+    Expect.equals(outputUnitForMember(a), outputUnitForMember(d));
   }
 
   asyncTest(() async {
@@ -41,7 +41,7 @@ void main() {
 
 // Make sure that the implicit references to supers are found by the deferred
 // loading dependency mechanism.
-const Map MEMORY_SOURCE_FILES = const {
+const Map<String, String> MEMORY_SOURCE_FILES = const {
   "main.dart": """
 import "lib.dart" deferred as lib;
 

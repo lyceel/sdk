@@ -7,12 +7,14 @@ import 'dart:convert' show json;
 import 'dart:io';
 
 import 'package:args/args.dart';
+import 'package:build_integration/file_system/multi_root.dart';
 import 'package:front_end/src/api_prototype/standard_file_system.dart';
 import 'package:front_end/src/api_unstable/ddc.dart' as fe;
-import 'package:front_end/src/multi_root_file_system.dart';
 import 'package:kernel/kernel.dart';
+import 'package:kernel/text/ast_to_text.dart' as kernel show Printer;
+import 'package:kernel/binary/ast_to_binary.dart' as kernel show BinaryPrinter;
 import 'package:path/path.dart' as path;
-import 'package:source_maps/source_maps.dart';
+import 'package:source_maps/source_maps.dart' show SourceMapBuilder;
 
 import '../compiler/js_names.dart' as JS;
 import '../compiler/module_builder.dart';
@@ -65,7 +67,7 @@ Uri stringToUri(String s, {bool windows}) {
   Uri result = Uri.base.resolve(s);
   if (windows && result.scheme.length == 1) {
     // Assume c: or similar --- interpret as file path.
-    return new Uri.file(s, windows: true);
+    return Uri.file(s, windows: true);
   }
   return result;
 }
@@ -98,24 +100,46 @@ Uri stringToCustomUri(String s, List<Uri> roots, String scheme) {
 
 class CompilerResult {
   final fe.InitializedCompilerState compilerState;
-  final bool result;
+  final bool success;
 
-  CompilerResult(this.compilerState, this.result);
+  CompilerResult(this.compilerState, this.success);
 
-  CompilerResult.noState(this.result) : compilerState = null;
+  CompilerResult.noState(this.success) : compilerState = null;
 }
 
 Future<CompilerResult> _compile(List<String> args,
     {fe.InitializedCompilerState compilerState}) async {
   // TODO(jmesserly): refactor options to share code with dartdevc CLI.
-  var argParser = new ArgParser(allowTrailingOptions: true)
+  var argParser = ArgParser(allowTrailingOptions: true)
     ..addFlag('help',
         abbr: 'h', help: 'Display this message.', negatable: false)
     ..addOption('out', abbr: 'o', help: 'Output file (required).')
     ..addOption('packages', help: 'The package spec file to use.')
+    ..addFlag('summarize',
+        help: 'emit API summary in a .dill file', defaultsTo: true)
+    // TODO(jmesserly): should default to `false` and be hidden.
+    // For now this is very helpful in debugging the compiler.
+    ..addFlag('summarize-text',
+        help: 'emit API summary in a .js.txt file', defaultsTo: true)
     // TODO(jmesserly): add verbose help to show hidden options
     ..addOption('dart-sdk-summary',
         help: 'The path to the Dart SDK summary file.', hide: true)
+    // TODO(jmesserly): this help description length is too long.
+    //
+    // Also summary-input-dir and custom-app-scheme should be removed.
+    // They are undocumented and not necessary.
+    //
+    // URIs can be passed to `--summary` (including relative ones if desired),
+    // and we can easily add logic to prevert absolute file URIs in source maps.
+    //
+    // It appears to have been added in this change, but none of the flags are
+    // described there:
+    // https://github.com/dart-lang/sdk/commit/226602dc189555d9a43785c2a2f599b1622c1890
+    //
+    // Looking at the code, it appears to be solving a similar problem as
+    // `--module-root` in our old Analyzer-based backend.
+    // See https://github.com/dart-lang/sdk/issues/32272 for context on removing
+    // --module-root.
     ..addMultiOption('summary',
         abbr: 's',
         help: 'path to a summary of a transitive dependency of this module.\n'
@@ -140,7 +164,7 @@ Future<CompilerResult> _compile(List<String> args,
 
   if (argResults['help'] as bool || args.isEmpty) {
     print(_usageMessage(argParser));
-    return new CompilerResult.noState(true);
+    return CompilerResult.noState(true);
   }
 
   var moduleFormat = parseModuleFormatOption(argResults).first;
@@ -183,38 +207,55 @@ Future<CompilerResult> _compile(List<String> args,
   // lib folder). The following [FileSystem] will resolve those references to
   // the correct location and keeps the real file location hidden from the
   // front end.
-  var fileSystem = new MultiRootFileSystem(
+  var fileSystem = MultiRootFileSystem(
       customScheme, multiRoots, StandardFileSystem.instance);
 
+  var oldCompilerState = compilerState;
   compilerState = await fe.initializeCompiler(
-      compilerState,
+      oldCompilerState,
       stringToUri(sdkSummaryPath),
       stringToUri(packageFile),
       summaryUris,
-      new DevCompilerTarget(),
+      DevCompilerTarget(),
       fileSystem: fileSystem);
   fe.DdcResult result = await fe.compile(compilerState, inputs, errorHandler);
   if (result == null || !succeeded) {
-    return new CompilerResult(compilerState, false);
+    return CompilerResult(compilerState, false);
   }
 
   var component = result.component;
   var emitMetadata = argResults['emit-metadata'] as bool;
   if (!emitMetadata && _checkForDartMirrorsImport(component)) {
-    return new CompilerResult(compilerState, false);
+    return CompilerResult(compilerState, false);
   }
 
   String output = argResults['out'];
-  var file = new File(output);
-  if (!file.parent.existsSync()) file.parent.createSync(recursive: true);
+  var file = File(output);
+  await file.parent.create(recursive: true);
 
-  // TODO(jmesserly): Save .dill file so other modules can link in this one.
-  //await writeComponentToBinary(component, output);
+  // Output files can be written in parallel, so collect the futures.
+  var outFiles = <Future>[];
+  if (argResults['summarize'] as bool) {
+    // TODO(jmesserly): CFE mutates the Kernel tree, so we can't save the dill
+    // file if we successfully reused a cached library. If compiler state is
+    // unchanged, it means we used the cache.
+    //
+    // In that case, we need to unbind canonical names, because they could be
+    // bound already from the previous compile.
+    if (identical(compilerState, oldCompilerState)) {
+      component.unbindCanonicalNames();
+    }
+    var sink = File(path.withoutExtension(output) + '.dill').openWrite();
+    kernel.BinaryPrinter(sink).writeComponentFile(component);
+    outFiles.add(sink.flush().then((_) => sink.close()));
+  }
+  if (argResults['summarize-text'] as bool) {
+    var sink = File(output + '.txt').openWrite();
+    kernel.Printer(sink, showExternal: false).writeComponentFile(component);
+    outFiles.add(sink.flush().then((_) => sink.close()));
+  }
 
-  // Useful for debugging:
-  writeComponentToText(component, path: output + '.txt');
-
-  var compiler = new ProgramCompiler(component,
+  var compiler = ProgramCompiler(component,
       declaredVariables: declaredVariables,
       emitMetadata: emitMetadata,
       enableAsserts: argResults['enable-asserts'] as bool);
@@ -226,15 +267,15 @@ Future<CompilerResult> _compile(List<String> args,
       jsUrl: path.toUri(output).toString(),
       mapUrl: path.toUri(output + '.map').toString(),
       customScheme: customScheme);
-  file.writeAsStringSync(jsCode.code);
 
+  outFiles.add(file.writeAsString(jsCode.code));
   if (jsCode.sourceMap != null) {
-    file = new File(output + '.map');
-    if (!file.parent.existsSync()) file.parent.createSync(recursive: true);
-    file.writeAsStringSync(json.encode(jsCode.sourceMap));
+    outFiles.add(
+        File(output + '.map').writeAsString(json.encode(jsCode.sourceMap)));
   }
 
-  return new CompilerResult(compilerState, true);
+  await Future.wait(outFiles);
+  return CompilerResult(compilerState, true);
 }
 
 /// The output of compiling a JavaScript module in a particular format.
@@ -256,25 +297,24 @@ class JSCode {
 }
 
 JSCode jsProgramToCode(JS.Program moduleTree, ModuleFormat format,
-    {bool buildSourceMap: false,
+    {bool buildSourceMap = false,
     String jsUrl,
     String mapUrl,
     String customScheme}) {
-  var opts = new JS.JavaScriptPrintingOptions(
+  var opts = JS.JavaScriptPrintingOptions(
       allowKeywordsInProperties: true, allowSingleLineIfStatements: true);
   JS.SimpleJavaScriptPrintingContext printer;
   SourceMapBuilder sourceMap;
   if (buildSourceMap) {
-    var sourceMapContext = new SourceMapPrintingContext();
+    var sourceMapContext = SourceMapPrintingContext();
     sourceMap = sourceMapContext.sourceMap;
     printer = sourceMapContext;
   } else {
-    printer = new JS.SimpleJavaScriptPrintingContext();
+    printer = JS.SimpleJavaScriptPrintingContext();
   }
 
   var tree = transformModuleFormat(format, moduleTree);
-  tree.accept(
-      new JS.Printer(opts, printer, localNamer: new JS.TemporaryNamer(tree)));
+  tree.accept(JS.Printer(opts, printer, localNamer: JS.TemporaryNamer(tree)));
 
   Map builtMap;
   if (buildSourceMap && sourceMap != null) {
@@ -291,7 +331,7 @@ JSCode jsProgramToCode(JS.Program moduleTree, ModuleFormat format,
 
   var text = printer.getText();
 
-  return new JSCode(text, builtMap);
+  return JSCode(text, builtMap);
 }
 
 /// This was copied from module_compiler.dart.
@@ -302,7 +342,7 @@ JSCode jsProgramToCode(JS.Program moduleTree, ModuleFormat format,
 // TODO(sigmund): delete bazelMappings - customScheme should be used instead.
 Map placeSourceMap(Map sourceMap, String sourceMapPath,
     Map<String, String> bazelMappings, String customScheme) {
-  var map = new Map.from(sourceMap);
+  var map = Map.from(sourceMap);
   // Convert to a local file path if it's not.
   sourceMapPath = path.fromUri(_sourceToUri(sourceMapPath, customScheme));
   var sourceMapDir = path.dirname(path.absolute(sourceMapPath));
@@ -353,7 +393,7 @@ Uri _sourceToUri(String source, customScheme) {
   }
   // Assume a file path.
   // TODO(jmesserly): shouldn't this be `path.toUri(path.absolute)`?
-  return new Uri.file(path.absolute(source));
+  return Uri.file(path.absolute(source));
 }
 
 /// Parses Dart's non-standard `-Dname=value` syntax for declared variables,
@@ -367,7 +407,7 @@ Map<String, String> parseAndRemoveDeclaredVariables(List<String> args) {
       var eq = rest.indexOf('=');
       if (eq <= 0) {
         var kind = eq == 0 ? 'name' : 'value';
-        throw new FormatException('no $kind given to -D option `$arg`');
+        throw FormatException('no $kind given to -D option `$arg`');
       }
       var name = rest.substring(0, eq);
       var value = rest.substring(eq + 1);

@@ -28,7 +28,11 @@ LocationSummary::LocationSummary(Zone* zone,
                                  intptr_t temp_count,
                                  LocationSummary::ContainsCall contains_call)
     : num_inputs_(input_count),
+#if defined(TARGET_ARCH_ARM)
+      num_temps_(temp_count + (contains_call == kCallOnSharedSlowPath ? 1 : 0)),
+#else
       num_temps_(temp_count),
+#endif
       stack_bitmap_(NULL),
       contains_call_(contains_call),
       live_registers_() {
@@ -37,6 +41,14 @@ LocationSummary::LocationSummary(Zone* zone,
 #endif
   input_locations_ = zone->Alloc<Location>(num_inputs_);
   temp_locations_ = zone->Alloc<Location>(num_temps_);
+
+#if defined(TARGET_ARCH_ARM)
+  if (contains_call == kCallOnSharedSlowPath) {
+    // TODO(sjindel): Mitigate the negative effect on the fast-path of blocking
+    // LR.
+    set_temp(temp_count, Location::RegisterLocation(LR));
+  }
+#endif
 }
 
 LocationSummary* LocationSummary::Make(
@@ -112,37 +124,12 @@ Location Location::AnyOrConstant(Value* value) {
 // DBC does not have an notion of 'address' in its instruction set.
 #if !defined(TARGET_ARCH_DBC)
 Address Location::ToStackSlotAddress() const {
-  const intptr_t index = stack_index();
-  const Register base = base_reg();
-  if (base == FPREG) {
-    if (index < 0) {
-      const intptr_t offset = (kParamEndSlotFromFp - index) * kWordSize;
-      return Address(base, offset);
-    } else {
-      const intptr_t offset = (kFirstLocalSlotFromFp - index) * kWordSize;
-      return Address(base, offset);
-    }
-  } else {
-    ASSERT(base == SPREG);
-    return Address(base, index * kWordSize);
-  }
+  return Address(base_reg(), ToStackSlotOffset());
 }
 #endif
 
 intptr_t Location::ToStackSlotOffset() const {
-  const intptr_t index = stack_index();
-  if (base_reg() == FPREG) {
-    if (index < 0) {
-      const intptr_t offset = (kParamEndSlotFromFp - index) * kWordSize;
-      return offset;
-    } else {
-      const intptr_t offset = (kFirstLocalSlotFromFp - index) * kWordSize;
-      return offset;
-    }
-  } else {
-    ASSERT(base_reg() == SPREG);
-    return index * kWordSize;
-  }
+  return stack_index() * kWordSize;
 }
 
 const Object& Location::constant() const {
@@ -180,8 +167,17 @@ const char* Location::Name() const {
       }
       UNREACHABLE();
 #if TARGET_ARCH_DBC
-    case kArgsDescRegister:
-      return "ArgDesc";
+    case kSpecialDbcRegister:
+      switch (payload()) {
+        case kArgsDescriptorReg:
+          return "ArgDescReg";
+        case kExceptionReg:
+          return "ExceptionReg";
+        case kStackTraceReg:
+          return "StackTraceReg";
+        default:
+          UNREACHABLE();
+      }
 #endif
     default:
       if (IsConstant()) {
@@ -248,18 +244,18 @@ Location Location::RemapForSlowPath(Definition* def,
   if (IsRegister()) {
     intptr_t index = cpu_reg_slots[reg()];
     ASSERT(index >= 0);
-    return Location::StackSlot(index);
+    return Location::StackSlot(FrameSlotForVariableIndex(-index));
   } else if (IsFpuRegister()) {
     intptr_t index = fpu_reg_slots[fpu_reg()];
     ASSERT(index >= 0);
     switch (def->representation()) {
       case kUnboxedDouble:
-        return Location::DoubleStackSlot(index);
+        return Location::DoubleStackSlot(FrameSlotForVariableIndex(-index));
 
       case kUnboxedFloat32x4:
       case kUnboxedInt32x4:
       case kUnboxedFloat64x2:
-        return Location::QuadStackSlot(index);
+        return Location::QuadStackSlot(FrameSlotForVariableIndex(-index));
 
       default:
         UNREACHABLE();
@@ -271,14 +267,16 @@ Location Location::RemapForSlowPath(Definition* def,
     intptr_t index_hi;
 
     if (value_pair->At(0).IsRegister()) {
-      index_lo = cpu_reg_slots[value_pair->At(0).reg()];
+      index_lo =
+          FrameSlotForVariableIndex(-cpu_reg_slots[value_pair->At(0).reg()]);
     } else {
       ASSERT(value_pair->At(0).IsStackSlot());
       index_lo = value_pair->At(0).stack_index();
     }
 
     if (value_pair->At(1).IsRegister()) {
-      index_hi = cpu_reg_slots[value_pair->At(1).reg()];
+      index_hi =
+          FrameSlotForVariableIndex(-cpu_reg_slots[value_pair->At(1).reg()]);
     } else {
       ASSERT(value_pair->At(1).IsStackSlot());
       index_hi = value_pair->At(1).stack_index();

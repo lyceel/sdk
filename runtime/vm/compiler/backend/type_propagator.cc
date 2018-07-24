@@ -130,7 +130,7 @@ void FlowGraphTypePropagator::PropagateRecursive(BlockEntryInstr* block) {
   // can contain [AssertAssignableInstr]s and we therefore enable this
   // optimization.
   Isolate* isolate = Isolate::Current();
-  if (isolate->type_checks() || isolate->strong()) {
+  if (isolate->argument_type_checks()) {
     StrengthenAsserts(block);
   }
 
@@ -1051,6 +1051,13 @@ CompileType SpecialParameterInstr::ComputeType() const {
       return CompileType::FromCid(kTypeArgumentsCid);
     case kArgDescriptor:
       return CompileType::FromCid(kImmutableArrayCid);
+    case kException:
+      return CompileType(CompileType::kNonNullable, kDynamicCid,
+                         &Object::dynamic_type());
+    case kStackTrace:
+      // We cannot use [kStackTraceCid] here because any kind of object can be
+      // used as a stack trace via `new Future.error(..., <obj>)` :-/
+      return CompileType::Dynamic();
   }
   UNREACHABLE();
   return CompileType::Dynamic();
@@ -1318,6 +1325,10 @@ CompileType BinaryInt64OpInstr::ComputeType() const {
 }
 
 CompileType ShiftInt64OpInstr::ComputeType() const {
+  return CompileType::Int();
+}
+
+CompileType SpeculativeShiftInt64OpInstr::ComputeType() const {
   return CompileType::Int();
 }
 

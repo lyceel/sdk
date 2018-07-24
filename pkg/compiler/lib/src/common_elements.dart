@@ -7,6 +7,7 @@ library dart2js.type_system;
 
 import 'common.dart';
 import 'common/names.dart' show Identifiers, Uris;
+import 'constants/expressions.dart' show ConstantExpression;
 import 'constants/values.dart';
 import 'elements/entities.dart';
 import 'elements/names.dart' show PublicName;
@@ -14,12 +15,10 @@ import 'elements/types.dart';
 import 'js_backend/backend.dart' show JavaScriptBackend;
 import 'js_backend/constant_system_javascript.dart';
 import 'js_backend/native_data.dart' show NativeBasicData;
-import 'constants/expressions.dart' show ConstantExpression;
+import 'types/abstract_value_domain.dart';
 import 'universe/call_structure.dart' show CallStructure;
 import 'universe/selector.dart' show Selector;
 import 'universe/call_structure.dart';
-import 'universe/world_builder.dart';
-import 'world.dart';
 
 /// The common elements and types in Dart.
 class CommonElements {
@@ -748,8 +747,8 @@ class CommonElements {
   /// in the given [world].
   ///
   /// Returns `false` if `JSString.split` is not available.
-  bool appliesToJsStringSplit(
-      Selector selector, ReceiverConstraint receiver, World world) {
+  bool appliesToJsStringSplit(Selector selector, AbstractValue receiver,
+      AbstractValueDomain abstractValueDomain) {
     if (_jsStringSplit == null) {
       ClassEntity cls =
           _findClass(interceptorsLibrary, 'JSString', required: false);
@@ -758,7 +757,8 @@ class CommonElements {
       if (_jsStringSplit == null) return false;
     }
     return selector.applies(_jsStringSplit) &&
-        (receiver == null || receiver.canHit(jsStringSplit, selector, world));
+        (receiver == null ||
+            abstractValueDomain.canHit(receiver, jsStringSplit, selector));
   }
 
   FunctionEntity _jsStringSplit;
@@ -1051,9 +1051,6 @@ class CommonElements {
   FunctionEntity get getRuntimeTypeArgumentIntercepted =>
       _findHelperFunction('getRuntimeTypeArgumentIntercepted');
 
-  FunctionEntity get runtimeTypeToString =>
-      _findHelperFunction('runtimeTypeToString');
-
   FunctionEntity get assertIsSubtype => _findHelperFunction('assertIsSubtype');
 
   FunctionEntity get checkSubtype => _findHelperFunction('checkSubtype');
@@ -1091,6 +1088,15 @@ class CommonElements {
   FunctionEntity get createInvocationMirror =>
       _findHelperFunction('createInvocationMirror');
 
+  bool isCreateInvocationMirrorHelper(MemberEntity member) {
+    return member.isTopLevel &&
+        member.name == '_createInvocationMirror' &&
+        member.library == coreLibrary;
+  }
+
+  FunctionEntity get createUnmangledInvocationMirror =>
+      _findHelperFunction('createUnmangledInvocationMirror');
+
   FunctionEntity get cyclicThrowHelper =>
       _findHelperFunction("throwCyclicInit");
 
@@ -1109,14 +1115,38 @@ class CommonElements {
   FunctionEntity get hashCodeForNativeObject =>
       _findHelperFunction('hashCodeForNativeObject');
 
-  ClassEntity get instantiation1Class => _findHelperClass('Instantiation1');
-  ClassEntity get instantiation2Class => _findHelperClass('Instantiation2');
-  ClassEntity get instantiation3Class => _findHelperClass('Instantiation3');
-  FunctionEntity get instantiate1 => _findHelperFunction('instantiate1');
-  FunctionEntity get instantiate2 => _findHelperFunction('instantiate2');
-  FunctionEntity get instantiate3 => _findHelperFunction('instantiate3');
+  // TODO(johnniwinther,sra): Support arbitrary type argument count.
+  void _checkTypeArgumentCount(int typeArgumentCount) {
+    assert(typeArgumentCount > 0);
+    if (typeArgumentCount > 20) {
+      failedAt(
+          NO_LOCATION_SPANNABLE,
+          "Unsupported instantiation argument count: "
+          "${typeArgumentCount}");
+    }
+  }
+
+  ClassEntity getInstantiationClass(int typeArgumentCount) {
+    _checkTypeArgumentCount(typeArgumentCount);
+    return _findHelperClass('Instantiation$typeArgumentCount');
+  }
+
+  FunctionEntity getInstantiateFunction(int typeArgumentCount) {
+    _checkTypeArgumentCount(typeArgumentCount);
+    return _findHelperFunction('instantiate$typeArgumentCount');
+  }
+
   FunctionEntity get instantiatedGenericFunctionType =>
       _findHelperFunction('instantiatedGenericFunctionType');
+
+  FunctionEntity get extractFunctionTypeObjectFromInternal =>
+      _findHelperFunction('extractFunctionTypeObjectFromInternal');
+
+  bool isInstantiationClass(ClassEntity cls) {
+    return cls.library == _jsHelperLibrary &&
+        cls.name != 'Instantiation' &&
+        cls.name.startsWith('Instantiation');
+  }
 
   // From dart:_internal
 
@@ -1412,8 +1442,6 @@ abstract class ElementEnvironment {
       ClassEntity cls, List<DartType> typeArguments);
 
   /// Returns the `dynamic` type.
-  // TODO(johnniwinther): Remove this when `ResolutionDynamicType` is no longer
-  // needed.
   DartType get dynamicType;
 
   /// Returns the 'raw type' of [cls]. That is, the instantiation of [cls]
@@ -1453,6 +1481,12 @@ abstract class ElementEnvironment {
   /// The upper bound on the [typeVariable]. If not explicitly declared, this is
   /// `Object`.
   DartType getTypeVariableBound(TypeVariableEntity typeVariable);
+
+  /// The default type of the [typeVariable].
+  ///
+  /// This is the type used as the default type argument when no explicit type
+  /// argument is passed.
+  DartType getTypeVariableDefaultType(TypeVariableEntity typeVariable);
 
   /// Returns the type of [function].
   FunctionType getFunctionType(FunctionEntity function);
@@ -1499,18 +1533,9 @@ abstract class ElementEnvironment {
   /// Returns the metadata constants declared on [cls].
   Iterable<ConstantValue> getClassMetadata(ClassEntity cls);
 
-  /// Returns the metadata constants declared on [typedef].
-  Iterable<ConstantValue> getTypedefMetadata(TypedefEntity typedef);
-
   /// Returns the metadata constants declared on [member].
   Iterable<ConstantValue> getMemberMetadata(MemberEntity member,
       {bool includeParameterMetadata: false});
-
-  /// Returns the function type that is an alias of a [typedef].
-  FunctionType getFunctionTypeOfTypedef(TypedefEntity typedef);
-
-  /// Returns the typedef type that is declared by a [typedef].
-  TypedefType getTypedefTypeOfTypedef(TypedefEntity typedef);
 
   /// Returns `true` if [cls] is a Dart enum class.
   bool isEnumClass(ClassEntity cls);

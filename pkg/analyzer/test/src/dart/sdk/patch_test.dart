@@ -627,7 +627,7 @@ class C {
     ClassDeclaration cls = unit.declarations[0];
     MethodDeclaration method = cls.members[0];
     FormalParameter parameter = method.parameters.parameters[0];
-    expect(parameter, new isInstanceOf<DefaultFormalParameter>());
+    expect(parameter, new TypeMatcher<DefaultFormalParameter>());
   }
 
   test_class_method_patch_success_implicitReturnType() {
@@ -1054,7 +1054,7 @@ int _bar;
 
   void _createSdk() {
     sdk = new FolderBasedDartSdk(provider, sdkFolder);
-    sdk.analysisOptions = new AnalysisOptionsImpl()..strongMode = true;
+    sdk.analysisOptions = new AnalysisOptionsImpl();
   }
 
   CompilationUnit _doTopLevelPatching(String baseCode, String patchCode) {

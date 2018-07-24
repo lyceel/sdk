@@ -25,6 +25,7 @@ import '../ssa/builder_kernel.dart';
 import '../ssa/nodes.dart';
 import '../ssa/ssa.dart';
 import '../ssa/types.dart';
+import '../types/abstract_value_domain.dart';
 import '../types/types.dart';
 import '../universe/selector.dart';
 import '../universe/world_impact.dart';
@@ -42,9 +43,11 @@ abstract class KernelBackendStrategy implements BackendStrategy {
 
 class KernelCodegenWorkItemBuilder implements WorkItemBuilder {
   final JavaScriptBackend _backend;
-  final ClosedWorld _closedWorld;
+  final JClosedWorld _closedWorld;
+  final GlobalTypeInferenceResults _globalInferenceResults;
 
-  KernelCodegenWorkItemBuilder(this._backend, this._closedWorld);
+  KernelCodegenWorkItemBuilder(
+      this._backend, this._closedWorld, this._globalInferenceResults);
 
   CompilerOptions get _options => _backend.compiler.options;
 
@@ -60,23 +63,26 @@ class KernelCodegenWorkItemBuilder implements WorkItemBuilder {
       }
     }
 
-    return new KernelCodegenWorkItem(_backend, _closedWorld, entity);
+    return new KernelCodegenWorkItem(
+        _backend, _closedWorld, _globalInferenceResults, entity);
   }
 }
 
 class KernelCodegenWorkItem extends CodegenWorkItem {
   final JavaScriptBackend _backend;
-  final ClosedWorld _closedWorld;
+  final JClosedWorld _closedWorld;
   final MemberEntity element;
   final CodegenRegistry registry;
+  final GlobalTypeInferenceResults _globalInferenceResults;
 
-  KernelCodegenWorkItem(this._backend, this._closedWorld, this.element)
+  KernelCodegenWorkItem(this._backend, this._closedWorld,
+      this._globalInferenceResults, this.element)
       : registry =
             new CodegenRegistry(_closedWorld.elementEnvironment, element);
 
   @override
   WorldImpact run() {
-    return _backend.codegen(this, _closedWorld);
+    return _backend.codegen(this, _closedWorld, _globalInferenceResults);
   }
 }
 
@@ -91,14 +97,15 @@ class KernelSsaBuilder implements SsaBuilder {
       this.task, this._compiler, this._elementMap, this._globalLocalsMap);
 
   @override
-  HGraph build(CodegenWorkItem work, ClosedWorld closedWorld) {
+  HGraph build(CodegenWorkItem work, JClosedWorld closedWorld,
+      GlobalTypeInferenceResults results) {
     return task.measure(() {
       KernelSsaGraphBuilder builder = new KernelSsaGraphBuilder(
           work.element,
           _elementMap.getMemberThisType(work.element),
           _compiler,
           _elementMap,
-          _compiler.globalInference.results,
+          results,
           _globalLocalsMap,
           closedWorld,
           _compiler.codegenWorldBuilder,
@@ -124,94 +131,76 @@ class KernelToTypeInferenceMapImpl implements KernelToTypeInferenceMap {
       _globalInferenceResults
           .resultOfMember(e is ConstructorBodyEntity ? e.constructor : e);
 
-  TypeMask getReturnTypeOf(FunctionEntity function) {
-    return TypeMaskFactory.inferredReturnTypeForElement(
+  AbstractValue getReturnTypeOf(FunctionEntity function) {
+    return AbstractValueFactory.inferredReturnTypeForElement(
         function, _globalInferenceResults);
   }
 
-  TypeMask receiverTypeOfInvocation(
-      ir.MethodInvocation node, ClosedWorld closedWorld) {
+  AbstractValue receiverTypeOfInvocation(
+      ir.MethodInvocation node, AbstractValueDomain abstractValueDomain) {
     return _targetResults.typeOfSend(node);
   }
 
-  TypeMask receiverTypeOfGet(ir.PropertyGet node) {
+  AbstractValue receiverTypeOfGet(ir.PropertyGet node) {
     return _targetResults.typeOfSend(node);
   }
 
-  TypeMask receiverTypeOfDirectGet(ir.DirectPropertyGet node) {
+  AbstractValue receiverTypeOfDirectGet(ir.DirectPropertyGet node) {
     return _targetResults.typeOfSend(node);
   }
 
-  TypeMask receiverTypeOfSet(ir.PropertySet node, ClosedWorld closedWorld) {
+  AbstractValue receiverTypeOfSet(
+      ir.PropertySet node, AbstractValueDomain abstractValueDomain) {
     return _targetResults.typeOfSend(node);
   }
 
-  TypeMask typeOfListLiteral(
-      MemberEntity owner, ir.ListLiteral listLiteral, ClosedWorld closedWorld) {
+  AbstractValue typeOfListLiteral(MemberEntity owner,
+      ir.ListLiteral listLiteral, AbstractValueDomain abstractValueDomain) {
     return _resultOf(owner).typeOfListLiteral(listLiteral) ??
-        closedWorld.abstractValueDomain.dynamicType;
+        abstractValueDomain.dynamicType;
   }
 
-  TypeMask typeOfIterator(ir.ForInStatement node) {
+  AbstractValue typeOfIterator(ir.ForInStatement node) {
     return _targetResults.typeOfIterator(node);
   }
 
-  TypeMask typeOfIteratorCurrent(ir.ForInStatement node) {
+  AbstractValue typeOfIteratorCurrent(ir.ForInStatement node) {
     return _targetResults.typeOfIteratorCurrent(node);
   }
 
-  TypeMask typeOfIteratorMoveNext(ir.ForInStatement node) {
+  AbstractValue typeOfIteratorMoveNext(ir.ForInStatement node) {
     return _targetResults.typeOfIteratorMoveNext(node);
   }
 
-  bool isJsIndexableIterator(ir.ForInStatement node, ClosedWorld closedWorld) {
-    TypeMask mask = typeOfIterator(node);
-    return mask != null &&
-        mask.satisfies(
-            closedWorld.commonElements.jsIndexableClass, closedWorld) &&
-        // String is indexable but not iterable.
-        !mask.satisfies(closedWorld.commonElements.jsStringClass, closedWorld);
+  bool isJsIndexableIterator(
+      ir.ForInStatement node, AbstractValueDomain abstractValueDomain) {
+    AbstractValue mask = typeOfIterator(node);
+    return abstractValueDomain.isJsIndexableAndIterable(mask);
   }
 
-  bool isFixedLength(TypeMask mask, ClosedWorld closedWorld) {
-    if (mask.isContainer && (mask as ContainerTypeMask).length != null) {
-      // A container on which we have inferred the length.
-      return true;
-    }
-    // TODO(sra): Recognize any combination of fixed length indexables.
-    if (mask.containsOnly(closedWorld.commonElements.jsFixedArrayClass) ||
-        mask.containsOnly(
-            closedWorld.commonElements.jsUnmodifiableArrayClass) ||
-        mask.containsOnlyString(closedWorld) ||
-        closedWorld.abstractValueDomain.isTypedArray(mask)) {
-      return true;
-    }
-    return false;
-  }
-
-  TypeMask inferredIndexType(ir.ForInStatement node) {
-    return TypeMaskFactory.inferredTypeForSelector(
+  AbstractValue inferredIndexType(ir.ForInStatement node) {
+    return AbstractValueFactory.inferredTypeForSelector(
         new Selector.index(), typeOfIterator(node), _globalInferenceResults);
   }
 
-  TypeMask getInferredTypeOf(MemberEntity member) {
-    return TypeMaskFactory.inferredTypeForMember(
+  AbstractValue getInferredTypeOf(MemberEntity member) {
+    return AbstractValueFactory.inferredTypeForMember(
         member, _globalInferenceResults);
   }
 
-  TypeMask getInferredTypeOfParameter(Local parameter) {
-    return TypeMaskFactory.inferredTypeForParameter(
+  AbstractValue getInferredTypeOfParameter(Local parameter) {
+    return AbstractValueFactory.inferredTypeForParameter(
         parameter, _globalInferenceResults);
   }
 
-  TypeMask selectorTypeOf(Selector selector, TypeMask mask) {
-    return TypeMaskFactory.inferredTypeForSelector(
+  AbstractValue selectorTypeOf(Selector selector, AbstractValue mask) {
+    return AbstractValueFactory.inferredTypeForSelector(
         selector, mask, _globalInferenceResults);
   }
 
-  TypeMask typeFromNativeBehavior(
-      NativeBehavior nativeBehavior, ClosedWorld closedWorld) {
-    return TypeMaskFactory.fromNativeBehavior(nativeBehavior, closedWorld);
+  AbstractValue typeFromNativeBehavior(
+      NativeBehavior nativeBehavior, JClosedWorld closedWorld) {
+    return AbstractValueFactory.fromNativeBehavior(nativeBehavior, closedWorld);
   }
 }
 

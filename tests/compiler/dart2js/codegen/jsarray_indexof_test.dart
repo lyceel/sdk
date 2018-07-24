@@ -33,9 +33,9 @@ main() {
 main() {
   asyncTest(() async {
     print('--test from kernel------------------------------------------------');
-    await runTest([]);
+    await runTest([Flags.noPreviewDart2]);
     print('--test from kernel (trust-type-annotations)-----------------------');
-    await runTest([Flags.trustTypeAnnotations]);
+    await runTest([Flags.noPreviewDart2, Flags.trustTypeAnnotations]);
     print('--test from kernel (strong mode)----------------------------------');
     await runTest([Flags.strongMode]);
     print('--test from kernel (strong mode, omit-implicit.checks)------------');
@@ -48,7 +48,7 @@ runTest(List<String> options) async {
       memorySourceFiles: {'main.dart': source}, options: options);
   Expect.isTrue(result.isSuccess);
   Compiler compiler = result.compiler;
-  ClosedWorld closedWorld = compiler.backendClosedWorldForTesting;
+  JClosedWorld closedWorld = compiler.backendClosedWorldForTesting;
   MemberEntity jsArrayIndexOf =
       findClassMember(closedWorld, 'JSArray', 'indexOf');
   ProgramLookup programLookup = new ProgramLookup(result.compiler);

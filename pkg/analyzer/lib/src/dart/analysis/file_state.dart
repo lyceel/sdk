@@ -630,7 +630,7 @@ class FileState {
     AnalysisOptions analysisOptions = _fsState._analysisOptions;
     CharSequenceReader reader = new CharSequenceReader(content);
     Scanner scanner = new Scanner(source, reader, errorListener);
-    scanner.scanGenericMethodComments = analysisOptions.strongMode;
+    scanner.scanGenericMethodComments = true;
     Token token = PerformanceStatistics.scan.makeCurrentWhile(() {
       return scanner.tokenize();
     });
@@ -639,7 +639,7 @@ class FileState {
     bool useFasta = analysisOptions.useFastaParser;
     Parser parser = new Parser(source, errorListener, useFasta: useFasta);
     parser.enableOptionalNewAndConst = analysisOptions.previewDart2;
-    parser.parseGenericMethodComments = analysisOptions.strongMode;
+    parser.parseGenericMethodComments = true;
     CompilationUnit unit = parser.parseCompilationUnit(token);
     unit.lineInfo = lineInfo;
 
@@ -723,6 +723,11 @@ class FileSystemState {
   final Set<String> knownFilePaths = new Set<String>();
 
   /**
+   * All known files.
+   */
+  final List<FileState> knownFiles = [];
+
+  /**
    * Mapping from a path to the flag whether there is a URI for the path.
    */
   final Map<String, bool> _hasUriForPath = {};
@@ -743,6 +748,11 @@ class FileSystemState {
   final Map<FileState, List<FileState>> _partToLibraries = {};
 
   /**
+   * The value of this field is incremented when the set of files is updated.
+   */
+  int fileStamp = 0;
+
+  /**
    * The [FileState] instance that correspond to an unresolved URI.
    */
   FileState _unresolvedFile;
@@ -756,25 +766,20 @@ class FileSystemState {
   FileSystemStateTestView _testView;
 
   FileSystemState(
-      this._logger,
-      this._byteStore,
-      this._contentOverlay,
-      this._resourceProvider,
-      this._sourceFactory,
-      this._analysisOptions,
-      this._salt,
-      {this.externalSummaries,
-      this.parseExceptionHandler}) {
+    this._logger,
+    this._byteStore,
+    this._contentOverlay,
+    this._resourceProvider,
+    this._sourceFactory,
+    this._analysisOptions,
+    this._salt, {
+    this.externalSummaries,
+    this.parseExceptionHandler,
+  }) {
     _fileContentCache =
         _FileContentCache.getInstance(_resourceProvider, _contentOverlay);
     _testView = new FileSystemStateTestView(this);
   }
-
-  /**
-   * Return the known files.
-   */
-  List<FileState> get knownFiles =>
-      _pathToFiles.values.map((files) => files.first).toList();
 
   @visibleForTesting
   FileSystemStateTestView get test => _testView;
@@ -811,9 +816,9 @@ class FileSystemState {
         return file;
       }
       // Create a new file.
-      Uri fileUri = _resourceProvider.pathContext.toUri(path);
       FileSource uriSource = new FileSource(resource, uri);
-      file = new FileState._(this, path, uri, fileUri, uriSource);
+      file = new FileState._(
+          this, path, uri, _absolutePathToFileUri(path), uriSource);
       _uriToFile[uri] = file;
       _addFileWithPath(path, file);
       _pathToCanonicalFile[path] = file;
@@ -852,9 +857,9 @@ class FileSystemState {
 
       String path = uriSource.fullName;
       File resource = _resourceProvider.getFile(path);
-      Uri fileUri = _resourceProvider.pathContext.toUri(path);
       FileSource source = new FileSource(resource, uri);
-      file = new FileState._(this, path, uri, fileUri, source);
+      file = new FileState._(
+          this, path, uri, _absolutePathToFileUri(path), source);
       _uriToFile[uri] = file;
       _addFileWithPath(path, file);
       file.refresh(allowCached: true);
@@ -912,6 +917,7 @@ class FileSystemState {
     markFileForReading(path);
     _uriToFile.clear();
     knownFilePaths.clear();
+    knownFiles.clear();
     _pathToFiles.clear();
     _pathToCanonicalFile.clear();
     _partToLibraries.clear();
@@ -921,10 +927,24 @@ class FileSystemState {
     var files = _pathToFiles[path];
     if (files == null) {
       knownFilePaths.add(path);
+      knownFiles.add(file);
       files = <FileState>[];
       _pathToFiles[path] = files;
+      fileStamp++;
     }
     files.add(file);
+  }
+
+  /**
+   * A specialized version of package:path context.toUri(). This assumes the
+   * path is absolute as does a performant conversion to a file: uri.
+   */
+  Uri _absolutePathToFileUri(String path) {
+    if (path.contains(r'\')) {
+      return new Uri(scheme: 'file', path: path.replaceAll(r'\', '/'));
+    } else {
+      return new Uri(scheme: 'file', path: path);
+    }
   }
 }
 

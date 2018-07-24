@@ -7,6 +7,7 @@ library vm.bytecode.assembler;
 import 'dart:typed_data';
 
 import 'package:vm/bytecode/dbc.dart';
+import 'package:vm/bytecode/exceptions.dart' show ExceptionsTable;
 
 class Label {
   List<int> _jumps = <int>[];
@@ -42,6 +43,7 @@ class BytecodeAssembler {
   final List<int> bytecode = new List<int>();
   final Uint32List _encodeBufferIn;
   final Uint8List _encodeBufferOut;
+  final ExceptionsTable exceptionsTable = new ExceptionsTable();
 
   BytecodeAssembler._(this._encodeBufferIn, this._encodeBufferOut);
 
@@ -51,6 +53,7 @@ class BytecodeAssembler {
   }
 
   int get offset => bytecode.length;
+  int get offsetInWords => bytecode.length >> kLog2BytesPerBytecode;
 
   void bind(Label label) {
     final List<int> jumps = label.bind(offset);
@@ -62,6 +65,10 @@ class BytecodeAssembler {
   void emitWord(int word) {
     _encodeBufferIn[0] = word; // TODO(alexmarkov): Which endianness to use?
     bytecode.addAll(_encodeBufferOut);
+  }
+
+  int _getOpcodeAt(int pos) {
+    return bytecode[pos]; // TODO(alexmarkov): Take endianness into account.
   }
 
   void _setWord(int pos, int word) {
@@ -163,8 +170,14 @@ class BytecodeAssembler {
     emitWord(_encodeT(Opcode.kJump, label.jumpOperand(offset)));
   }
 
+  void emitJumpIfNoAsserts(Label label) {
+    emitWord(_encodeT(Opcode.kJumpIfNoAsserts, label.jumpOperand(offset)));
+  }
+
   void patchJump(int pos, int rt) {
-    _setWord(pos, _encodeT(Opcode.kJump, rt));
+    final Opcode opcode = Opcode.values[_getOpcodeAt(pos)];
+    assert(isJump(opcode));
+    _setWord(pos, _encodeT(opcode, rt));
   }
 
   void emitReturn(int ra) {
@@ -243,8 +256,8 @@ class BytecodeAssembler {
     emitWord(_encodeAD(Opcode.kPushPolymorphicInstanceCallByRange, ra, rd));
   }
 
-  void emitNativeCall(int ra, int rb, int rc) {
-    emitWord(_encodeABC(Opcode.kNativeCall, ra, rb, rc));
+  void emitNativeCall(int rd) {
+    emitWord(_encodeD(Opcode.kNativeCall, rd));
   }
 
   void emitOneByteStringFromCharCode(int ra, int rx) {
@@ -819,8 +832,8 @@ class BytecodeAssembler {
     emitWord(_encode0(Opcode.kCloneContext));
   }
 
-  void emitMoveSpecial(int ra, int rd) {
-    emitWord(_encodeAD(Opcode.kMoveSpecial, ra, rd));
+  void emitMoveSpecial(int ra, SpecialIndex rd) {
+    emitWord(_encodeAD(Opcode.kMoveSpecial, ra, rd.index));
   }
 
   void emitInstantiateType(int rd) {

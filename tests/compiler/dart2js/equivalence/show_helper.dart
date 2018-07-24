@@ -25,10 +25,10 @@ ArgParser createArgParser() {
   return argParser;
 }
 
-show(ArgResults argResults, ComputeMemberDataFunction computeKernelData,
-    {ComputeClassDataFunction computeKernelClassData,
-    bool testFrontend: false,
-    List<String> options: const <String>[]}) async {
+show(ArgResults argResults, DataComputer dataComputer,
+    {bool testFrontend: false, List<String> options: const <String>[]}) async {
+  dataComputer.setup();
+
   if (argResults.wasParsed('colors')) {
     useColors = argResults['colors'];
   }
@@ -49,8 +49,8 @@ show(ArgResults argResults, ComputeMemberDataFunction computeKernelData,
   }
 
   options = new List<String>.from(options);
-  if (strongMode) {
-    options.add(Flags.strongMode);
+  if (!strongMode) {
+    options.add(Flags.noPreviewDart2);
   }
   if (trustTypeAnnotations) {
     options.add(Flags.trustTypeAnnotations);
@@ -58,8 +58,7 @@ show(ArgResults argResults, ComputeMemberDataFunction computeKernelData,
   if (omitImplicitChecks) {
     options.add(Flags.omitImplicitChecks);
   }
-  CompiledData data = await computeData(entryPoint, const {}, computeKernelData,
-      computeClassData: computeKernelClassData,
+  CompiledData data = await computeData(entryPoint, const {}, dataComputer,
       options: options,
       testFrontend: testFrontend,
       forUserLibrariesOnly: false,

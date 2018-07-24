@@ -22,6 +22,8 @@ class ResolutionWorldImpactBuilder extends WorldImpactBuilderImpl
   Setlet<ConstantExpression> _constantLiterals;
   Setlet<dynamic> _nativeData;
   Setlet<ClassEntity> _seenClasses;
+  Set<RuntimeTypeUse> _runtimeTypeUses;
+  Set<GenericInstantiation> _genericInstantiations;
 
   ResolutionWorldImpactBuilder(this.name);
 
@@ -30,9 +32,7 @@ class ResolutionWorldImpactBuilder extends WorldImpactBuilderImpl
 
   void registerMapLiteral(MapLiteralUse mapLiteralUse) {
     assert(mapLiteralUse != null);
-    if (_mapLiterals == null) {
-      _mapLiterals = new Setlet<MapLiteralUse>();
-    }
+    _mapLiterals ??= new Setlet<MapLiteralUse>();
     _mapLiterals.add(mapLiteralUse);
   }
 
@@ -43,9 +43,7 @@ class ResolutionWorldImpactBuilder extends WorldImpactBuilderImpl
 
   void registerListLiteral(ListLiteralUse listLiteralUse) {
     assert(listLiteralUse != null);
-    if (_listLiterals == null) {
-      _listLiterals = new Setlet<ListLiteralUse>();
-    }
+    _listLiterals ??= new Setlet<ListLiteralUse>();
     _listLiterals.add(listLiteralUse);
   }
 
@@ -54,10 +52,21 @@ class ResolutionWorldImpactBuilder extends WorldImpactBuilderImpl
     return _listLiterals != null ? _listLiterals : const <ListLiteralUse>[];
   }
 
+  void registerRuntimeTypeUse(RuntimeTypeUse runtimeTypeUse) {
+    assert(runtimeTypeUse != null);
+    _runtimeTypeUses ??= new Setlet<RuntimeTypeUse>();
+    _runtimeTypeUses.add(runtimeTypeUse);
+  }
+
+  @override
+  Iterable<RuntimeTypeUse> get runtimeTypeUses {
+    return _runtimeTypeUses != null
+        ? _runtimeTypeUses
+        : const <RuntimeTypeUse>[];
+  }
+
   void registerConstSymbolName(String name) {
-    if (_constSymbolNames == null) {
-      _constSymbolNames = new Setlet<String>();
-    }
+    _constSymbolNames ??= new Setlet<String>();
     _constSymbolNames.add(name);
   }
 
@@ -67,9 +76,7 @@ class ResolutionWorldImpactBuilder extends WorldImpactBuilderImpl
   }
 
   void registerFeature(Feature feature) {
-    if (_features == null) {
-      _features = new EnumSet<Feature>();
-    }
+    _features ??= new EnumSet<Feature>();
     _features.add(feature);
   }
 
@@ -81,9 +88,7 @@ class ResolutionWorldImpactBuilder extends WorldImpactBuilderImpl
   }
 
   void registerConstantLiteral(ConstantExpression constant) {
-    if (_constantLiterals == null) {
-      _constantLiterals = new Setlet<ConstantExpression>();
-    }
+    _constantLiterals ??= new Setlet<ConstantExpression>();
     _constantLiterals.add(constant);
   }
 
@@ -95,9 +100,7 @@ class ResolutionWorldImpactBuilder extends WorldImpactBuilderImpl
 
   void registerNativeData(dynamic nativeData) {
     assert(nativeData != null);
-    if (_nativeData == null) {
-      _nativeData = new Setlet<dynamic>();
-    }
+    _nativeData ??= new Setlet<dynamic>();
     _nativeData.add(nativeData);
   }
 
@@ -107,15 +110,23 @@ class ResolutionWorldImpactBuilder extends WorldImpactBuilderImpl
   }
 
   void registerSeenClass(ClassEntity seenClass) {
-    if (_seenClasses == null) {
-      _seenClasses = new Setlet<ClassEntity>();
-    }
+    _seenClasses ??= new Setlet<ClassEntity>();
     _seenClasses.add(seenClass);
   }
 
   @override
   Iterable<ClassEntity> get seenClasses {
     return _seenClasses ?? const <ClassEntity>[];
+  }
+
+  void registerInstantiation(GenericInstantiation instantiation) {
+    _genericInstantiations ??= new Set<GenericInstantiation>();
+    _genericInstantiations.add(instantiation);
+  }
+
+  @override
+  Iterable<GenericInstantiation> get genericInstantiations {
+    return _genericInstantiations ?? const <GenericInstantiation>[];
   }
 
   String toString() {
@@ -152,6 +163,12 @@ class ResolutionWorldImpactBuilder extends WorldImpactBuilderImpl
     if (_nativeData != null) {
       sb.write('\n native-data:');
       for (var data in _nativeData) {
+        sb.write('\n  $data');
+      }
+    }
+    if (_genericInstantiations != null) {
+      sb.write('\n instantiations:');
+      for (var data in _genericInstantiations) {
         sb.write('\n  $data');
       }
     }

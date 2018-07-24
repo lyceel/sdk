@@ -45,6 +45,7 @@ DEFINE_FLAG(bool,
             "Generate jitdump file to use with perf-inject");
 
 DECLARE_FLAG(bool, write_protect_code);
+DECLARE_FLAG(bool, write_protect_vm_isolate);
 
 // Linux CodeObservers.
 
@@ -122,7 +123,7 @@ class JitDumpCodeObserver : public CodeObserver {
       : out_file_(nullptr), mapped_(nullptr), mapped_size_(0), code_id_(0) {
     const intptr_t pid = getpid();
     char* const filename = OS::SCreate(nullptr, "/tmp/jit-%" Pd ".dump", pid);
-    const int fd = open(filename, O_CREAT | O_TRUNC | O_RDWR);
+    const int fd = open(filename, O_CREAT | O_TRUNC | O_RDWR, 0666);
     free(filename);
 
     if (fd == -1) {
@@ -155,9 +156,11 @@ class JitDumpCodeObserver : public CodeObserver {
     // writing all JIT generated code out.
     setvbuf(out_file_, nullptr, _IOFBF, 2 * MB);
 
-    // Disable code write protection, constant flickering of page attributes
+    // Disable code write protection and vm isolate write protection, because
+    // calling mprotect on the pages filled with JIT generated code objects
     // confuses perf.
     FLAG_write_protect_code = false;
+    FLAG_write_protect_vm_isolate = false;
 
     // Write JITDUMP header.
     WriteHeader();
@@ -520,7 +523,7 @@ bool OS::StringToInt64(const char* str, int64_t* value) {
     base = 16;
   }
   errno = 0;
-  if (FLAG_limit_ints_to_64_bits && (base == 16)) {
+  if (base == 16) {
     // Unsigned 64-bit hexadecimal integer literals are allowed but
     // immediately interpreted as signed 64-bit integers.
     *value = static_cast<int64_t>(strtoull(str, &endptr, base));

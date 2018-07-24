@@ -217,6 +217,7 @@ class ApiElementBuilder extends _BaseElementBuilder {
       constantField.isStatic = true;
       constantField.isConst = true;
       constantField.type = enumType;
+      constantField.metadata = _createElementAnnotations(constant.metadata);
       setElementDocumentationComment(constantField, constant);
       fields.add(constantField);
       new PropertyAccessorElementImpl_ImplicitGetter(constantField);
@@ -1181,6 +1182,7 @@ class LocalElementBuilder extends _BaseElementBuilder {
     _visitChildren(holder, node);
 
     FunctionElementImpl element = new FunctionElementImpl.forNode(node.name);
+    element.type = new FunctionTypeImpl(element);
     _setCodeRange(element, node);
     setElementDocumentationComment(element, node);
     element.metadata = _createElementAnnotations(node.metadata);

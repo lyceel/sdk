@@ -23,8 +23,6 @@ redirecting_factory_simple_test: Fail # Missing support for RedirectingFactoryCo
 redirecting_factory_typeargs_test: Fail # Missing support for RedirectingFactoryConstructor.
 redirecting_factory_typeparam_test: Fail # Missing support for RedirectingFactoryConstructor.
 redirecting_factory_typeparambounds_test: Fail # Missing support for RedirectingFactoryConstructor.
-redirection_chain_type_arguments: Fail # Issue 32130
-redirection_chain_type_arguments_subst: Fail # Issue 32130
 statements: Fail # Make async tranformer optional for golden file testing.
 type_variable_as_super: Fail
 uninitialized_fields: Fail # Fasta and dartk disagree on static initializers
@@ -41,9 +39,12 @@ inference/infer_assign_to_property_custom: Fail
 inference/infer_type_cast: Fail
 inference/infer_typed_list_literal: Fail
 inference/unsafe_block_closure_inference_function_call_explicit_dynamic_param_via_expr1: Fail
-inference/unsafe_block_closure_inference_function_call_explicit_dynamic_param_via_expr2: Fail
 inference/unsafe_block_closure_inference_function_call_explicit_type_param_via_expr1: Fail
-inference/unsafe_block_closure_inference_function_call_explicit_type_param_via_expr2: Fail
+inference/unsafe_block_closure_inference_function_call_explicit_type_param_via_expr2: RuntimeError
+
+instantiate_to_bound/body_typedef_super_bounded_type: Fail # Issue 33444
+instantiate_to_bound/non_simple_class_parametrized_typedef_cycle: RuntimeError # May be related to Issue 33479
+instantiate_to_bound/typedef_super_bounded_type: Fail # Issue 33444
 
 rasta/abstract_constructor: Fail
 rasta/bad_constructor_redirection: Fail
@@ -102,7 +103,7 @@ regress/issue_29975: Fail # Issue 29975.
 regress/issue_29976: RuntimeError # Issue 29976.
 regress/issue_29982: Fail # Issue 29982.
 regress/issue_30836: RuntimeError # Issue 30836.
-regress/issue_31155: Crash # Issue 31155.
+regress/issue_33452: RuntimeError # Test has an intentional error
 
 runtime_checks/implicit_downcast_constructor_initializer: RuntimeError # Test exercises strong mode semantics
 runtime_checks/implicit_downcast_do: RuntimeError # Test exercises strong mode semantics
@@ -116,6 +117,8 @@ runtime_checks_new/mixin_forwarding_stub_field: RuntimeError # Test exercises st
 runtime_checks_new/mixin_forwarding_stub_getter: RuntimeError # Test exercises strong mode semantics
 runtime_checks_new/mixin_forwarding_stub_setter: RuntimeError # Test exercises strong mode semantics
 runtime_checks_new/stub_checked_via_target: RuntimeError # Test exercises strong mode semantics
+constructor_const_inference: RuntimeError # Test exercises strong mode semantics.  See also Issue #33813.
+redirecting_factory_const_inference: RuntimeError # Test exercises strong mode semantics.  See also Issue #33813.
 
 ambiguous_exports: RuntimeError # Expected, this file exports two main methods.
 rasta/duplicated_mixin: RuntimeError # Expected, this file has no main method.

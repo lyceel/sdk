@@ -10,7 +10,7 @@
 #include "vm/compiler/jit/compiler.h"
 #include "vm/cpu.h"
 #include "vm/dart_entry.h"
-#include "vm/heap.h"
+#include "vm/heap/heap.h"
 #include "vm/instructions.h"
 #include "vm/object_store.h"
 #include "vm/runtime_entry.h"
@@ -100,6 +100,11 @@ void StubCode::GenerateTypeRefTypeTestStub(Assembler* assembler) {
 
 // TODO(kustermann): Don't generate this stub.
 void StubCode::GenerateUnreachableTypeTestStub(Assembler* assembler) {
+  __ Trap();
+}
+
+// TODO(kustermann): Don't generate this stub.
+void StubCode::GenerateLazySpecializeTypeTestStub(Assembler* assembler) {
   __ Trap();
 }
 

@@ -42,7 +42,7 @@ runTests({bool strongMode: false}) async {
       class G extends C {}
       abstract class H implements C {}
       abstract class I implements H {}
-      """, mainSource: r"""
+
       main() {
         new A().call;
         new C();
@@ -51,8 +51,8 @@ runTests({bool strongMode: false}) async {
         new F();
         new G();
       }
-      """, options: strongMode ? [Flags.strongMode] : []);
-  ClosedWorld world = env.closedWorld;
+      """, options: strongMode ? [Flags.strongMode] : [Flags.noPreviewDart2]);
+  KClosedWorld world = env.kClosedWorld;
 
   ClassEntity A = env.getElement("A");
   ClassEntity B = env.getElement("B");
@@ -67,7 +67,7 @@ runTests({bool strongMode: false}) async {
 
   void checkClass(ClassEntity cls, List<ClassEntity> expectedSubtypes,
       {bool checkSubset: false}) {
-    ClassSet node = world.getClassSet(cls);
+    ClassSet node = world.classHierarchy.getClassSet(cls);
     Set<ClassEntity> actualSubtypes = node.subtypes().toSet();
     if (checkSubset) {
       for (ClassEntity subtype in expectedSubtypes) {

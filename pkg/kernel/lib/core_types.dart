@@ -83,6 +83,7 @@ class CoreTypes {
   Class _asyncAwaitCompleterClass;
   Class _futureOrClass;
   Constructor _asyncAwaitCompleterConstructor;
+  Procedure _completeOnAsyncReturnProcedure;
   Procedure _completerSyncConstructor;
   Procedure _completerComplete;
   Procedure _completerCompleteError;
@@ -97,6 +98,10 @@ class CoreTypes {
 
   /// The `dart:mirrors` library, or `null` if the component does not use it.
   Library _mirrorsLibrary;
+
+  Class _pragmaClass;
+  Field _pragmaName;
+  Field _pragmaOptions;
 
   CoreTypes(Component component)
       : index = new LibraryIndex.coreLibraries(component);
@@ -178,6 +183,11 @@ class CoreTypes {
   Constructor get asyncAwaitCompleterConstructor {
     return _asyncAwaitCompleterConstructor ??=
         index.getMember('dart:async', '_AsyncAwaitCompleter', '');
+  }
+
+  Member get completeOnAsyncReturn {
+    return _completeOnAsyncReturnProcedure ??=
+        index.getTopLevelMember('dart:async', '_completeOnAsyncReturn');
   }
 
   Procedure get completerComplete {
@@ -316,6 +326,18 @@ class CoreTypes {
 
   Procedure get objectEquals {
     return _objectEquals ??= index.getMember('dart:core', 'Object', '==');
+  }
+
+  Class get pragmaClass {
+    return _pragmaClass ??= index.getClass('dart:core', 'pragma');
+  }
+
+  Field get pragmaName {
+    return _pragmaName ??= index.getMember('dart:core', 'pragma', 'name');
+  }
+
+  Field get pragmaOptions {
+    return _pragmaOptions ??= index.getMember('dart:core', 'pragma', 'options');
   }
 
   Procedure get printProcedure {

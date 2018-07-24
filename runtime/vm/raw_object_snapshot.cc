@@ -9,6 +9,7 @@
 #include "vm/snapshot.h"
 #include "vm/stub_code.h"
 #include "vm/symbols.h"
+#include "vm/type_testing_stubs.h"
 #include "vm/visitor.h"
 
 namespace dart {
@@ -236,6 +237,11 @@ RawType* Type::ReadFrom(SnapshotReader* reader,
     type.SetCanonical();
   }
 
+  // Fill in the type testing stub.
+  Instructions& instr = *reader->InstructionsHandle();
+  instr = TypeTestingStubGenerator::DefaultCodeForType(type);
+  type.SetTypeTestingStub(instr);
+
   return type.raw();
 }
 
@@ -306,6 +312,11 @@ RawTypeRef* TypeRef::ReadFrom(SnapshotReader* reader,
   READ_OBJECT_FIELDS(type_ref, type_ref.raw()->from(), type_ref.raw()->to(),
                      kAsReference);
 
+  // Fill in the type testing stub.
+  Instructions& instr = *reader->InstructionsHandle();
+  instr = TypeTestingStubGenerator::DefaultCodeForType(type_ref);
+  type_ref.SetTypeTestingStub(instr);
+
   return type_ref.raw();
 }
 
@@ -356,6 +367,11 @@ RawTypeParameter* TypeParameter::ReadFrom(SnapshotReader* reader,
   (*reader->ClassHandle()) =
       Class::RawCast(reader->ReadObjectImpl(kAsReference));
   type_parameter.set_parameterized_class(*reader->ClassHandle());
+
+  // Fill in the type testing stub.
+  Instructions& instr = *reader->InstructionsHandle();
+  instr = TypeTestingStubGenerator::DefaultCodeForType(type_parameter);
+  type_parameter.SetTypeTestingStub(instr);
 
   return type_parameter.raw();
 }
@@ -1623,7 +1639,7 @@ RawICData* ICData::ReadFrom(SnapshotReader* reader,
   NOT_IN_PRECOMPILED(result.set_deopt_id(reader->Read<int32_t>()));
   result.set_state_bits(reader->Read<uint32_t>());
 #if defined(TAG_IC_DATA)
-  result.set_tag(reader->Read<int16_t>());
+  result.set_tag(static_cast<ICData::Tag>(reader->Read<int16_t>()));
 #endif
 
   // Set all the object fields.
@@ -1650,7 +1666,7 @@ void RawICData::WriteTo(SnapshotWriter* writer,
   NOT_IN_PRECOMPILED(writer->Write<int32_t>(ptr()->deopt_id_));
   writer->Write<uint32_t>(ptr()->state_bits_);
 #if defined(TAG_IC_DATA)
-  writer->Write<int16_t>(ptr()->tag_);
+  writer->Write<int16_t>(static_cast<int64_t>(ptr()->tag_));
 #endif
 
   // Write out all the object pointer fields.
@@ -1852,7 +1868,11 @@ RawInstance* Instance::ReadFrom(SnapshotReader* reader,
   obj ^= Object::Allocate(kInstanceCid, Instance::InstanceSize(),
                           HEAP_SPACE(kind));
   if (RawObject::IsCanonical(tags)) {
-    obj = obj.CheckAndCanonicalize(reader->thread(), NULL);
+    const char* error_str = NULL;
+    obj = obj.CheckAndCanonicalize(reader->thread(), &error_str);
+    if (error_str != NULL) {
+      FATAL1("Failed to canonicalize: %s", error_str);
+    }
   }
   reader->AddBackRef(object_id, &obj, kIsDeserialized);
 
@@ -1924,51 +1944,6 @@ void RawMint::WriteTo(SnapshotWriter* writer,
 
   // Write out the 64 bit value.
   writer->Write<int64_t>(ptr()->value_);
-}
-
-RawBigint* Bigint::ReadFrom(SnapshotReader* reader,
-                            intptr_t object_id,
-                            intptr_t tags,
-                            Snapshot::Kind kind,
-                            bool as_reference) {
-  ASSERT(reader != NULL);
-
-  // Allocate bigint object.
-  Bigint& obj = Bigint::ZoneHandle(reader->zone(), Bigint::New());
-  reader->AddBackRef(object_id, &obj, kIsDeserialized);
-
-  // Set all the object fields.
-  READ_OBJECT_FIELDS(obj, obj.raw()->from(), obj.raw()->to(), kAsInlinedObject);
-
-  // If it is a canonical constant make it one.
-  // When reading a full snapshot we don't need to canonicalize the object
-  // as it would already be a canonical object.
-  // When reading a script snapshot or a message snapshot we always have
-  // to canonicalize the object.
-  if (RawObject::IsCanonical(tags)) {
-    obj ^= obj.CheckAndCanonicalize(reader->thread(), NULL);
-    ASSERT(!obj.IsNull());
-    ASSERT(obj.IsCanonical());
-  }
-  return obj.raw();
-}
-
-void RawBigint::WriteTo(SnapshotWriter* writer,
-                        intptr_t object_id,
-                        Snapshot::Kind kind,
-                        bool as_reference) {
-  ASSERT(writer != NULL);
-
-  // Write out the serialization header value for this object.
-  writer->WriteInlinedObjectHeader(object_id);
-
-  // Write out the class and tags information.
-  writer->WriteIndexedObject(kBigintCid);
-  writer->WriteTags(writer->GetObjectTags(this));
-
-  // Write out all the object pointer fields.
-  SnapshotWriterVisitor visitor(writer, kAsInlinedObject);
-  visitor.VisitPointers(from(), to());
 }
 
 RawDouble* Double::ReadFrom(SnapshotReader* reader,
@@ -2170,7 +2145,7 @@ void RawExternalOneByteString::WriteTo(SnapshotWriter* writer,
   // Serialize as a non-external one byte string.
   StringWriteTo(writer, object_id, kind, kOneByteStringCid,
                 writer->GetObjectTags(this), ptr()->length_,
-                ptr()->external_data_->data());
+                ptr()->external_data_);
 }
 
 void RawExternalTwoByteString::WriteTo(SnapshotWriter* writer,
@@ -2180,7 +2155,7 @@ void RawExternalTwoByteString::WriteTo(SnapshotWriter* writer,
   // Serialize as a non-external two byte string.
   StringWriteTo(writer, object_id, kind, kTwoByteStringCid,
                 writer->GetObjectTags(this), ptr()->length_,
-                ptr()->external_data_->data());
+                ptr()->external_data_);
 }
 
 RawBool* Bool::ReadFrom(SnapshotReader* reader,
@@ -2255,7 +2230,11 @@ RawImmutableArray* ImmutableArray::ReadFrom(SnapshotReader* reader,
     // Read all the individual elements for inlined objects.
     reader->ArrayReadFrom(object_id, *array, len, tags);
     if (RawObject::IsCanonical(tags)) {
-      *array ^= array->CheckAndCanonicalize(reader->thread(), NULL);
+      const char* error_str = NULL;
+      *array ^= array->CheckAndCanonicalize(reader->thread(), &error_str);
+      if (error_str != NULL) {
+        FATAL1("Failed to canonicalize: %s", error_str);
+      }
     }
   }
   return raw(*array);
@@ -2581,7 +2560,11 @@ RawTypedData* TypedData::ReadFrom(SnapshotReader* reader,
   // When reading a script snapshot or a message snapshot we always have
   // to canonicalize the object.
   if (RawObject::IsCanonical(tags)) {
-    result ^= result.CheckAndCanonicalize(reader->thread(), NULL);
+    const char* error_str = NULL;
+    result ^= result.CheckAndCanonicalize(reader->thread(), &error_str);
+    if (error_str != NULL) {
+      FATAL1("Failed to canonicalize: %s", error_str);
+    }
     ASSERT(!result.IsNull());
     ASSERT(result.IsCanonical());
   }

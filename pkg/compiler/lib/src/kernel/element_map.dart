@@ -20,7 +20,7 @@ import '../js_model/closure.dart' show JRecordField, KernelScopeInfo;
 import '../js_model/elements.dart' show JGeneratorBody;
 import '../native/native.dart' as native;
 import '../ssa/type_builder.dart';
-import '../types/types.dart';
+import '../types/abstract_value_domain.dart';
 import '../universe/call_structure.dart';
 import '../universe/selector.dart';
 import '../world.dart';
@@ -93,8 +93,11 @@ abstract class KernelToElementMap {
   /// Returns the [Name] corresponding to [name].
   Name getName(ir.Name name);
 
-  /// Return `true` if [node] is the `dart:_foreign_helper` library.
-  bool isForeignLibrary(ir.Library node);
+  /// Return `true` if [member] is a "foreign helper", that is, a member whose
+  /// semantics is defined synthetically and not through Dart code.
+  ///
+  /// Most foreign helpers are located in the `dart:_foreign_helper` library.
+  bool isForeignHelper(MemberEntity member);
 
   /// Computes the [native.NativeBehavior] for a call to the [JS] function.
   native.NativeBehavior getNativeBehaviorForJsCall(ir.StaticInvocation node);
@@ -120,6 +123,13 @@ abstract class KernelToElementMap {
 
   /// Return the [ImportEntity] corresponding to [node].
   ImportEntity getImport(ir.LibraryDependency node);
+
+  /// Returns the definition information for [cls].
+  ClassDefinition getClassDefinition(covariant ClassEntity cls);
+
+  /// Returns the static type of [node].
+  // TODO(johnniwinther): This should be provided directly from kernel.
+  DartType getStaticType(ir.Expression node);
 }
 
 /// Interface that translates between Kernel IR nodes and entities used for
@@ -182,15 +192,11 @@ abstract class KernelToElementMapForImpact extends KernelToElementMap {
   /// Returns the [ir.Library] corresponding to [library].
   ir.Library getLibraryNode(LibraryEntity library);
 
+  /// Returns the node that defines [typedef].
+  ir.Typedef getTypedefNode(covariant TypedefEntity typedef);
+
   /// Returns the definition information for [member].
   MemberDefinition getMemberDefinition(covariant MemberEntity member);
-
-  /// Returns the definition information for [cls].
-  ClassDefinition getClassDefinition(covariant ClassEntity cls);
-
-  /// Returns the static type of [node].
-  // TODO(johnniwinther): This should be provided directly from kernel.
-  DartType getStaticType(ir.Expression node);
 
   /// Returns the element type of a async/sync*/async* function.
   DartType getFunctionAsyncOrSyncStarElementType(ir.FunctionNode functionNode);
@@ -369,59 +375,56 @@ enum ForeignKind {
 /// Interface for type inference results for kernel IR nodes.
 abstract class KernelToTypeInferenceMap {
   /// Returns the inferred return type of [function].
-  TypeMask getReturnTypeOf(FunctionEntity function);
+  AbstractValue getReturnTypeOf(FunctionEntity function);
 
   /// Returns the inferred receiver type of the dynamic [invocation].
-  TypeMask receiverTypeOfInvocation(
-      ir.MethodInvocation invocation, ClosedWorld closedWorld);
+  AbstractValue receiverTypeOfInvocation(
+      ir.MethodInvocation invocation, AbstractValueDomain abstractValueDomain);
 
   /// Returns the inferred receiver type of the dynamic [read].
-  TypeMask receiverTypeOfGet(ir.PropertyGet read);
+  AbstractValue receiverTypeOfGet(ir.PropertyGet read);
 
   /// Returns the inferred receiver type of the direct [read].
-  TypeMask receiverTypeOfDirectGet(ir.DirectPropertyGet read);
+  AbstractValue receiverTypeOfDirectGet(ir.DirectPropertyGet read);
 
   /// Returns the inferred receiver type of the dynamic [write].
-  TypeMask receiverTypeOfSet(ir.PropertySet write, ClosedWorld closedWorld);
+  AbstractValue receiverTypeOfSet(
+      ir.PropertySet write, AbstractValueDomain abstractValueDomain);
 
   /// Returns the inferred type of [listLiteral].
-  TypeMask typeOfListLiteral(covariant MemberEntity owner,
-      ir.ListLiteral listLiteral, ClosedWorld closedWorld);
+  AbstractValue typeOfListLiteral(MemberEntity owner,
+      ir.ListLiteral listLiteral, AbstractValueDomain abstractValueDomain);
 
   /// Returns the inferred type of iterator in [forInStatement].
-  TypeMask typeOfIterator(ir.ForInStatement forInStatement);
+  AbstractValue typeOfIterator(ir.ForInStatement forInStatement);
 
   /// Returns the inferred type of `current` in [forInStatement].
-  TypeMask typeOfIteratorCurrent(ir.ForInStatement forInStatement);
+  AbstractValue typeOfIteratorCurrent(ir.ForInStatement forInStatement);
 
   /// Returns the inferred type of `moveNext` in [forInStatement].
-  TypeMask typeOfIteratorMoveNext(ir.ForInStatement forInStatement);
+  AbstractValue typeOfIteratorMoveNext(ir.ForInStatement forInStatement);
 
   /// Returns `true` if [forInStatement] is inferred to be a JavaScript
   /// indexable iterator.
-  bool isJsIndexableIterator(
-      ir.ForInStatement forInStatement, ClosedWorld closedWorld);
-
-  /// Returns `true` if [mask] is inferred to have a JavaScript `length`
-  /// property.
-  bool isFixedLength(TypeMask mask, ClosedWorld closedWorld);
+  bool isJsIndexableIterator(ir.ForInStatement forInStatement,
+      AbstractValueDomain abstractValueDomain);
 
   /// Returns the inferred index type of [forInStatement].
-  TypeMask inferredIndexType(ir.ForInStatement forInStatement);
+  AbstractValue inferredIndexType(ir.ForInStatement forInStatement);
 
   /// Returns the inferred type of [member].
-  TypeMask getInferredTypeOf(MemberEntity member);
+  AbstractValue getInferredTypeOf(MemberEntity member);
 
   /// Returns the inferred type of the [parameter].
-  TypeMask getInferredTypeOfParameter(Local parameter);
+  AbstractValue getInferredTypeOfParameter(Local parameter);
 
-  /// Returns the inferred type of a dynamic [selector] access on a receiver of
-  /// type [mask].
-  TypeMask selectorTypeOf(Selector selector, TypeMask mask);
+  /// Returns the inferred type of a dynamic [selector] access on the
+  /// [receiver].
+  AbstractValue selectorTypeOf(Selector selector, AbstractValue receiver);
 
   /// Returns the returned type annotation in the [nativeBehavior].
-  TypeMask typeFromNativeBehavior(
-      native.NativeBehavior nativeBehavior, ClosedWorld closedWorld);
+  AbstractValue typeFromNativeBehavior(
+      native.NativeBehavior nativeBehavior, JClosedWorld closedWorld);
 }
 
 /// Map from kernel IR nodes to local entities.
@@ -565,4 +568,69 @@ AsyncMarker getAsyncMarker(ir.FunctionNode node) {
       throw new UnsupportedError(
           "Async marker ${node.asyncMarker} is not supported.");
   }
+}
+
+/// Kernel encodes a null-aware expression `a?.b` as
+///
+///     let final #1 = a in #1 == null ? null : #1.b
+///
+/// [getNullAwareExpression] recognizes such expressions storing the result in
+/// a [NullAwareExpression] object.
+///
+/// [syntheticVariable] holds the synthesized `#1` variable. [expression] holds
+/// the `#1.b` expression. [receiver] returns `a` expression. [parent] returns
+/// the parent of the let node, i.e. the parent node of the original null-aware
+/// expression. [let] returns the let node created for the encoding.
+class NullAwareExpression {
+  final ir.VariableDeclaration syntheticVariable;
+  final ir.Expression expression;
+
+  NullAwareExpression(this.syntheticVariable, this.expression);
+
+  ir.Expression get receiver => syntheticVariable.initializer;
+
+  ir.TreeNode get parent => syntheticVariable.parent.parent;
+
+  ir.Let get let => syntheticVariable.parent;
+
+  String toString() => let.toString();
+}
+
+NullAwareExpression getNullAwareExpression(ir.TreeNode node) {
+  if (node is ir.Let) {
+    ir.Expression body = node.body;
+    if (node.variable.name == null &&
+        node.variable.isFinal &&
+        body is ir.ConditionalExpression &&
+        body.condition is ir.MethodInvocation &&
+        body.then is ir.NullLiteral) {
+      ir.MethodInvocation invocation = body.condition;
+      ir.Expression receiver = invocation.receiver;
+      if (invocation.name.name == '==' &&
+          receiver is ir.VariableGet &&
+          receiver.variable == node.variable &&
+          invocation.arguments.positional.single is ir.NullLiteral) {
+        // We have
+        //   let #t1 = e0 in #t1 == null ? null : e1
+        return new NullAwareExpression(node.variable, body.otherwise);
+      }
+    }
+  }
+  return null;
+}
+
+/// Returns the initializer for [field].
+///
+/// If [field] is an instance field with a null literal initializer `null` is
+/// returned, otherwise the initializer of the [ir.Field] is returned.
+ir.Node getFieldInitializer(
+    KernelToElementMapForBuilding elementMap, FieldEntity field) {
+  MemberDefinition definition = elementMap.getMemberDefinition(field);
+  ir.Field node = definition.node;
+  if (node.isInstanceMember &&
+      !node.isFinal &&
+      node.initializer is ir.NullLiteral) {
+    return null;
+  }
+  return node.initializer;
 }

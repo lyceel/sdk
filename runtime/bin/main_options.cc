@@ -63,20 +63,17 @@ ENUM_OPTIONS_LIST(ENUM_OPTION_DEFINITION)
 CB_OPTIONS_LIST(CB_OPTION_DEFINITION)
 #undef CB_OPTION_DEFINITION
 
-void Options::SetPreviewDart2Options(CommandLineOptions* vm_options) {
-#if !defined(DART_PRECOMPILED_RUNTIME)
-  Options::dfe()->set_use_dfe();
-#endif  // !defined(DART_PRECOMPILED_RUNTIME)
-  OPTION_FIELD(preview_dart_2) = true;
+void Options::SetDart2Options(CommandLineOptions* vm_options) {
   vm_options->AddArgument("--strong");
   vm_options->AddArgument("--reify-generic-functions");
-  vm_options->AddArgument("--limit-ints-to-64-bits");
   vm_options->AddArgument("--sync-async");
 }
 
-bool OPTION_FIELD(preview_dart_2) = false;
-DEFINE_BOOL_OPTION_CB(preview_dart_2,
-                      { Options::SetPreviewDart2Options(vm_options); });
+void Options::SetDart1Options(CommandLineOptions* vm_options) {
+  vm_options->AddArgument("--no-strong");
+  vm_options->AddArgument("--no-reify-generic-functions");
+  vm_options->AddArgument("--no-sync-async");
+}
 
 #if !defined(DART_PRECOMPILED_RUNTIME)
 DFE* Options::dfe_ = NULL;
@@ -86,7 +83,7 @@ DFE* Options::dfe_ = NULL;
 DEFINE_STRING_OPTION_CB(dfe, { Options::dfe()->set_frontend_filename(value); });
 #endif  // !defined(DART_PRECOMPILED_RUNTIME)
 
-DEFINE_BOOL_OPTION_CB(hot_reload_test_mode, {
+static void hot_reload_test_mode_callback(CommandLineOptions* vm_options) {
   // Identity reload.
   vm_options->AddArgument("--identity_reload");
   // Start reloading quickly.
@@ -97,9 +94,15 @@ DEFINE_BOOL_OPTION_CB(hot_reload_test_mode, {
   vm_options->AddArgument("--reload_every_back_off");
   // Ensure that every isolate has reloaded once before exiting.
   vm_options->AddArgument("--check_reloaded");
-});
+#if !defined(DART_PRECOMPILED_RUNTIME)
+  Options::dfe()->set_use_incremental_compiler(true);
+#endif  // !defined(DART_PRECOMPILED_RUNTIME)
+}
 
-DEFINE_BOOL_OPTION_CB(hot_reload_rollback_test_mode, {
+DEFINE_BOOL_OPTION_CB(hot_reload_test_mode, hot_reload_test_mode_callback);
+
+static void hot_reload_rollback_test_mode_callback(
+    CommandLineOptions* vm_options) {
   // Identity reload.
   vm_options->AddArgument("--identity_reload");
   // Start reloading quickly.
@@ -112,7 +115,13 @@ DEFINE_BOOL_OPTION_CB(hot_reload_rollback_test_mode, {
   vm_options->AddArgument("--check_reloaded");
   // Force all reloads to fail and execute the rollback code.
   vm_options->AddArgument("--reload_force_rollback");
-});
+#if !defined(DART_PRECOMPILED_RUNTIME)
+  Options::dfe()->set_use_incremental_compiler(true);
+#endif  // !defined(DART_PRECOMPILED_RUNTIME)
+}
+
+DEFINE_BOOL_OPTION_CB(hot_reload_rollback_test_mode,
+                      hot_reload_rollback_test_mode_callback);
 
 void Options::PrintVersion() {
   Log::PrintErr("Dart VM version: %s\n", Dart_VersionString());
@@ -299,6 +308,9 @@ bool Options::ProcessEnableVmServiceOption(const char* arg,
         "Use --enable-vm-service[=<port number>[/<bind address>]]\n");
     return false;
   }
+#if !defined(DART_PRECOMPILED_RUNTIME)
+  dfe()->set_use_incremental_compiler(true);
+#endif  // !defined(DART_PRECOMPILED_RUNTIME)
 
   return true;
 }
@@ -323,6 +335,9 @@ bool Options::ProcessObserveOption(const char* arg,
   vm_options->AddArgument("--pause-isolates-on-unhandled-exceptions");
   vm_options->AddArgument("--profiler");
   vm_options->AddArgument("--warn-on-pause-with-no-debugger");
+#if !defined(DART_PRECOMPILED_RUNTIME)
+  dfe()->set_use_incremental_compiler(true);
+#endif  // !defined(DART_PRECOMPILED_RUNTIME)
   return true;
 }
 
@@ -339,6 +354,9 @@ int Options::ParseArguments(int argc,
   const char* kPrefix = "--";
   const intptr_t kPrefixLen = strlen(kPrefix);
 
+  // Set Dart 2 as the default option.
+  Options::SetDart2Options(vm_options);
+
   // Store the executable name.
   Platform::SetExecutableName(argv[0]);
 
@@ -353,27 +371,9 @@ int Options::ParseArguments(int argc,
       // Check if this flag is a potentially valid VM flag.
       const char* kChecked = "-c";
       const char* kCheckedFull = "--checked";
-      const char* kPackageRoot = "-p";
-      if (strncmp(argv[i], kPackageRoot, strlen(kPackageRoot)) == 0) {
-        // If argv[i] + strlen(kPackageRoot) is \0, then look in argv[i + 1]
-        // Otherwise set Option::package_root_ = argv[i] + strlen(kPackageRoot)
-        const char* opt = argv[i] + strlen(kPackageRoot);
-        if (opt[0] == '\0') {
-          i++;
-          opt = argv[i];
-          if ((opt == NULL) || (opt[0] == '-')) {
-            Log::PrintErr("Invalid option specification : '%s'\n", argv[i - 1]);
-            i++;
-            break;
-          }
-        }
-        package_root_ = opt;
-        i++;
-        continue;  // '-p' is not a VM flag so don't add to vm options.
-      } else if ((strncmp(argv[i], kChecked, strlen(kChecked)) == 0) ||
-                 (strncmp(argv[i], kCheckedFull, strlen(kCheckedFull)) == 0)) {
+      if ((strncmp(argv[i], kChecked, strlen(kChecked)) == 0) ||
+          (strncmp(argv[i], kCheckedFull, strlen(kCheckedFull)) == 0)) {
         checked_set = true;
-        vm_options->AddArgument(kCheckedFull);
         i++;
         continue;  // '-c' is not a VM flag so don't add to vm options.
       } else if (!OptionProcessor::IsValidFlag(argv[i], kPrefix, kPrefixLen)) {
@@ -399,6 +399,13 @@ int Options::ParseArguments(int argc,
     }
   }
 
+  if (Options::no_preview_dart_2()) {
+    Options::SetDart1Options(vm_options);
+  } else {
+#if !defined(DART_PRECOMPILED_RUNTIME)
+    Options::dfe()->set_use_dfe();
+#endif  // !defined(DART_PRECOMPILED_RUNTIME)
+  }
   if (Options::deterministic()) {
     // Both an embedder and VM flag.
     vm_options->AddArgument("--deterministic");
@@ -459,9 +466,11 @@ int Options::ParseArguments(int argc,
         " run using a snapshot is invalid.\n");
     return -1;
   }
-  if (checked_set && Options::preview_dart_2()) {
-    Log::PrintErr("Flags --checked and --preview-dart-2 are not compatible.\n");
-    return -1;
+  if (checked_set) {
+    vm_options->AddArgument("--enable-asserts");
+    if (Options::no_preview_dart_2()) {
+      vm_options->AddArgument("--enable-type-checks");
+    }
   }
 
   // If --snapshot is given without --snapshot-kind, default to script snapshot.

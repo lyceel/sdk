@@ -6,9 +6,9 @@
 #define RUNTIME_VM_DART_API_IMPL_H_
 
 #include "vm/allocation.h"
+#include "vm/heap/safepoint.h"
 #include "vm/native_arguments.h"
 #include "vm/object.h"
-#include "vm/safepoint.h"
 #include "vm/thread_registry.h"
 #include "vm/timeline.h"
 
@@ -52,7 +52,7 @@ const char* CanonicalFunction(const char* func);
 #define CHECK_API_SCOPE(thread)                                                \
   do {                                                                         \
     Thread* tmpT = (thread);                                                   \
-    Isolate* tmpI = tmpT->isolate();                                           \
+    Isolate* tmpI = tmpT == NULL ? NULL : tmpT->isolate();                     \
     CHECK_ISOLATE(tmpI);                                                       \
     if (tmpT->api_top_scope() == NULL) {                                       \
       FATAL1(                                                                  \

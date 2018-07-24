@@ -63,6 +63,8 @@ class ChangeBuilderImpl implements ChangeBuilder {
   @override
   Future<Null> addFileEdit(
       String path, void buildFileEdit(FileEditBuilder builder)) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     FileEditBuilderImpl builder = await createFileEditBuilder(path);
     buildFileEdit(builder);
     _change.addFileEdit(builder.fileEdit);
@@ -74,6 +76,8 @@ class ChangeBuilderImpl implements ChangeBuilder {
    * the file with the given [path] and [timeStamp].
    */
   Future<FileEditBuilderImpl> createFileEditBuilder(String path) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     return new FileEditBuilderImpl(this, path, 0);
   }
 
@@ -184,13 +188,15 @@ class EditBuilderImpl implements EditBuilder {
     } finally {
       int end = offset + _buffer.length;
       int length = end - start;
-      Position position = new Position(fileEditBuilder.fileEdit.file, start);
-      fileEditBuilder.changeBuilder._lockedPositions.add(position);
-      LinkedEditGroup group =
-          fileEditBuilder.changeBuilder.getLinkedEditGroup(groupName);
-      group.addPosition(position, length);
-      for (LinkedEditSuggestion suggestion in builder.suggestions) {
-        group.addSuggestion(suggestion);
+      if (length != 0) {
+        Position position = new Position(fileEditBuilder.fileEdit.file, start);
+        fileEditBuilder.changeBuilder._lockedPositions.add(position);
+        LinkedEditGroup group =
+            fileEditBuilder.changeBuilder.getLinkedEditGroup(groupName);
+        group.addPosition(position, length);
+        for (LinkedEditSuggestion suggestion in builder.suggestions) {
+          group.addSuggestion(suggestion);
+        }
       }
     }
   }
@@ -229,9 +235,8 @@ class EditBuilderImpl implements EditBuilder {
   }
 
   @override
-  void write(String string, {StringBuffer displayTextBuffer}) {
+  void write(String string) {
     _buffer.write(string);
-    displayTextBuffer?.write(string);
   }
 
   @override
@@ -332,6 +337,8 @@ class FileEditBuilderImpl implements FileEditBuilder {
    * Finalize the source file edit that is being built.
    */
   Future<Null> finalize() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     // Nothing to do.
   }
 

@@ -18,20 +18,27 @@ import 'package:path/path.dart' as path;
 
 Future main(List<String> args) async {
   // Parse flags.
-  var parser = new ArgParser();
+  var parser = ArgParser();
   var parserOptions = parser.parse(args);
   var rest = parserOptions.rest;
 
-  Directory.current = path.dirname(path.dirname(path.fromUri(Platform.script)));
+  var ddcPath = path.dirname(path.dirname(path.fromUri(Platform.script)));
+  Directory.current = ddcPath;
 
-  var outputPath =
-      path.absolute(rest.length > 0 ? rest[0] : 'gen/sdk/kernel/ddc_sdk.dill');
+  String outputPath;
+  if (rest.isNotEmpty) {
+    outputPath = path.absolute(rest[0]);
+  } else {
+    var sdkRoot = path.absolute(path.dirname(path.dirname(ddcPath)));
+    var buildDir = path.join(sdkRoot, Platform.isMacOS ? 'xcodebuild' : 'out');
+    var genDir = path.join(buildDir, 'ReleaseX64', 'gen', 'utils', 'dartdevc');
+    outputPath = path.join(genDir, 'kernel', 'ddc_sdk.dill');
+  }
 
   var inputPath = path.absolute('tool/input_sdk');
-  var target = new DevCompilerTarget();
-  var options = new CompilerOptions()
+  var target = DevCompilerTarget();
+  var options = CompilerOptions()
     ..compileSdk = true
-    ..chaseDependencies = true
     ..packagesFileUri = path.toUri(path.absolute('../../.packages'))
     ..sdkRoot = path.toUri(inputPath)
     ..target = target;
@@ -40,10 +47,10 @@ Future main(List<String> args) async {
   var component = await kernelForComponent(inputs, options);
 
   var outputDir = path.dirname(outputPath);
-  await new Directory(outputDir).create(recursive: true);
+  await Directory(outputDir).create(recursive: true);
   await writeComponentToBinary(component, outputPath);
 
-  var jsModule = new ProgramCompiler(component, declaredVariables: {})
+  var jsModule = ProgramCompiler(component, declaredVariables: {})
       .emitModule(component, [], []);
   var moduleFormats = {
     'amd': ModuleFormat.amd,
@@ -56,9 +63,9 @@ Future main(List<String> args) async {
     var format = moduleFormats[name];
     var jsDir = path.join(outputDir, name);
     var jsPath = path.join(jsDir, 'dart_sdk.js');
-    await new Directory(jsDir).create();
+    await Directory(jsDir).create();
     var jsCode = jsProgramToCode(jsModule, format);
-    await new File(jsPath).writeAsString(jsCode.code);
-    await new File('$jsPath.map').writeAsString(json.encode(jsCode.sourceMap));
+    await File(jsPath).writeAsString(jsCode.code);
+    await File('$jsPath.map').writeAsString(json.encode(jsCode.sourceMap));
   }
 }

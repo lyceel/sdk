@@ -9,11 +9,9 @@ import 'strong_mode_test.dart';
 
 main() {
   defineReflectiveSuite(() {
-    // TODO(scheglov): Restore similar test coverage when the front-end API
-    // allows it.  See https://github.com/dart-lang/sdk/issues/32258.
-    // defineReflectiveTests(StrongModeLocalInferenceTest_Kernel);
-    // defineReflectiveTests(StrongModeStaticTypeAnalyzer2Test_Kernel);
-    // defineReflectiveTests(StrongModeTypePropagationTest_Kernel);
+    defineReflectiveTests(StrongModeLocalInferenceTest_Kernel);
+    defineReflectiveTests(StrongModeStaticTypeAnalyzer2Test_Kernel);
+    defineReflectiveTests(StrongModeTypePropagationTest_Kernel);
   });
 }
 
@@ -38,18 +36,7 @@ class StrongModeLocalInferenceTest_Kernel extends StrongModeLocalInferenceTest {
   bool get useCFE => true;
 
   @override
-  @failingTest
-  test_async_star_method_propagation() async {
-    // Bad state: No type information for Stream at 124
-    await super.test_async_star_method_propagation();
-  }
-
-  @override
-  @failingTest
-  test_async_star_propagation() async {
-    // Bad state: No type information for Stream at 105
-    await super.test_async_star_propagation();
-  }
+  bool get usingFastaParser => true;
 
   @override
   @failingTest
@@ -222,13 +209,6 @@ class StrongModeLocalInferenceTest_Kernel extends StrongModeLocalInferenceTest {
 
   @override
   @failingTest
-  test_inferredFieldDeclaration_propagation() async {
-    // Expected: InterfaceTypeImpl:<int>
-    await super.test_inferredFieldDeclaration_propagation();
-  }
-
-  @override
-  @failingTest
   test_instanceCreation() async {
     // AnalysisException: Element mismatch in /test.dart at class A<S, T>
     await super.test_instanceCreation();
@@ -254,6 +234,20 @@ class StrongModeLocalInferenceTest_Kernel extends StrongModeLocalInferenceTest {
 
   @override
   @failingTest
+  test_redirectedConstructor_named() {
+    // Expected: 'A<T2, U2>'; Actual: 'A<T, U>'
+    return super.test_redirectedConstructor_named();
+  }
+
+  @override
+  @failingTest
+  test_redirectedConstructor_unnamed() {
+    // Expected: 'A<T2, U2>'; Actual: 'A<T, U>'
+    return super.test_redirectedConstructor_unnamed();
+  }
+
+  @override
+  @failingTest
   test_redirectingConstructor_propagation() async {
     // AnalysisException: Element mismatch in /test.dart at class A
     await super.test_redirectingConstructor_propagation();
@@ -275,22 +269,7 @@ class StrongModeStaticTypeAnalyzer2Test_Kernel
   bool get useCFE => true;
 
   @override
-  test_dynamicObjectGetter_hashCode() async {
-    // Fails with non-kernel analyzer but works correctly with kernel.
-    await super.test_dynamicObjectGetter_hashCode();
-  }
-
-  @override
-  test_dynamicObjectMethod_toString() async {
-    // Fails with non-kernel analyzer but works correctly with kernel.
-    await super.test_dynamicObjectMethod_toString();
-  }
-
-  @override
-  test_futureOr_promotion3() async {
-    // Test passes even though the overridden method fails.
-    await super.test_futureOr_promotion3();
-  }
+  bool get usingFastaParser => true;
 
   @override
   @failingTest
@@ -315,6 +294,22 @@ class StrongModeStaticTypeAnalyzer2Test_Kernel
 
   @override
   @failingTest
+  test_genericMethod_functionExpressionInvocation_functionTypedParameter_explicit() {
+    // Failed to resolve 2 nodes
+    return super
+        .test_genericMethod_functionExpressionInvocation_functionTypedParameter_explicit();
+  }
+
+  @override
+  @failingTest
+  test_genericMethod_functionExpressionInvocation_functionTypedParameter_inferred() {
+    // Failed to resolve 1 nodes
+    return super
+        .test_genericMethod_functionExpressionInvocation_functionTypedParameter_inferred();
+  }
+
+  @override
+  @failingTest
   test_genericMethod_functionExpressionInvocation_inferred() async {
     // Bad state: Expected element declaration for analyzer offset 230; got one for kernel offset 233
     await super.test_genericMethod_functionExpressionInvocation_inferred();
@@ -329,9 +324,32 @@ class StrongModeStaticTypeAnalyzer2Test_Kernel
 
   @override
   @failingTest
+  test_genericMethod_functionInvocation_functionTypedParameter_explicit() {
+    // Failed to resolve 1 nodes
+    return super
+        .test_genericMethod_functionInvocation_functionTypedParameter_explicit();
+  }
+
+  @override
+  @failingTest
+  test_genericMethod_functionInvocation_functionTypedParameter_inferred() {
+    // Failed to resolve 1 nodes
+    return super
+        .test_genericMethod_functionInvocation_functionTypedParameter_inferred();
+  }
+
+  @override
+  @failingTest
   test_genericMethod_functionInvocation_inferred() async {
     // Failed to resolve 1 nodes:
     await super.test_genericMethod_functionInvocation_inferred();
+  }
+
+  @override
+  @failingTest
+  test_genericMethod_functionTypedParameter_tearoff() {
+    // Failed to resolve 1 nodes
+    return super.test_genericMethod_functionTypedParameter_tearoff();
   }
 
   @override
@@ -350,16 +368,18 @@ class StrongModeStaticTypeAnalyzer2Test_Kernel
 
   @override
   @failingTest
-  test_genericMethod_override_invalidReturnType() async {
+  test_genericMethod_override_invalidContravariantTypeParamBounds() async {
     // Expected 1 errors of type StrongModeCode.STRONG_MODE_INVALID_METHOD_OVERRIDE, found 0
-    await super.test_genericMethod_override_invalidReturnType();
+    await super
+        .test_genericMethod_override_invalidContravariantTypeParamBounds();
   }
 
   @override
   @failingTest
-  test_genericMethod_override_invalidTypeParamBounds() async {
+  test_genericMethod_override_invalidCovariantTypeParamBounds() async {
     // Expected 1 errors of type StrongModeCode.STRONG_MODE_INVALID_METHOD_OVERRIDE, found 0
-    await super.test_genericMethod_override_invalidTypeParamBounds();
+    await super
+        .test_genericMethod_override_invalidContravariantTypeParamBounds();
   }
 
   @override
@@ -385,9 +405,87 @@ class StrongModeStaticTypeAnalyzer2Test_Kernel
 
   @override
   @failingTest
-  @potentialAnalyzerProblem
-  test_instantiateToBounds_class_error_recursion() async {
-    return super.test_instantiateToBounds_class_error_recursion();
+  test_genericMethod_toplevel_field_staticTearoff() {
+    // Failed to resolve 1 nodes
+    return super.test_genericMethod_toplevel_field_staticTearoff();
+  }
+
+  @override
+  test_notInstantiatedBound_class_error_recursion_less_direct() async {
+    return super.test_notInstantiatedBound_class_error_recursion_less_direct();
+  }
+
+  @override
+  @failingTest
+  test_notInstantiatedBound_class_error_recursion_typedef() {
+    // Expected 2 errors of type
+    // StrongModeCode.STRONG_MODE_NOT_INSTANTIATED_BOUND, found 0; 1 errors of
+    // type CompileTimeErrorCode.TYPE_ALIAS_CANNOT_REFERENCE_ITSELF, found 0
+    return super.test_notInstantiatedBound_class_error_recursion_typedef();
+  }
+
+  @override
+  @failingTest
+  test_notInstantiatedBound_error_class_argument() {
+    // Expected 1 errors of type
+    // StrongModeCode.STRONG_MODE_NOT_INSTANTIATED_BOUND, found 0
+    return super.test_notInstantiatedBound_error_class_argument();
+  }
+
+  @override
+  @failingTest
+  test_notInstantiatedBound_error_class_argument2() {
+    // Expected 1 errors of type
+    // StrongModeCode.STRONG_MODE_NOT_INSTANTIATED_BOUND, found 0
+    return super.test_notInstantiatedBound_error_class_argument2();
+  }
+
+  @override
+  @failingTest
+  test_notInstantiatedBound_error_class_direct() {
+    // Expected 1 errors of type
+    // StrongModeCode.STRONG_MODE_NOT_INSTANTIATED_BOUND, found 0
+    return super.test_notInstantiatedBound_error_class_direct();
+  }
+
+  @override
+  @failingTest
+  test_notInstantiatedBound_error_class_indirect() {
+    // Expected 1 errors of type
+    // StrongModeCode.STRONG_MODE_NOT_INSTANTIATED_BOUND, found 0
+    return super.test_notInstantiatedBound_error_class_indirect();
+  }
+
+  @override
+  @failingTest
+  test_notInstantiatedBound_error_functionType() {
+    // Expected 2 errors of type
+    // StrongModeCode.STRONG_MODE_NOT_INSTANTIATED_BOUND, found 0
+    return super.test_notInstantiatedBound_error_functionType();
+  }
+
+  @override
+  @failingTest
+  test_notInstantiatedBound_error_typedef_argument() {
+    // Expected 1 errors of type
+    // StrongModeCode.STRONG_MODE_NOT_INSTANTIATED_BOUND, found 0
+    return super.test_notInstantiatedBound_error_typedef_argument();
+  }
+
+  @override
+  @failingTest
+  test_notInstantiatedBound_error_typedef_argument2() {
+    // Expected 1 errors of type
+    // StrongModeCode.STRONG_MODE_NOT_INSTANTIATED_BOUND, found 0
+    return super.test_notInstantiatedBound_error_typedef_argument2();
+  }
+
+  @override
+  @failingTest
+  test_notInstantiatedBound_error_typedef_direct() {
+    // Expected 1 errors of type
+    // StrongModeCode.STRONG_MODE_NOT_INSTANTIATED_BOUND, found 0
+    return super.test_notInstantiatedBound_error_typedef_direct();
   }
 
   @override
@@ -399,22 +497,9 @@ class StrongModeStaticTypeAnalyzer2Test_Kernel
 
   @override
   @failingTest
-  test_setterWithNoVoidType() async {
-    // Expected 1 errors of type StaticTypeWarningCode.RETURN_OF_INVALID_TYPE, found 0
-    await super.test_setterWithNoVoidType();
-  }
-
-  @override
-  @failingTest
   test_setterWithOtherTypeIsError() async {
     // Expected 2 errors of type StaticWarningCode.NON_VOID_RETURN_FOR_SETTER, found 0
     await super.test_setterWithOtherTypeIsError();
-  }
-
-  @override
-  @failingTest
-  test_returnOfInvalidType_object_void() async {
-    await super.test_returnOfInvalidType_object_void();
   }
 }
 
@@ -429,4 +514,7 @@ class StrongModeTypePropagationTest_Kernel
 
   @override
   bool get useCFE => true;
+
+  @override
+  bool get usingFastaParser => true;
 }

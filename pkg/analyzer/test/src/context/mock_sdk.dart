@@ -157,6 +157,7 @@ abstract class String implements Comparable<String>, Pattern {
   bool get isEmpty => false;
   bool get isNotEmpty => false;
   int get length => 0;
+  int codeUnitAt(int index);
   String substring(int len) => null;
   String toLowerCase();
   String toUpperCase();
@@ -285,7 +286,7 @@ abstract class Iterable<E> {
 }
 
 class List<E> implements Iterable<E> {
-  List();
+  List([int length]);
   factory List.from(Iterable elements, {bool growable: true}) => null;
   void add(E value) {}
   void addAll(Iterable<E> iterable) {}
@@ -310,6 +311,10 @@ class Map<K, V> extends Object {
 
 class Duration implements Comparable<Duration> {}
 
+class Exception {
+  factory Exception([var message]);
+}
+
 external bool identical(Object a, Object b);
 
 void print(Object object) {}
@@ -328,10 +333,6 @@ class _CompileTimeError {
 class _ConstantExpressionError {
   const _ConstantExpressionError();
   external _throw(error);
-}
-
-class _DuplicatedFieldInitializerError {
-  _DuplicatedFieldInitializerError(String name);
 }
 
 class AbstractClassInstantiationError {
@@ -451,7 +452,7 @@ const List<SdkLibrary> _LIBRARIES = const [
 ];
 
 class MockSdk implements DartSdk {
-  static const Map<String, String> FULL_URI_MAP = const {
+  static const Map<String, String> _URI_MAP = const {
     "dart:core": "$sdkRoot/lib/core/core.dart",
     "dart:html": "$sdkRoot/lib/html/dartium/html_dartium.dart",
     "dart:async": "$sdkRoot/lib/async/async.dart",
@@ -465,13 +466,9 @@ class MockSdk implements DartSdk {
     "dart:math": "$sdkRoot/lib/math/math.dart"
   };
 
-  static const Map<String, String> NO_ASYNC_URI_MAP = const {
-    "dart:core": "$sdkRoot/lib/core/core.dart",
-  };
-
   final resource.MemoryResourceProvider provider;
 
-  final Map<String, String> uriMap;
+  final Map<String, String> uriMap = {};
 
   /**
    * The [AnalysisContextImpl] which is used for all of the sources.
@@ -479,7 +476,7 @@ class MockSdk implements DartSdk {
   AnalysisContextImpl _analysisContext;
 
   @override
-  final List<SdkLibrary> sdkLibraries;
+  final List<SdkLibrary> sdkLibraries = [];
 
   /**
    * The cached linked bundle of the SDK.
@@ -488,15 +485,21 @@ class MockSdk implements DartSdk {
 
   MockSdk(
       {bool generateSummaryFiles: false,
-      bool dartAsync: true,
       resource.MemoryResourceProvider resourceProvider})
-      : provider = resourceProvider ?? new resource.MemoryResourceProvider(),
-        sdkLibraries = dartAsync ? _LIBRARIES : [_LIB_CORE],
-        uriMap = dartAsync ? FULL_URI_MAP : NO_ASYNC_URI_MAP {
+      : provider = resourceProvider ?? new resource.MemoryResourceProvider() {
+    _URI_MAP.forEach((uri, path) {
+      uriMap[uri] = provider.convertPath(path);
+    });
+
+    for (_MockSdkLibrary library in _LIBRARIES) {
+      var convertedLibrary = library._toProvider(provider);
+      sdkLibraries.add(convertedLibrary);
+    }
+
     for (_MockSdkLibrary library in sdkLibraries) {
-      provider.newFile(provider.convertPath(library.path), library.content);
+      provider.newFile(library.path, library.content);
       library.parts.forEach((String path, String content) {
-        provider.newFile(provider.convertPath(path), content);
+        provider.newFile(path, content);
       });
     }
     provider.newFile(
@@ -536,7 +539,7 @@ class MockSdk implements DartSdk {
       return null;
     }
     for (SdkLibrary library in sdkLibraries) {
-      String libraryPath = provider.convertPath(library.path);
+      String libraryPath = library.path;
       if (filePath == libraryPath) {
         try {
           resource.File file = provider.getResource(filePath);
@@ -593,7 +596,7 @@ class MockSdk implements DartSdk {
   Source mapDartUri(String dartUri) {
     String path = uriMap[dartUri];
     if (path != null) {
-      resource.File file = provider.getResource(provider.convertPath(path));
+      resource.File file = provider.getResource(path);
       Uri uri = new Uri(scheme: 'dart', path: dartUri.substring(5));
       return file.createSource(uri);
     }
@@ -603,29 +606,13 @@ class MockSdk implements DartSdk {
   }
 
   /**
-   * This method is used to apply patches to [MockSdk].  It may be called only
-   * before analysis, i.e. before the analysis context was created.
-   */
-  void updateUriFile(String uri, String updateContent(String content)) {
-    assert(_analysisContext == null);
-    String path = FULL_URI_MAP[uri];
-    assert(path != null);
-    path = provider.convertPath(path);
-    String content = provider.getFile(path).readAsStringSync();
-    String newContent = updateContent(content);
-    provider.updateFile(path, newContent);
-  }
-
-  /**
    * Compute the bytes of the linked bundle associated with this SDK.
    */
   List<int> _computeLinkedBundleBytes() {
     List<Source> librarySources = sdkLibraries
         .map((SdkLibrary library) => mapDartUri(library.shortName))
         .toList();
-    return new SummaryBuilder(
-            librarySources, context, context.analysisOptions.strongMode)
-        .build();
+    return new SummaryBuilder(librarySources, context, true).build();
   }
 }
 
@@ -658,6 +645,18 @@ class _MockSdkLibrary implements SdkLibrary {
 
   @override
   bool get isVmLibrary => throw new UnimplementedError();
+
+  _MockSdkLibrary _toProvider(resource.MemoryResourceProvider provider) {
+    return new _MockSdkLibrary(
+      shortName,
+      provider.convertPath(path),
+      content,
+      parts.map((path, content) {
+        var convertedPath = provider.convertPath(path);
+        return new MapEntry(convertedPath, content);
+      }),
+    );
+  }
 }
 
 /**

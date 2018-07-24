@@ -386,6 +386,11 @@ void ConstantPropagator::VisitDropTemps(DropTempsInstr* instr) {
   UNREACHABLE();
 }
 
+void ConstantPropagator::VisitMakeTemp(MakeTempInstr* instr) {
+  // Instruction is eliminated when translating to SSA.
+  UNREACHABLE();
+}
+
 void ConstantPropagator::VisitStoreLocal(StoreLocalInstr* instr) {
   // Instruction is eliminated when translating to SSA.
   UNREACHABLE();
@@ -488,9 +493,7 @@ void ConstantPropagator::VisitTestSmi(TestSmiInstr* instr) {
   if (IsNonConstant(left) || IsNonConstant(right)) {
     SetValue(instr, non_constant_);
   } else if (IsConstant(left) && IsConstant(right)) {
-    // BitOp does not work on Bigints.
-    if (left.IsInteger() && right.IsInteger() && !left.IsBigint() &&
-        !right.IsBigint()) {
+    if (left.IsInteger() && right.IsInteger()) {
       const bool result = CompareIntegers(
           instr->kind(),
           Integer::Handle(Z, Integer::Cast(left).BitOp(Token::kBIT_AND,
@@ -703,8 +706,10 @@ void ConstantPropagator::VisitBooleanNegate(BooleanNegateInstr* instr) {
 void ConstantPropagator::VisitInstanceOf(InstanceOfInstr* instr) {
   Definition* def = instr->value()->definition();
   const Object& value = def->constant_value();
-  if (IsNonConstant(value)) {
-    const AbstractType& checked_type = instr->type();
+  const AbstractType& checked_type = instr->type();
+  if (checked_type.IsTopType()) {
+    SetValue(instr, Bool::True());
+  } else if (IsNonConstant(value)) {
     intptr_t value_cid = instr->value()->definition()->Type()->ToCid();
     Representation rep = def->representation();
     if ((checked_type.IsFloat32x4Type() && (rep == kUnboxedFloat32x4)) ||
@@ -725,7 +730,6 @@ void ConstantPropagator::VisitInstanceOf(InstanceOfInstr* instr) {
   } else if (IsConstant(value)) {
     if (value.IsInstance()) {
       const Instance& instance = Instance::Cast(value);
-      const AbstractType& checked_type = instr->type();
       if (instr->instantiator_type_arguments()->BindsToConstantNull() &&
           instr->function_type_arguments()->BindsToConstantNull()) {
         Error& bound_error = Error::Handle();
@@ -772,7 +776,8 @@ void ConstantPropagator::VisitLoadClassId(LoadClassIdInstr* instr) {
 
 void ConstantPropagator::VisitLoadField(LoadFieldInstr* instr) {
   Value* instance = instr->instance();
-  if ((instr->recognized_kind() == MethodRecognizer::kObjectArrayLength) &&
+  if ((instr->native_field() != nullptr) &&
+      (instr->native_field()->kind() == NativeFieldDesc::kArray_length) &&
       instance->definition()->OriginalDefinition()->IsCreateArray()) {
     Value* num_elements = instance->definition()
                               ->OriginalDefinition()
@@ -930,15 +935,25 @@ void ConstantPropagator::VisitBinaryUint32Op(BinaryUint32OpInstr* instr) {
   VisitBinaryIntegerOp(instr);
 }
 
-void ConstantPropagator::VisitShiftUint32Op(ShiftUint32OpInstr* instr) {
-  VisitBinaryIntegerOp(instr);
-}
-
 void ConstantPropagator::VisitBinaryInt64Op(BinaryInt64OpInstr* instr) {
   VisitBinaryIntegerOp(instr);
 }
 
 void ConstantPropagator::VisitShiftInt64Op(ShiftInt64OpInstr* instr) {
+  VisitBinaryIntegerOp(instr);
+}
+
+void ConstantPropagator::VisitSpeculativeShiftInt64Op(
+    SpeculativeShiftInt64OpInstr* instr) {
+  VisitBinaryIntegerOp(instr);
+}
+
+void ConstantPropagator::VisitShiftUint32Op(ShiftUint32OpInstr* instr) {
+  VisitBinaryIntegerOp(instr);
+}
+
+void ConstantPropagator::VisitSpeculativeShiftUint32Op(
+    SpeculativeShiftUint32OpInstr* instr) {
   VisitBinaryIntegerOp(instr);
 }
 

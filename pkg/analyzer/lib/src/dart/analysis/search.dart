@@ -3,6 +3,7 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import 'dart:async';
+import 'dart:collection';
 
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/ast/visitor.dart';
@@ -81,6 +82,8 @@ class Search {
    * Returns class members with the given [name].
    */
   Future<List<Element>> classMembers(String name) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     List<Element> elements = <Element>[];
 
     void addElement(Element element) {
@@ -113,12 +116,12 @@ class Search {
    * declarations.
    *
    * The path of each file with at least one declaration is added to [files].
-   * The list is for searched, there might be duplicates, but this is OK,
-   * we just want reduce amount of data, not to make it absolute minimum.
    */
   Future<List<Declaration>> declarations(
-      RegExp regExp, int maxResults, List<String> files,
+      RegExp regExp, int maxResults, LinkedHashSet<String> files,
       {String onlyForFile}) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     List<Declaration> declarations = <Declaration>[];
 
     DeclarationKind getExecutableKind(
@@ -139,13 +142,18 @@ class Search {
       }
     }
 
+    await _driver.discoverAvailableFiles();
+
     try {
-      for (String path in _driver.addedFiles) {
-        if (onlyForFile != null && path != onlyForFile) {
+      List<FileState> knownFiles = _driver.fsState.knownFiles.toList();
+      for (FileState file in knownFiles) {
+        if (onlyForFile != null && file.path != onlyForFile) {
+          continue;
+        }
+        if (files.contains(file.path)) {
           continue;
         }
 
-        FileState file = _driver.fsState.getFileForPath(path);
         int fileIndex;
 
         void addDeclaration(String name, DeclarationKind kind, int offset,
@@ -166,6 +174,7 @@ class Search {
             fileIndex = files.length;
             files.add(file.path);
           }
+
           var location = file.lineInfo.getLocation(offset);
           declarations.add(new Declaration(
               fileIndex,
@@ -279,7 +288,10 @@ class Search {
   /**
    * Returns references to the [element].
    */
-  Future<List<SearchResult>> references(Element element) async {
+  Future<List<SearchResult>> references(
+      Element element, SearchedFiles searchedFiles) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (element == null) {
       return const <SearchResult>[];
     }
@@ -289,46 +301,54 @@ class Search {
         kind == ElementKind.CONSTRUCTOR ||
         kind == ElementKind.FUNCTION_TYPE_ALIAS ||
         kind == ElementKind.SETTER) {
-      return _searchReferences(element);
+      return _searchReferences(element, searchedFiles);
     } else if (kind == ElementKind.COMPILATION_UNIT) {
       return _searchReferences_CompilationUnit(element);
     } else if (kind == ElementKind.GETTER) {
-      return _searchReferences_Getter(element);
+      return _searchReferences_Getter(element, searchedFiles);
     } else if (kind == ElementKind.FIELD ||
         kind == ElementKind.TOP_LEVEL_VARIABLE) {
-      return _searchReferences_Field(element);
+      return _searchReferences_Field(element, searchedFiles);
     } else if (kind == ElementKind.FUNCTION || kind == ElementKind.METHOD) {
       if (element.enclosingElement is ExecutableElement) {
-        return _searchReferences_Local(element, (n) => n is Block);
+        return _searchReferences_Local(
+            element, (n) => n is Block, searchedFiles);
       }
-      return _searchReferences_Function(element);
+      return _searchReferences_Function(element, searchedFiles);
     } else if (kind == ElementKind.IMPORT) {
-      return _searchReferences_Import(element);
+      return _searchReferences_Import(element, searchedFiles);
     } else if (kind == ElementKind.LABEL ||
         kind == ElementKind.LOCAL_VARIABLE) {
-      return _searchReferences_Local(element, (n) => n is Block);
+      return _searchReferences_Local(element, (n) => n is Block, searchedFiles);
     } else if (kind == ElementKind.LIBRARY) {
-      return _searchReferences_Library(element);
+      return _searchReferences_Library(element, searchedFiles);
     } else if (kind == ElementKind.PARAMETER) {
-      return _searchReferences_Parameter(element);
+      return _searchReferences_Parameter(element, searchedFiles);
     } else if (kind == ElementKind.PREFIX) {
-      return _searchReferences_Prefix(element);
+      return _searchReferences_Prefix(element, searchedFiles);
     } else if (kind == ElementKind.TYPE_PARAMETER) {
       return _searchReferences_Local(
-          element, (n) => n.parent is CompilationUnit);
+          element, (n) => n.parent is CompilationUnit, searchedFiles);
     }
     return const <SearchResult>[];
   }
 
   /**
    * Returns subtypes of the given [type].
+   *
+   * The [searchedFiles] are consulted to see if a file is "owned" by this
+   * [Search] object, so should be only searched by it to avoid duplicate
+   * results; and updated to take ownership if the file is not owned yet.
    */
-  Future<List<SearchResult>> subTypes(ClassElement type) async {
+  Future<List<SearchResult>> subTypes(
+      ClassElement type, SearchedFiles searchedFiles) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (type == null) {
       return const <SearchResult>[];
     }
     List<SearchResult> results = <SearchResult>[];
-    await _addResults(results, type, const {
+    await _addResults(results, type, searchedFiles, const {
       IndexRelationKind.IS_EXTENDED_BY: SearchResultKind.REFERENCE,
       IndexRelationKind.IS_MIXED_IN_BY: SearchResultKind.REFERENCE,
       IndexRelationKind.IS_IMPLEMENTED_BY: SearchResultKind.REFERENCE
@@ -341,34 +361,38 @@ class Search {
    */
   Future<List<SubtypeResult>> subtypes(
       {ClassElement type, SubtypeResult subtype}) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     String name;
     String id;
     if (type != null) {
       name = type.name;
-      id = type.librarySource.uri.toString() +
-          ';' +
-          type.source.uri.toString() +
-          ';' +
-          name;
+      id = '${type.librarySource.uri};${type.source.uri};$name';
     } else {
       name = subtype.name;
       id = subtype.id;
     }
 
-    List<SubtypeResult> results = [];
-    for (String path in _driver.addedFiles) {
-      FileState file = _driver.fsState.getFileForPath(path);
+    await _driver.discoverAvailableFiles();
+
+    final List<SubtypeResult> results = [];
+
+    // Note, this is a defensive copy.
+    List<FileState> knownFiles = _driver.fsState.knownFiles.toList();
+
+    for (FileState file in knownFiles) {
       if (file.subtypedNames.contains(name)) {
-        AnalysisDriverResolvedUnit unit = _driver.getResolvedUnitObject(file);
-        if (unit != null) {
-          for (AnalysisDriverSubtype subtype in unit.index.subtypes) {
+        AnalysisDriverUnitIndex index = await _driver.getIndex(file.path);
+        if (index != null) {
+          for (AnalysisDriverSubtype subtype in index.subtypes) {
             if (subtype.supertypes.contains(id)) {
-              FileState library = file.isPart ? file.library : file;
+              FileState library = file.library ?? file;
               results.add(new SubtypeResult(
-                  library.uriStr,
-                  library.uriStr + ';' + file.uriStr + ';' + subtype.name,
-                  subtype.name,
-                  subtype.members));
+                library.uriStr,
+                '${library.uriStr};${file.uriStr};${subtype.name}',
+                subtype.name,
+                subtype.members,
+              ));
             }
           }
         }
@@ -382,6 +406,8 @@ class Search {
    * Returns top-level elements with names matching the given [regExp].
    */
   Future<List<Element>> topLevelElements(RegExp regExp) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     List<Element> elements = <Element>[];
 
     void addElement(Element element) {
@@ -390,7 +416,8 @@ class Search {
       }
     }
 
-    for (FileState file in _driver.fsState.knownFiles) {
+    List<FileState> knownFiles = _driver.fsState.knownFiles.toList();
+    for (FileState file in knownFiles) {
       UnitElementResult unitResult = await _driver.getUnitElement(file.path);
       if (unitResult != null) {
         CompilationUnitElement unitElement = unitResult.element;
@@ -408,7 +435,10 @@ class Search {
   /**
    * Returns unresolved references to the given [name].
    */
-  Future<List<SearchResult>> unresolvedMemberReferences(String name) async {
+  Future<List<SearchResult>> unresolvedMemberReferences(
+      String name, SearchedFiles searchedFiles) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (name == null) {
       return const <SearchResult>[];
     }
@@ -419,10 +449,11 @@ class Search {
     // Check the index of every file that references the element name.
     List<SearchResult> results = [];
     for (String file in files) {
-      AnalysisDriverUnitIndex index = await _driver.getIndex(file);
-      if (index != null) {
-        _IndexRequest request = new _IndexRequest(index);
-        var fileResults = await request.getUnresolvedMemberReferences(
+      if (searchedFiles.add(file, this)) {
+        AnalysisDriverUnitIndex index = await _driver.getIndex(file);
+        if (index != null) {
+          _IndexRequest request = new _IndexRequest(index);
+          var fileResults = await request.getUnresolvedMemberReferences(
             name,
             const {
               IndexRelationKind.IS_READ_BY: SearchResultKind.READ,
@@ -430,16 +461,23 @@ class Search {
               IndexRelationKind.IS_READ_WRITTEN_BY: SearchResultKind.READ_WRITE,
               IndexRelationKind.IS_INVOKED_BY: SearchResultKind.INVOCATION
             },
-            () => _getUnitElement(file));
-        results.addAll(fileResults);
+            () => _getUnitElement(file),
+          );
+          results.addAll(fileResults);
+        }
       }
     }
 
     return results;
   }
 
-  Future<Null> _addResults(List<SearchResult> results, Element element,
+  Future<Null> _addResults(
+      List<SearchResult> results,
+      Element element,
+      SearchedFiles searchedFiles,
       Map<IndexRelationKind, SearchResultKind> relationToResultKind) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     // Prepare the element name.
     String name = element.displayName;
     if (element is ConstructorElement) {
@@ -451,7 +489,7 @@ class Search {
     String path = element.source.fullName;
     if (name.startsWith('_')) {
       String libraryPath = element.library.source.fullName;
-      if (_driver.addedFiles.contains(libraryPath)) {
+      if (searchedFiles.add(libraryPath, this)) {
         FileState library = _driver.fsState.getFileForPath(libraryPath);
         List<FileState> candidates = [library]..addAll(library.partedFiles);
         for (FileState file in candidates) {
@@ -462,14 +500,16 @@ class Search {
       }
     } else {
       files = await _driver.getFilesReferencingName(name);
-      if (!files.contains(path) && _driver.addedFiles.contains(path)) {
+      if (!files.contains(path)) {
         files.add(path);
       }
     }
 
     // Check the index of every file that references the element name.
     for (String file in files) {
-      await _addResultsInFile(results, element, relationToResultKind, file);
+      if (searchedFiles.add(file, this)) {
+        await _addResultsInFile(results, element, relationToResultKind, file);
+      }
     }
   }
 
@@ -481,6 +521,8 @@ class Search {
       Element element,
       Map<IndexRelationKind, SearchResultKind> relationToResultKind,
       String file) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     AnalysisDriverUnitIndex index = await _driver.getIndex(file);
     if (index != null) {
       _IndexRequest request = new _IndexRequest(index);
@@ -494,19 +536,26 @@ class Search {
   }
 
   Future<CompilationUnitElement> _getUnitElement(String file) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     UnitElementResult result = await _driver.getUnitElement(file);
     return result?.element;
   }
 
-  Future<List<SearchResult>> _searchReferences(Element element) async {
+  Future<List<SearchResult>> _searchReferences(
+      Element element, SearchedFiles searchedFiles) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     List<SearchResult> results = <SearchResult>[];
-    await _addResults(results, element,
+    await _addResults(results, element, searchedFiles,
         const {IndexRelationKind.IS_REFERENCED_BY: SearchResultKind.REFERENCE});
     return results;
   }
 
   Future<List<SearchResult>> _searchReferences_CompilationUnit(
       CompilationUnitElement element) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     String path = element.source.fullName;
 
     // If the path is not known, then the file is not referenced.
@@ -516,7 +565,8 @@ class Search {
 
     // Check every file that references the given path.
     List<SearchResult> results = <SearchResult>[];
-    for (FileState file in _driver.fsState.knownFiles) {
+    List<FileState> knownFiles = _driver.fsState.knownFiles.toList();
+    for (FileState file in knownFiles) {
       for (FileState referencedFile in file.directReferencedFiles) {
         if (referencedFile.path == path) {
           await _addResultsInFile(
@@ -533,35 +583,40 @@ class Search {
   }
 
   Future<List<SearchResult>> _searchReferences_Field(
-      PropertyInducingElement field) async {
+      PropertyInducingElement field, SearchedFiles searchedFiles) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     List<SearchResult> results = <SearchResult>[];
     PropertyAccessorElement getter = field.getter;
     PropertyAccessorElement setter = field.setter;
     if (!field.isSynthetic) {
-      await _addResults(results, field, const {
+      await _addResults(results, field, searchedFiles, const {
         IndexRelationKind.IS_WRITTEN_BY: SearchResultKind.WRITE,
         IndexRelationKind.IS_REFERENCED_BY: SearchResultKind.REFERENCE
       });
     }
     if (getter != null) {
-      await _addResults(results, getter, const {
+      await _addResults(results, getter, searchedFiles, const {
         IndexRelationKind.IS_REFERENCED_BY: SearchResultKind.READ,
         IndexRelationKind.IS_INVOKED_BY: SearchResultKind.INVOCATION
       });
     }
     if (setter != null) {
-      await _addResults(results, setter,
+      await _addResults(results, setter, searchedFiles,
           const {IndexRelationKind.IS_REFERENCED_BY: SearchResultKind.WRITE});
     }
     return results;
   }
 
-  Future<List<SearchResult>> _searchReferences_Function(Element element) async {
+  Future<List<SearchResult>> _searchReferences_Function(
+      Element element, SearchedFiles searchedFiles) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     if (element is Member) {
       element = (element as Member).baseElement;
     }
     List<SearchResult> results = <SearchResult>[];
-    await _addResults(results, element, const {
+    await _addResults(results, element, searchedFiles, const {
       IndexRelationKind.IS_REFERENCED_BY: SearchResultKind.REFERENCE,
       IndexRelationKind.IS_INVOKED_BY: SearchResultKind.INVOCATION
     });
@@ -569,9 +624,11 @@ class Search {
   }
 
   Future<List<SearchResult>> _searchReferences_Getter(
-      PropertyAccessorElement getter) async {
+      PropertyAccessorElement getter, SearchedFiles searchedFiles) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     List<SearchResult> results = <SearchResult>[];
-    await _addResults(results, getter, const {
+    await _addResults(results, getter, searchedFiles, const {
       IndexRelationKind.IS_REFERENCED_BY: SearchResultKind.REFERENCE,
       IndexRelationKind.IS_INVOKED_BY: SearchResultKind.INVOCATION
     });
@@ -579,10 +636,11 @@ class Search {
   }
 
   Future<List<SearchResult>> _searchReferences_Import(
-      ImportElement element) async {
-    // Search only in drivers to which the library was added.
+      ImportElement element, SearchedFiles searchedFiles) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     String path = element.source.fullName;
-    if (!_driver.addedFiles.contains(path)) {
+    if (!searchedFiles.add(path, this)) {
       return const <SearchResult>[];
     }
 
@@ -600,10 +658,11 @@ class Search {
   }
 
   Future<List<SearchResult>> _searchReferences_Library(
-      LibraryElement element) async {
-    // Search only in drivers to which the library with the prefix was added.
+      LibraryElement element, SearchedFiles searchedFiles) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     String path = element.source.fullName;
-    if (!_driver.addedFiles.contains(path)) {
+    if (!searchedFiles.add(path, this)) {
       return const <SearchResult>[];
     }
 
@@ -627,10 +686,12 @@ class Search {
     return results;
   }
 
-  Future<List<SearchResult>> _searchReferences_Local(
-      Element element, bool isRootNode(AstNode n)) async {
+  Future<List<SearchResult>> _searchReferences_Local(Element element,
+      bool isRootNode(AstNode n), SearchedFiles searchedFiles) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     String path = element.source.fullName;
-    if (!_driver.addedFiles.contains(path)) {
+    if (!searchedFiles.add(path, this)) {
       return const <SearchResult>[];
     }
 
@@ -661,23 +722,30 @@ class Search {
   }
 
   Future<List<SearchResult>> _searchReferences_Parameter(
-      ParameterElement parameter) async {
+      ParameterElement parameter, SearchedFiles searchedFiles) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     List<SearchResult> results = <SearchResult>[];
-    results.addAll(await _searchReferences_Local(parameter, (AstNode node) {
-      AstNode parent = node.parent;
-      return parent is ClassDeclaration || parent is CompilationUnit;
-    }));
+    results.addAll(await _searchReferences_Local(
+      parameter,
+      (AstNode node) {
+        AstNode parent = node.parent;
+        return parent is ClassDeclaration || parent is CompilationUnit;
+      },
+      searchedFiles,
+    ));
     if (parameter.isOptional) {
-      results.addAll(await _searchReferences(parameter));
+      results.addAll(await _searchReferences(parameter, searchedFiles));
     }
     return results;
   }
 
   Future<List<SearchResult>> _searchReferences_Prefix(
-      PrefixElement element) async {
-    // Search only in drivers to which the library with the prefix was added.
+      PrefixElement element, SearchedFiles searchedFiles) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     String path = element.source.fullName;
-    if (!_driver.addedFiles.contains(path)) {
+    if (!searchedFiles.add(path, this)) {
       return const <SearchResult>[];
     }
 
@@ -692,6 +760,32 @@ class Search {
       results.addAll(visitor.results);
     }
     return results;
+  }
+}
+
+/**
+ * Container that keeps track of file owners.
+ */
+class SearchedFiles {
+  final Map<String, Search> pathOwners = {};
+  final Map<Uri, Search> uriOwners = {};
+
+  bool add(String path, Search search) {
+    var file = search._driver.fsState.getFileForPath(path);
+    var pathOwner = pathOwners[path];
+    var uriOwner = uriOwners[file.uri];
+    if (pathOwner == null && uriOwner == null) {
+      pathOwners[path] = search;
+      uriOwners[file.uri] = search;
+      return true;
+    }
+    return identical(pathOwner, search) && identical(uriOwner, search);
+  }
+
+  void ownAdded(Search search) {
+    for (var path in search._driver.addedFiles) {
+      add(path, search);
+    }
   }
 }
 
@@ -971,6 +1065,8 @@ class _IndexRequest {
       int elementId,
       Map<IndexRelationKind, SearchResultKind> relationToResultKind,
       Future<CompilationUnitElement> getEnclosingUnitElement()) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     // Find the first usage of the element.
     int i = _findFirstOccurrence(index.usedElements, elementId);
     if (i == -1) {
@@ -1042,6 +1138,8 @@ class _IndexRequest {
       String name,
       Map<IndexRelationKind, SearchResultKind> relationToResultKind,
       Future<CompilationUnitElement> getEnclosingUnitElement()) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     // Find the name identifier.
     int nameId = getStringId(name);
     if (nameId == -1) {

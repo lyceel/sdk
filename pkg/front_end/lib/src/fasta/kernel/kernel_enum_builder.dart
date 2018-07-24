@@ -42,7 +42,7 @@ import '../source/source_class_builder.dart' show SourceClassBuilder;
 
 import 'kernel_builder.dart'
     show
-        Builder,
+        Declaration,
         EnumBuilder,
         FormalParameterBuilder,
         KernelClassBuilder,
@@ -84,9 +84,10 @@ class KernelEnumBuilder extends SourceClassBuilder
       this.objectType,
       this.stringType,
       LibraryBuilder parent,
+      int startCharOffset,
       int charOffset)
       : super(metadata, 0, name, null, null, null, scope, constructors, parent,
-            null, charOffset, TreeNode.noOffset, cls);
+            null, startCharOffset, charOffset, TreeNode.noOffset, cls);
 
   factory KernelEnumBuilder(
       MetadataCollector metadataCollector,
@@ -140,6 +141,7 @@ class KernelEnumBuilder extends SourceClassBuilder
         parent,
         charOffset,
         charOffset,
+        charOffset,
         charEndOffset);
     constructors[""] = constructorBuilder;
     KernelFieldBuilder valuesBuilder = new KernelFieldBuilder(null, listType,
@@ -156,17 +158,19 @@ class KernelEnumBuilder extends SourceClassBuilder
         parent,
         charOffset,
         charOffset,
+        charOffset,
         charEndOffset);
     members["toString"] = toStringBuilder;
     String className = name;
-    for (int i = 0; i < constantNamesAndOffsetsAndDocs.length; i += 3) {
-      String name = constantNamesAndOffsetsAndDocs[i];
-      int charOffset = constantNamesAndOffsetsAndDocs[i + 1];
-      String documentationComment = constantNamesAndOffsetsAndDocs[i + 2];
+    for (int i = 0; i < constantNamesAndOffsetsAndDocs.length; i += 4) {
+      List<MetadataBuilder> metadata = constantNamesAndOffsetsAndDocs[i];
+      String name = constantNamesAndOffsetsAndDocs[i + 1];
+      int charOffset = constantNamesAndOffsetsAndDocs[i + 2];
+      String documentationComment = constantNamesAndOffsetsAndDocs[i + 3];
       if (members.containsKey(name)) {
         parent.addCompileTimeError(templateDuplicatedName.withArguments(name),
             charOffset, noLength, parent.fileUri);
-        constantNamesAndOffsetsAndDocs[i] = null;
+        constantNamesAndOffsetsAndDocs[i + 1] = null;
         continue;
       }
       if (name == className) {
@@ -175,15 +179,24 @@ class KernelEnumBuilder extends SourceClassBuilder
             charOffset,
             noLength,
             parent.fileUri);
-        constantNamesAndOffsetsAndDocs[i] = null;
+        constantNamesAndOffsetsAndDocs[i + 1] = null;
         continue;
       }
-      KernelFieldBuilder fieldBuilder = new KernelFieldBuilder(null, selfType,
-          name, constMask | staticMask, parent, charOffset, null, true);
+      KernelFieldBuilder fieldBuilder = new KernelFieldBuilder(
+          metadata,
+          selfType,
+          name,
+          constMask | staticMask,
+          parent,
+          charOffset,
+          null,
+          true);
       metadataCollector?.setDocumentationComment(
           fieldBuilder.target, documentationComment);
       members[name] = fieldBuilder;
     }
+    final int startCharOffset =
+        metadata == null ? charOffset : metadata.first.charOffset;
     KernelEnumBuilder enumBuilder = new KernelEnumBuilder.internal(
         metadata,
         name,
@@ -198,6 +211,7 @@ class KernelEnumBuilder extends SourceClassBuilder
         objectType,
         stringType,
         parent,
+        startCharOffset,
         charOffset);
     // TODO(sigmund): dynamic should be `covariant MemberBuilder`.
     void setParent(String name, dynamic b) {
@@ -222,10 +236,12 @@ class KernelEnumBuilder extends SourceClassBuilder
   @override
   Class build(KernelLibraryBuilder libraryBuilder, LibraryBuilder coreLibrary) {
     cls.isEnum = true;
-    intType.resolveIn(coreLibrary.scope, charOffset, fileUri);
-    stringType.resolveIn(coreLibrary.scope, charOffset, fileUri);
-    objectType.resolveIn(coreLibrary.scope, charOffset, fileUri);
-    listType.resolveIn(coreLibrary.scope, charOffset, fileUri);
+    intType.resolveIn(coreLibrary.scope, charOffset, fileUri, libraryBuilder);
+    stringType.resolveIn(
+        coreLibrary.scope, charOffset, fileUri, libraryBuilder);
+    objectType.resolveIn(
+        coreLibrary.scope, charOffset, fileUri, libraryBuilder);
+    listType.resolveIn(coreLibrary.scope, charOffset, fileUri, libraryBuilder);
 
     KernelFieldBuilder indexFieldBuilder = this["index"];
     Field indexField = indexFieldBuilder.build(libraryBuilder);
@@ -235,8 +251,8 @@ class KernelEnumBuilder extends SourceClassBuilder
     toStringBuilder.body = new ReturnStatement(
         new DirectPropertyGet(new ThisExpression(), nameField));
     List<Expression> values = <Expression>[];
-    for (int i = 0; i < constantNamesAndOffsetsAndDocs.length; i += 3) {
-      String name = constantNamesAndOffsetsAndDocs[i];
+    for (int i = 0; i < constantNamesAndOffsetsAndDocs.length; i += 4) {
+      String name = constantNamesAndOffsetsAndDocs[i + 1];
       if (name != null) {
         KernelFieldBuilder builder = this[name];
         values.add(new StaticGet(builder.build(libraryBuilder)));
@@ -258,7 +274,7 @@ class KernelEnumBuilder extends SourceClassBuilder
         new FieldInitializer(nameField,
             new VariableGet(constructor.function.positionalParameters[1]))
           ..parent = constructor);
-    KernelClassBuilder objectClass = objectType.builder;
+    KernelClassBuilder objectClass = objectType.declaration;
     MemberBuilder superConstructor = objectClass.findConstructorOrFactory(
         "", charOffset, fileUri, libraryBuilder);
     if (superConstructor == null || !superConstructor.isConstructor) {
@@ -273,8 +289,8 @@ class KernelEnumBuilder extends SourceClassBuilder
             ..parent = constructor);
     }
     int index = 0;
-    for (int i = 0; i < constantNamesAndOffsetsAndDocs.length; i += 3) {
-      String constant = constantNamesAndOffsetsAndDocs[i];
+    for (int i = 0; i < constantNamesAndOffsetsAndDocs.length; i += 4) {
+      String constant = constantNamesAndOffsetsAndDocs[i + 1];
       if (constant != null) {
         KernelFieldBuilder field = this[constant];
         field.build(libraryBuilder);
@@ -290,7 +306,7 @@ class KernelEnumBuilder extends SourceClassBuilder
   }
 
   @override
-  Builder findConstructorOrFactory(
+  Declaration findConstructorOrFactory(
       String name, int charOffset, Uri uri, LibraryBuilder library) {
     return null;
   }

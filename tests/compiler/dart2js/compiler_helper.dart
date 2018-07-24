@@ -20,15 +20,13 @@ import 'package:compiler/src/commandline_options.dart';
 export 'package:compiler/src/diagnostics/messages.dart';
 export 'package:compiler/src/diagnostics/source_span.dart';
 export 'package:compiler/src/diagnostics/spannable.dart';
-
-export 'package:compiler/src/types/types.dart' show TypeMask;
-
-import 'package:compiler/src/util/util.dart';
 export 'package:compiler/src/util/util.dart';
 
 import 'package:compiler/src/world.dart';
 
 import 'package:compiler/src/compiler.dart' show Compiler;
+
+import 'package:front_end/src/fasta/util/link.dart' show Link;
 
 import 'memory_compiler.dart';
 
@@ -45,21 +43,21 @@ Future<String> compile(String code,
     String methodName,
     bool enableTypeAssertions: false,
     bool minify: false,
-    bool analyzeAll: false,
     bool disableInlining: true,
     bool trustJSInteropTypeAnnotations: false,
     void check(String generatedEntry),
     bool returnAll: false}) async {
   OutputCollector outputCollector = returnAll ? new OutputCollector() : null;
-  List<String> options = <String>[Flags.disableTypeInference];
+  // TODO(sigmund): use strong-mode.
+  List<String> options = <String>[
+    Flags.noPreviewDart2,
+    Flags.disableTypeInference
+  ];
   if (enableTypeAssertions) {
     options.add(Flags.enableCheckedMode);
   }
   if (minify) {
     options.add(Flags.minify);
-  }
-  if (analyzeAll) {
-    options.add(Flags.analyzeAll);
   }
   if (trustJSInteropTypeAnnotations) {
     options.add(Flags.trustJSInteropTypeAnnotations);
@@ -82,7 +80,7 @@ Future<String> compile(String code,
       outputProvider: outputCollector);
   Expect.isTrue(result.isSuccess);
   Compiler compiler = result.compiler;
-  ClosedWorld closedWorld = compiler.backendClosedWorldForTesting;
+  JClosedWorld closedWorld = compiler.backendClosedWorldForTesting;
   ElementEnvironment elementEnvironment = closedWorld.elementEnvironment;
   LibraryEntity mainLibrary = elementEnvironment.mainLibrary;
   FunctionEntity element =
@@ -103,7 +101,7 @@ Future<String> compileAll(String code,
     int expectedWarnings}) async {
   OutputCollector outputCollector = new OutputCollector();
   DiagnosticCollector diagnosticCollector = new DiagnosticCollector();
-  List<String> options = <String>[];
+  List<String> options = <String>[Flags.noPreviewDart2];
   if (disableInlining) {
     options.add(Flags.disableInlining);
   }

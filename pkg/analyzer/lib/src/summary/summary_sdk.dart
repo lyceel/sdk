@@ -25,6 +25,9 @@ import 'package:analyzer/src/summary/package_bundle_reader.dart';
  * implement [sdkLibraries], [sdkVersion], [uris] and [fromFileUri].
  */
 class SummaryBasedDartSdk implements DartSdk {
+  /**
+   * TODO(brianwilkerson) Remove this field.
+   */
   final bool strongMode;
   SummaryDataStore _dataStore;
   InSummaryUriResolver _uriResolver;
@@ -60,8 +63,7 @@ class SummaryBasedDartSdk implements DartSdk {
   @override
   AnalysisContext get context {
     if (_analysisContext == null) {
-      AnalysisOptionsImpl analysisOptions = new AnalysisOptionsImpl()
-        ..strongMode = strongMode;
+      AnalysisOptionsImpl analysisOptions = new AnalysisOptionsImpl();
       _analysisContext = new SdkAnalysisContext(analysisOptions);
       SourceFactory factory = new SourceFactory(
           [new DartUriResolver(this)], null, resourceProvider);

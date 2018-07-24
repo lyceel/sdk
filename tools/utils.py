@@ -293,26 +293,32 @@ def IsCrossBuild(target_os, arch):
           (target_os != GuessOS()))
 
 
-def GetBuildConf(mode, arch, conf_os=None):
+def GetBuildConf(mode, arch, conf_os=None, kbc=False):
+  kbc_suffix = ''
+  if kbc:
+    kbc_suffix = 'KBC'
   if conf_os == 'android':
-    return '%s%s%s' % (GetBuildMode(mode), conf_os.title(), arch.upper())
+    return '%s%s%s%s' % (GetBuildMode(mode), conf_os.title(), arch.upper(),
+                       kbc_suffix)
   else:
     # Ask for a cross build if the host and target architectures don't match.
     host_arch = ARCH_GUESS
     cross_build = ''
     if GetArchFamily(host_arch) != GetArchFamily(arch):
       cross_build = 'X'
-    return '%s%s%s' % (GetBuildMode(mode), cross_build, arch.upper())
+    return '%s%s%s%s' % (GetBuildMode(mode), cross_build, arch.upper(),
+                       kbc_suffix)
 
 
 def GetBuildDir(host_os):
   return BUILD_ROOT[host_os]
 
 
-def GetBuildRoot(host_os, mode=None, arch=None, target_os=None):
+def GetBuildRoot(host_os, mode=None, arch=None, target_os=None, kbc=False):
   build_root = GetBuildDir(host_os)
   if mode:
-    build_root = os.path.join(build_root, GetBuildConf(mode, arch, target_os))
+    build_root = os.path.join(build_root,
+                              GetBuildConf(mode, arch, target_os, kbc))
   return build_root
 
 
@@ -676,7 +682,6 @@ def CheckedInSdkPath():
   tools_dir = os.path.dirname(os.path.realpath(__file__))
   return os.path.join(tools_dir,
                       'sdks',
-                      osname,
                       'dart-sdk')
 
 
@@ -684,21 +689,7 @@ def CheckedInSdkExecutable():
   name = 'dart'
   if IsWindows():
     name = 'dart.exe'
-  elif GuessOS() == 'linux':
-    arch = GuessArchitecture()
-    if arch == 'arm':
-      name = 'dart-arm'
-    elif arch == 'arm64':
-      name = 'dart-arm64'
-    elif arch == 'armv5te':
-      # TODO(zra): This binary does not exist, yet. Check one in once we have
-      # sufficient stability.
-      name = 'dart-armv5te'
-    elif arch == 'armv6':
-      # TODO(zra): Ditto.
-      name = 'dart-armv6'
   return os.path.join(CheckedInSdkPath(), 'bin', name)
-
 
 def CheckedInSdkCheckExecutable():
   executable = CheckedInSdkExecutable()

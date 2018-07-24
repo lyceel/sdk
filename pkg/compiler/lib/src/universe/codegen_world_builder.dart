@@ -45,9 +45,9 @@ abstract class CodegenWorldBuilder implements WorldBuilder {
   ConstantValue getConstantFieldInitializer(covariant FieldEntity field);
 
   /// Returns `true` if [member] is invoked as a setter.
-  bool hasInvokedSetter(MemberEntity member, ClosedWorld world);
+  bool hasInvokedSetter(MemberEntity member, JClosedWorld world);
 
-  bool hasInvokedGetter(MemberEntity member, ClosedWorld world);
+  bool hasInvokedGetter(MemberEntity member, JClosedWorld world);
 
   Map<Selector, SelectorConstraints> invocationsByName(String name);
 
@@ -77,13 +77,19 @@ abstract class CodegenWorldBuilder implements WorldBuilder {
   /// an ordering that is less sensitive to perturbations in the source code.
   List<ConstantValue> getConstantsForEmission(
       [Comparator<ConstantValue> preSortCompare]);
+
+  /// Returns the types that are live as constant type literals.
+  Iterable<DartType> get constTypeLiterals;
+
+  /// Returns the types that are live as constant type literals.
+  Iterable<DartType> get liveTypeArguments;
 }
 
-abstract class CodegenWorldBuilderImpl extends WorldBuilderBase
+class CodegenWorldBuilderImpl extends WorldBuilderBase
     implements CodegenWorldBuilder {
   final ElementEnvironment _elementEnvironment;
   final NativeBasicData _nativeBasicData;
-  final ClosedWorld _world;
+  final JClosedWorld _world;
 
   /// The set of all directly instantiated classes, that is, classes with a
   /// generative constructor that has been called directly and not only through
@@ -159,8 +165,19 @@ abstract class CodegenWorldBuilderImpl extends WorldBuilderBase
 
   final Set<ConstantValue> _constantValues = new Set<ConstantValue>();
 
-  CodegenWorldBuilderImpl(this._elementEnvironment, this._nativeBasicData,
-      this._world, this.selectorConstraintsStrategy);
+  final KernelToWorldBuilder _elementMap;
+  final GlobalLocalsMap _globalLocalsMap;
+
+  final Set<DartType> _constTypeLiterals = new Set<DartType>();
+  final Set<DartType> _liveTypeArguments = new Set<DartType>();
+
+  CodegenWorldBuilderImpl(
+      this._elementMap,
+      this._globalLocalsMap,
+      this._elementEnvironment,
+      this._nativeBasicData,
+      this._world,
+      this.selectorConstraintsStrategy);
 
   Iterable<ClassEntity> get processedClasses => _processedClasses.keys
       .where((cls) => _processedClasses[cls].isInstantiated);
@@ -187,23 +204,15 @@ abstract class CodegenWorldBuilderImpl extends WorldBuilderBase
   // subclass and through subtype instantiated types/classes.
   // TODO(johnniwinther): Support unknown type arguments for generic types.
   void registerTypeInstantiation(
-      InterfaceType type, ClassUsedCallback classUsed,
-      {bool byMirrors: false}) {
+      InterfaceType type, ClassUsedCallback classUsed) {
     ClassEntity cls = type.element;
     bool isNative = _nativeBasicData.isNativeClass(cls);
     _instantiatedTypes.add(type);
-    if (!cls.isAbstract
-        // We can't use the closed-world assumption with native abstract
-        // classes; a native abstract class may have non-abstract subclasses
-        // not declared to the program.  Instances of these classes are
-        // indistinguishable from the abstract class.
-        ||
-        isNative
-        // Likewise, if this registration comes from the mirror system,
-        // all bets are off.
-        // TODO(herhut): Track classes required by mirrors separately.
-        ||
-        byMirrors) {
+    // We can't use the closed-world assumption with native abstract
+    // classes; a native abstract class may have non-abstract subclasses
+    // not declared to the program.  Instances of these classes are
+    // indistinguishable from the abstract class.
+    if (!cls.isAbstract || isNative) {
       _directlyInstantiatedClasses.add(cls);
       _processInstantiatedClass(cls, classUsed);
     }
@@ -222,7 +231,7 @@ abstract class CodegenWorldBuilderImpl extends WorldBuilderBase
   }
 
   bool _hasMatchingSelector(Map<Selector, SelectorConstraints> selectors,
-      MemberEntity member, ClosedWorld world) {
+      MemberEntity member, JClosedWorld world) {
     if (selectors == null) return false;
     for (Selector selector in selectors.keys) {
       if (selector.appliesUnnamed(member)) {
@@ -235,16 +244,16 @@ abstract class CodegenWorldBuilderImpl extends WorldBuilderBase
     return false;
   }
 
-  bool hasInvocation(MemberEntity member, ClosedWorld world) {
+  bool hasInvocation(MemberEntity member, JClosedWorld world) {
     return _hasMatchingSelector(_invokedNames[member.name], member, world);
   }
 
-  bool hasInvokedGetter(MemberEntity member, ClosedWorld world) {
+  bool hasInvokedGetter(MemberEntity member, JClosedWorld world) {
     return _hasMatchingSelector(_invokedGetters[member.name], member, world) ||
         member.isFunction && methodsNeedingSuperGetter.contains(member);
   }
 
-  bool hasInvokedSetter(MemberEntity member, ClosedWorld world) {
+  bool hasInvokedSetter(MemberEntity member, JClosedWorld world) {
     return _hasMatchingSelector(_invokedSetters[member.name], member, world);
   }
 
@@ -256,7 +265,8 @@ abstract class CodegenWorldBuilderImpl extends WorldBuilderBase
     void _process(Map<String, Set<_MemberUsage>> memberMap,
         EnumSet<MemberUse> action(_MemberUsage usage)) {
       _processSet(memberMap, methodName, (_MemberUsage usage) {
-        if (dynamicUse.appliesUnnamed(usage.entity, _world)) {
+        if (selectorConstraintsStrategy.appliedUnnamed(
+            dynamicUse, usage.entity, _world)) {
           memberUsed(usage.entity, action(usage));
           return true;
         }
@@ -294,14 +304,12 @@ abstract class CodegenWorldBuilderImpl extends WorldBuilderBase
       Map<String, Map<Selector, SelectorConstraints>> selectorMap) {
     Selector selector = dynamicUse.selector;
     String name = selector.name;
-    ReceiverConstraint mask = dynamicUse.mask;
-    Map<Selector, SelectorConstraints> selectors = selectorMap.putIfAbsent(
-        name, () => new Maplet<Selector, SelectorConstraints>());
-    UniverseSelectorConstraints constraints =
-        selectors.putIfAbsent(selector, () {
-      return selectorConstraintsStrategy.createSelectorConstraints(selector);
-    });
-    return constraints.addReceiverConstraint(mask);
+    Object constraint = dynamicUse.receiverConstraint;
+    Map<Selector, SelectorConstraints> selectors =
+        selectorMap[name] ??= new Maplet<Selector, SelectorConstraints>();
+    UniverseSelectorConstraints constraints = selectors[selector] ??=
+        selectorConstraintsStrategy.createSelectorConstraints(selector);
+    return constraints.addReceiverConstraint(constraint);
   }
 
   Map<Selector, SelectorConstraints> _asUnmodifiable(
@@ -357,7 +365,6 @@ abstract class CodegenWorldBuilderImpl extends WorldBuilderBase
         break;
       case StaticUseKind.SUPER_FIELD_SET:
       case StaticUseKind.FIELD_SET:
-      case StaticUseKind.DIRECT_USE:
       case StaticUseKind.CLOSURE:
       case StaticUseKind.CLOSURE_CALL:
       case StaticUseKind.CALL_METHOD:
@@ -414,7 +421,6 @@ abstract class CodegenWorldBuilderImpl extends WorldBuilderBase
       case StaticUseKind.SET:
       case StaticUseKind.INIT:
       case StaticUseKind.REFLECT:
-      case StaticUseKind.DIRECT_USE:
         useSet.addAll(usage.normalUse());
         break;
       case StaticUseKind.CONSTRUCTOR_INVOKE:
@@ -436,6 +442,7 @@ abstract class CodegenWorldBuilderImpl extends WorldBuilderBase
         }
         break;
       case StaticUseKind.INLINING:
+        registerStaticInvocation(staticUse);
         break;
     }
     if (useSet.isNotEmpty) {
@@ -635,21 +642,6 @@ abstract class CodegenWorldBuilderImpl extends WorldBuilderBase
     _staticMemberUsage.forEach(processMemberUse);
     return functions;
   }
-}
-
-class KernelCodegenWorldBuilder extends CodegenWorldBuilderImpl {
-  final KernelToWorldBuilder _elementMap;
-  final GlobalLocalsMap _globalLocalsMap;
-
-  KernelCodegenWorldBuilder(
-      this._elementMap,
-      this._globalLocalsMap,
-      ElementEnvironment elementEnvironment,
-      NativeBasicData nativeBasicData,
-      ClosedWorld world,
-      SelectorConstraintsStrategy selectorConstraintsStrategy)
-      : super(elementEnvironment, nativeBasicData, world,
-            selectorConstraintsStrategy);
 
   @override
   bool hasConstantFieldInitializer(FieldEntity field) {
@@ -695,4 +687,16 @@ class KernelCodegenWorldBuilder extends CodegenWorldBuilderImpl {
       f(member);
     });
   }
+
+  void registerConstTypeLiteral(DartType type) {
+    _constTypeLiterals.add(type);
+  }
+
+  Iterable<DartType> get constTypeLiterals => _constTypeLiterals;
+
+  void registerTypeArgument(DartType type) {
+    _liveTypeArguments.add(type);
+  }
+
+  Iterable<DartType> get liveTypeArguments => _liveTypeArguments;
 }

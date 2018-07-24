@@ -27,7 +27,7 @@ import '../universe/call_structure.dart' show CallStructure;
 import '../universe/selector.dart' show Selector, SelectorKind;
 import '../universe/world_builder.dart' show CodegenWorldBuilder;
 import '../util/util.dart';
-import '../world.dart' show ClosedWorld;
+import '../world.dart' show JClosedWorld;
 import 'backend.dart';
 import 'constant_system_javascript.dart';
 import 'native_data.dart';
@@ -492,7 +492,7 @@ class Namer {
   static final RegExp IDENTIFIER = new RegExp(r'^[A-Za-z_$][A-Za-z0-9_$]*$');
   static final RegExp NON_IDENTIFIER_CHAR = new RegExp(r'[^A-Za-z_0-9$]');
 
-  final ClosedWorld _closedWorld;
+  final JClosedWorld _closedWorld;
   final CodegenWorldBuilder _codegenWorldBuilder;
 
   RuntimeTypesEncoder _rtiEncoder;
@@ -521,16 +521,57 @@ class Namer {
   final Map<String, jsAst.Name> internalGlobals =
       new HashMap<String, jsAst.Name>();
 
+  Map<String, String> createMinifiedGlobalNameMap() {
+    var map = <String, String>{};
+    userGlobals.forEach((entity, jsName) {
+      // Non-finalized names are not present in the output program
+      if (jsName is TokenName && !jsName.isFinalized) return;
+      map[jsName.name] = entity.name;
+    });
+    internalGlobals.forEach((name, jsName) {
+      // Non-finalized names are not present in the output program
+      if (jsName is TokenName && !jsName.isFinalized) return;
+      map[jsName.name] = name;
+    });
+    return map;
+  }
+
   /// Used disambiguated names in the instance namespace, issued by
   /// [_disambiguateMember], [_disambiguateInternalMember],
   /// [_disambiguateOperator], and [reservePublicMemberName].
   final NamingScope instanceScope = new NamingScope();
   final Map<String, jsAst.Name> userInstanceMembers =
       new HashMap<String, jsAst.Name>();
+  final Map<String, String> userInstanceMembersOriginalName =
+      new HashMap<String, String>();
   final Map<MemberEntity, jsAst.Name> internalInstanceMembers =
       new HashMap<MemberEntity, jsAst.Name>();
   final Map<String, jsAst.Name> userInstanceOperators =
       new HashMap<String, jsAst.Name>();
+
+  Map<String, String> createMinifiedInstanceNameMap() {
+    var map = <String, String>{};
+    internalInstanceMembers.forEach((entity, jsName) {
+      // Non-finalized names are not present in the output program
+      if (jsName is TokenName && !jsName.isFinalized) return;
+      map[jsName.name] = entity.name;
+    });
+    userInstanceMembers.forEach((name, jsName) {
+      // Non-finalized names are not present in the output program
+      if (jsName is TokenName && !jsName.isFinalized) return;
+      var originalName = userInstanceMembersOriginalName[name];
+      map[jsName.name] = originalName ?? name;
+    });
+
+    // TODO(sigmund): reverse the operator names back to the original Dart
+    // names.
+    userInstanceOperators.forEach((name, jsName) {
+      // Non-finalized names are not present in the output program
+      if (jsName is TokenName && !jsName.isFinalized) return;
+      map[jsName.name] = name;
+    });
+    return map;
+  }
 
   /// Used to disambiguate names for constants in [constantName].
   final NamingScope constantScope = new NamingScope();
@@ -1102,7 +1143,7 @@ class Namer {
   }
 
   jsAst.Name _disambiguateGlobalMember(MemberEntity element) {
-    return _disambiguateGlobal(element, _proposeNameForMember);
+    return _disambiguateGlobal<MemberEntity>(element, _proposeNameForMember);
   }
 
   jsAst.Name _disambiguateGlobalType(Entity element) {
@@ -1112,8 +1153,8 @@ class Namer {
   /// Returns the disambiguated name for a top-level or static element.
   ///
   /// The resulting name is unique within the global-member namespace.
-  jsAst.Name _disambiguateGlobal(
-      Entity element, String proposeName(Entity element)) {
+  jsAst.Name _disambiguateGlobal<T extends Entity>(
+      T element, String proposeName(T element)) {
     // TODO(asgerf): We can reuse more short names if we disambiguate with
     // a separate namespace for each of the global holder objects.
     jsAst.Name newName = userGlobals[element];
@@ -1161,6 +1202,7 @@ class Namer {
       newName = getFreshName(instanceScope, proposedName,
           sanitizeForAnnotations: true);
       userInstanceMembers[key] = newName;
+      userInstanceMembersOriginalName[key] = '$originalName';
     }
     return _newReference(newName);
   }
@@ -1183,6 +1225,8 @@ class Namer {
       String name = proposeName();
       newName = getFreshName(instanceScope, name, sanitizeForAnnotations: true);
       userInstanceMembers[key] = newName;
+      // TODO(sigmund): consider plumbing the original name instead.
+      userInstanceMembersOriginalName[key] = name;
     }
     return _newReference(newName);
   }
@@ -1203,6 +1247,7 @@ class Namer {
     assert(!userInstanceMembers.containsKey(key));
     assert(!instanceScope.isUsed(disambiguatedName));
     userInstanceMembers[key] = new StringBackedName(disambiguatedName);
+    userInstanceMembersOriginalName[key] = originalName;
     instanceScope.registerUse(disambiguatedName);
   }
 
@@ -1646,6 +1691,10 @@ class Namer {
 
   String get futureOrTypeTag => r'type';
 
+  // The name of the variable used to offset function signatures in deferred
+  // parts with the fast-startup emitter.
+  String get typesOffsetName => r'typesOffset';
+
   Map<FunctionType, jsAst.Name> functionTypeNameMap =
       new HashMap<FunctionType, jsAst.Name>();
 
@@ -1893,7 +1942,7 @@ class ConstantNamingVisitor implements ConstantValueVisitor {
   @override
   void visitInt(IntConstantValue constant, [_]) {
     // No `addRoot` since IntConstants are always inlined.
-    if (constant.intValue < 0) {
+    if (constant.intValue < BigInt.zero) {
       add('m${-constant.intValue}');
     } else {
       add('${constant.intValue}');
@@ -2088,7 +2137,11 @@ class ConstantCanonicalHasher implements ConstantValueVisitor<int, Null> {
 
   @override
   int visitInt(IntConstantValue constant, [_]) {
-    return _hashInt(constant.intValue);
+    BigInt value = constant.intValue;
+    if (value.toSigned(32) == value) {
+      return value.toUnsigned(32).toInt() & _MASK;
+    }
+    return _hashDouble(value.toDouble());
   }
 
   @override

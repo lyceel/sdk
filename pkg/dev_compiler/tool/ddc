@@ -63,18 +63,18 @@ fi
 BASENAME=$( basename "${1%.*}")
 LIBROOT=$(cd $( dirname "${1%.*}") && pwd)
 
-export NODE_PATH=$GEN_DIR/js/common:$LIBROOT:$NODE_PATH
-
 if [ "$KERNEL" = true ]; then
 
   if [ ! -e $GEN_DIR/kernel/ddc_sdk.dill ]; then
     echo "DDC SDK must be built first, please run:"
     echo "    pushd $SDKDIR"
-    echo "    ./tools/build.py -m release dartdevc_sdk_kernel_summary"
+    echo "    ./tools/build.py -m release dartdevk_sdk"
     exit 1
   fi
 
-  dart -c $SDK_DIR/pkg/dev_compiler/bin/dartdevk.dart --modules=node \
+  NODE_PATH=$GEN_DIR/kernel/common:$LIBROOT:$NODE_PATH
+
+  $SDK_DIR/sdk/bin/dartdevk --modules=node \
       --dart-sdk-summary=$GEN_DIR/kernel/ddc_sdk.dill \
       -o $LIBROOT/$BASENAME.js $*
 else
@@ -86,11 +86,14 @@ else
     exit 1
   fi
 
-  dart -c $SDK_DIR/pkg/dev_compiler/bin/dartdevc.dart --modules=node \
+  NODE_PATH=$GEN_DIR/js/common:$LIBROOT:$NODE_PATH
+
+  $SDK_DIR/sdk/bin/dartdevc --modules=node \
       --library-root=$LIBROOT --dart-sdk-summary=$GEN_DIR/ddc_sdk.sum \
       -o $LIBROOT/$BASENAME.js $*
 fi
 
+export NODE_PATH
 pushd $LIBROOT > /dev/null
 # TODO(jmesserly): we could have this output the same content as the devtool
 # script, so you could debug the output without recompiling?

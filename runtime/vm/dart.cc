@@ -4,7 +4,6 @@
 
 #include "vm/dart.h"
 
-#include "vm/become.h"
 #include "vm/clustered_snapshot.h"
 #include "vm/code_observers.h"
 #include "vm/cpu.h"
@@ -12,9 +11,11 @@
 #include "vm/dart_entry.h"
 #include "vm/debugger.h"
 #include "vm/flags.h"
-#include "vm/freelist.h"
 #include "vm/handles.h"
-#include "vm/heap.h"
+#include "vm/heap/become.h"
+#include "vm/heap/freelist.h"
+#include "vm/heap/heap.h"
+#include "vm/heap/store_buffer.h"
 #include "vm/isolate.h"
 #include "vm/kernel_isolate.h"
 #include "vm/malloc_hooks.h"
@@ -28,7 +29,6 @@
 #include "vm/service_isolate.h"
 #include "vm/simulator.h"
 #include "vm/snapshot.h"
-#include "vm/store_buffer.h"
 #include "vm/stub_code.h"
 #include "vm/symbols.h"
 #include "vm/thread_interrupter.h"
@@ -43,6 +43,7 @@ DECLARE_FLAG(bool, print_class_table);
 DECLARE_FLAG(bool, trace_time_all);
 DEFINE_FLAG(bool, keep_code, false, "Keep deoptimized code for profiling.");
 DEFINE_FLAG(bool, trace_shutdown, false, "Trace VM shutdown on stderr");
+DECLARE_FLAG(bool, strong);
 
 Isolate* Dart::vm_isolate_ = NULL;
 int64_t Dart::start_time_micros_ = 0;
@@ -90,7 +91,7 @@ static void CheckOffsets() {
   // These offsets are embedded in precompiled instructions. We need simarm
   // (compiler) and arm (runtime) to agree.
   CHECK_OFFSET(Thread::stack_limit_offset(), 4);
-  CHECK_OFFSET(Thread::object_null_offset(), 48);
+  CHECK_OFFSET(Thread::object_null_offset(), 56);
   CHECK_OFFSET(SingleTargetCache::upper_limit_offset(), 14);
   CHECK_OFFSET(Isolate::object_store_offset(), 28);
   NOT_IN_PRODUCT(CHECK_OFFSET(sizeof(ClassHeapStats), 168));
@@ -99,7 +100,7 @@ static void CheckOffsets() {
   // These offsets are embedded in precompiled instructions. We need simarm64
   // (compiler) and arm64 (runtime) to agree.
   CHECK_OFFSET(Thread::stack_limit_offset(), 8);
-  CHECK_OFFSET(Thread::object_null_offset(), 96);
+  CHECK_OFFSET(Thread::object_null_offset(), 104);
   CHECK_OFFSET(SingleTargetCache::upper_limit_offset(), 26);
   CHECK_OFFSET(Isolate::object_store_offset(), 56);
   NOT_IN_PRODUCT(CHECK_OFFSET(sizeof(ClassHeapStats), 288));
@@ -245,15 +246,15 @@ char* Dart::InitOnce(const uint8_t* vm_isolate_snapshot,
       }
 #endif  // !defined(PRODUCT)
       if (FLAG_trace_isolates) {
-        OS::Print("Size of vm isolate snapshot = %" Pd "\n",
-                  snapshot->length());
+        OS::PrintErr("Size of vm isolate snapshot = %" Pd "\n",
+                     snapshot->length());
         vm_isolate_->heap()->PrintSizes();
         MegamorphicCacheTable::PrintSizes(vm_isolate_);
         intptr_t size;
         intptr_t capacity;
         Symbols::GetStats(vm_isolate_, &size, &capacity);
-        OS::Print("VM Isolate: Number of symbols : %" Pd "\n", size);
-        OS::Print("VM Isolate: Symbol table capacity : %" Pd "\n", capacity);
+        OS::PrintErr("VM Isolate: Number of symbols : %" Pd "\n", size);
+        OS::PrintErr("VM Isolate: Symbol table capacity : %" Pd "\n", capacity);
       }
     } else {
 #if defined(DART_PRECOMPILED_RUNTIME)
@@ -306,7 +307,13 @@ char* Dart::InitOnce(const uint8_t* vm_isolate_snapshot,
     Service::SetGetServiceAssetsCallback(get_service_assets);
   }
 
-  ServiceIsolate::Run();
+  const bool is_dart2_aot_precompiler =
+      FLAG_strong && FLAG_precompiled_mode && !kDartPrecompiledRuntime;
+
+  if (!is_dart2_aot_precompiler &&
+      (FLAG_support_service || !kDartPrecompiledRuntime)) {
+    ServiceIsolate::Run();
+  }
 
 #ifndef DART_PRECOMPILED_RUNTIME
   if (start_kernel_isolate) {
@@ -317,21 +324,21 @@ char* Dart::InitOnce(const uint8_t* vm_isolate_snapshot,
   return NULL;
 }
 
-// This waits until only the VM isolate and the service isolate remains in the
-// list, i.e. list length == 2.
+bool Dart::HasApplicationIsolateLocked() {
+  for (Isolate* isolate = Isolate::isolates_list_head_; isolate != NULL;
+       isolate = isolate->next_) {
+    if (!Isolate::IsVMInternalIsolate(isolate)) return true;
+  }
+  return false;
+}
+
+// This waits until only the VM, service and kernel isolates are in the list.
 void Dart::WaitForApplicationIsolateShutdown() {
   ASSERT(!Isolate::creation_enabled_);
   MonitorLocker ml(Isolate::isolates_list_monitor_);
-  while ((Isolate::isolates_list_head_ != NULL) &&
-         (Isolate::isolates_list_head_->next_ != NULL) &&
-         (Isolate::isolates_list_head_->next_->next_ != NULL)) {
+  while (HasApplicationIsolateLocked()) {
     ml.Wait();
   }
-  ASSERT(
-      ((Isolate::isolates_list_head_ == Dart::vm_isolate()) &&
-       ServiceIsolate::IsServiceIsolate(Isolate::isolates_list_head_->next_)) ||
-      ((Isolate::isolates_list_head_->next_ == Dart::vm_isolate()) &&
-       ServiceIsolate::IsServiceIsolate(Isolate::isolates_list_head_)));
 }
 
 // This waits until only the VM isolate remains in the list.
@@ -395,13 +402,20 @@ const char* Dart::Cleanup() {
 
   // Wait for all isolates, but the service and the vm isolate to shut down.
   // Only do that if there is a service isolate running.
-  if (ServiceIsolate::IsRunning()) {
+  if (ServiceIsolate::IsRunning() || KernelIsolate::IsRunning()) {
     if (FLAG_trace_shutdown) {
       OS::PrintErr("[+%" Pd64 "ms] SHUTDOWN: Shutting down app isolates\n",
                    UptimeMillis());
     }
     WaitForApplicationIsolateShutdown();
   }
+
+  // Shutdown the kernel isolate.
+  if (FLAG_trace_shutdown) {
+    OS::PrintErr("[+%" Pd64 "ms] SHUTDOWN: Shutting down kernel isolate\n",
+                 UptimeMillis());
+  }
+  KernelIsolate::Shutdown();
 
   // Shutdown the service isolate.
   if (FLAG_trace_shutdown) {
@@ -546,7 +560,7 @@ RawError* Dart::InitializeIsolate(const uint8_t* snapshot_data,
       return ApiError::New(message);
     }
     if (FLAG_trace_isolates) {
-      OS::Print("Size of isolate snapshot = %" Pd "\n", snapshot->length());
+      OS::PrintErr("Size of isolate snapshot = %" Pd "\n", snapshot->length());
     }
     FullSnapshotReader reader(snapshot, snapshot_instructions, shared_data,
                               shared_instructions, T);
@@ -677,6 +691,10 @@ const char* Dart::FeaturesString(Isolate* isolate,
              FLAG_error_on_bad_type);
     ADD_FLAG(error_on_bad_override, enable_error_on_bad_override,
              FLAG_error_on_bad_override);
+    // sync-async and reify_generic_functions also affect deopt_ids.
+    ADD_FLAG(sync_async, sync_async, FLAG_sync_async);
+    ADD_FLAG(reify_generic_functions, reify_generic_functions,
+             FLAG_reify_generic_functions);
     if (kind == Snapshot::kFullJIT) {
       ADD_FLAG(use_field_guards, use_field_guards, FLAG_use_field_guards);
       ADD_FLAG(use_osr, use_osr, FLAG_use_osr);
@@ -696,15 +714,21 @@ const char* Dart::FeaturesString(Isolate* isolate,
 #elif defined(TARGET_ARCH_IA32)
     buffer.AddString(" ia32");
 #elif defined(TARGET_ARCH_X64)
-#if defined(_WIN64)
+#if defined(TARGET_OS_WINDOWS)
     buffer.AddString(" x64-win");
 #else
     buffer.AddString(" x64-sysv");
 #endif
 #elif defined(TARGET_ARCH_DBC)
-    buffer.AddString(" dbc");
-#elif defined(TARGET_ARCH_DBC64)
+#if defined(ARCH_IS_32_BIT)
+    buffer.AddString(" dbc32");
+#elif defined(ARCH_IS_64_BIT)
     buffer.AddString(" dbc64");
+#else
+#error What word size?
+#endif
+#else
+#error What architecture?
 #endif
   }
 

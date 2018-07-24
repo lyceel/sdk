@@ -13,7 +13,7 @@ import 'package:compiler/src/compiler.dart' show Compiler;
 import 'package:compiler/src/elements/entities.dart';
 import 'package:compiler/src/frontend_strategy.dart';
 import 'package:compiler/src/kernel/kernel_strategy.dart';
-import 'package:compiler/src/world.dart' show ClosedWorld;
+import 'package:compiler/src/world.dart' show JClosedWorld, KClosedWorld;
 import 'memory_compiler.dart' as memory;
 
 DartType instantiate(ClassEntity element, List<DartType> arguments) {
@@ -27,41 +27,22 @@ class TypeEnvironment {
   static Future<TypeEnvironment> create(String source,
       {bool expectNoErrors: false,
       bool expectNoWarningsOrErrors: false,
-      bool stopAfterTypeInference: false,
-      String mainSource,
       bool testBackendWorld: false,
       List<String> options: const <String>[],
       Map<String, String> fieldTypeMap: const <String, String>{}}) async {
     Uri uri;
     Compiler compiler;
-    if (mainSource != null) {
-      stopAfterTypeInference = true;
-    }
-    if (testBackendWorld) {
-      stopAfterTypeInference = true;
-      assert(mainSource != null);
-    }
-    if (mainSource == null) {
-      source = '''import 'dart:async';
-                  main() {}
-                  $source''';
-    } else {
-      source = '$mainSource\n$source';
-    }
     memory.DiagnosticCollector collector;
     collector = new memory.DiagnosticCollector();
     uri = Uri.parse('memory:main.dart');
     memory.CompilationResult result = await memory.runCompiler(
         entryPoint: uri,
         memorySourceFiles: {'main.dart': source},
-        options: stopAfterTypeInference
-            ? ([Flags.disableTypeInference]..addAll(options))
-            : ([Flags.disableTypeInference, Flags.analyzeAll, Flags.analyzeOnly]
-              ..addAll(options)),
+        options: [Flags.disableTypeInference]..addAll(options),
         diagnosticHandler: collector,
         beforeRun: (compiler) {
           ImpactCacheDeleter.retainCachesForTesting = true;
-          compiler.stopAfterTypeInference = stopAfterTypeInference;
+          compiler.stopAfterTypeInference = true;
         });
     compiler = result.compiler;
     if (expectNoErrors || expectNoWarningsOrErrors) {
@@ -193,12 +174,14 @@ class TypeEnvironment {
     return types.isPotentialSubtype(T, S);
   }
 
-  ClosedWorld get closedWorld {
-    if (testBackendWorld) {
-      return compiler.backendClosedWorldForTesting;
-    } else {
-      return compiler.resolutionWorldBuilder.closedWorldForTesting;
-    }
+  JClosedWorld get jClosedWorld {
+    assert(testBackendWorld);
+    return compiler.backendClosedWorldForTesting;
+  }
+
+  KClosedWorld get kClosedWorld {
+    assert(!testBackendWorld);
+    return compiler.resolutionWorldBuilder.closedWorldForTesting;
   }
 }
 

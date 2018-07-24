@@ -1331,7 +1331,7 @@ void LICM::TrySpecializeSmiPhi(PhiInstr* phi,
 }
 
 void LICM::OptimisticallySpecializeSmiPhis() {
-  if (!flow_graph()->function().allows_hoisting_check_class() ||
+  if (flow_graph()->function().ProhibitsHoistingCheckClass() ||
       FLAG_precompiled_mode) {
     // Do not hoist any: Either deoptimized on a hoisted check,
     // or compiling precompiled code where we can't do optimistic
@@ -1355,7 +1355,7 @@ void LICM::OptimisticallySpecializeSmiPhis() {
 }
 
 void LICM::Optimize() {
-  if (!flow_graph()->function().allows_hoisting_check_class()) {
+  if (flow_graph()->function().ProhibitsHoistingCheckClass()) {
     // Do not hoist any.
     return;
   }
@@ -2473,7 +2473,7 @@ class StoreOptimizer : public LivenessAnalysis {
 
         // Handle side effects, deoptimization and function return.
         if (instr->HasUnknownSideEffects() || instr->CanDeoptimize() ||
-            instr->IsThrow() || instr->IsReThrow() || instr->IsReturn()) {
+            instr->MayThrow() || instr->IsReturn()) {
           // Instructions that return from the function, instructions with side
           // effects and instructions that can deoptimize are considered as
           // loads from all places.
@@ -3156,13 +3156,8 @@ void TryCatchAnalyzer::Optimize(FlowGraph* flow_graph) {
     // generator functions they may be context-allocated in which case they are
     // not tracked in the environment anyway.
 
-    const intptr_t parameter_count = flow_graph->num_direct_parameters();
-    if (!catch_entry->exception_var().is_captured()) {
-      cdefs[catch_entry->exception_var().BitIndexIn(parameter_count)] = NULL;
-    }
-    if (!catch_entry->stacktrace_var().is_captured()) {
-      cdefs[catch_entry->stacktrace_var().BitIndexIn(parameter_count)] = NULL;
-    }
+    cdefs[flow_graph->EnvIndex(catch_entry->raw_exception_var())] = NULL;
+    cdefs[flow_graph->EnvIndex(catch_entry->raw_stacktrace_var())] = NULL;
 
     for (BlockIterator block_it = flow_graph->reverse_postorder_iterator();
          !block_it.Done(); block_it.Advance()) {

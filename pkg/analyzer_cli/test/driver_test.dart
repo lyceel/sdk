@@ -11,7 +11,6 @@ import 'package:analyzer/src/analysis_options/analysis_options_provider.dart';
 import 'package:analyzer/src/error/codes.dart';
 import 'package:analyzer/src/generated/engine.dart';
 import 'package:analyzer/src/generated/source.dart';
-import 'package:analyzer/src/services/lint.dart';
 import 'package:analyzer/src/summary/idl.dart';
 import 'package:analyzer/src/util/sdk.dart';
 import 'package:analyzer_cli/src/ansi.dart' as ansi;
@@ -29,21 +28,45 @@ main() {
     defineReflectiveTests(BuildModeTest);
     defineReflectiveTests(ExitCodesTest);
     defineReflectiveTests(ExitCodesTest_PreviewDart2);
-    // TODO(scheglov): Restore similar test coverage when the front-end API
-    // allows it.  See https://github.com/dart-lang/sdk/issues/32258.
-    // defineReflectiveTests(ExitCodesTest_UseCFE);
+    defineReflectiveTests(ExitCodesTest_UseCFE);
     defineReflectiveTests(LinterTest);
     defineReflectiveTests(LinterTest_PreviewDart2);
-    // Disabled until integration with the CFE has been restarted.
-//    defineReflectiveTests(LinterTest_UseCFE);
+    defineReflectiveTests(LinterTest_UseCFE);
     defineReflectiveTests(NonDartFilesTest);
     defineReflectiveTests(OptionsTest);
     defineReflectiveTests(OptionsTest_PreviewDart2);
-    // TODO(scheglov): Restore similar test coverage when the front-end API
-    // allows it.  See https://github.com/dart-lang/sdk/issues/32258.
-    // defineReflectiveTests(OptionsTest_UseCFE);
+    defineReflectiveTests(OptionsTest_UseCFE);
   }, name: 'Driver');
 }
+
+/**
+ * Call a test that we think will fail.
+ *
+ * Ensure that we return any thrown exception correctly (avoiding the
+ * package:test zone error handler).
+ */
+callFailingTest(NoArgFunction expectedFailingTestFn) {
+  final Completer completer = new Completer();
+
+  try {
+    runZoned(
+      () async => await expectedFailingTestFn(),
+      onError: (error) {
+        completer.completeError(error);
+      },
+    ).then((result) {
+      completer.complete(result);
+    }).catchError((error) {
+      completer.completeError(error);
+    });
+  } catch (error) {
+    completer.completeError(error);
+  }
+
+  return completer.future;
+}
+
+typedef dynamic NoArgFunction();
 
 class BaseTest {
   static const emptyOptionsFile = 'data/empty_options.yaml';
@@ -53,6 +76,8 @@ class BaseTest {
   ExitHandler _savedExitHandler;
 
   Driver driver;
+
+  AnalysisOptions get analysisOptions => driver.analysisDriver.analysisOptions;
 
   bool get useCFE => false;
 
@@ -220,7 +245,6 @@ var b = a;
       await new Driver(isTesting: true).start([
         '--dart-sdk',
         _findSdkDirForSummaries(),
-        '--strong',
         '--build-mode',
         '--build-summary-unlinked-input=$aUnlinked,$bUnlinked',
         '--build-summary-output=$abLinked'
@@ -347,7 +371,6 @@ var b = new B();
 
       await _doDrive(testDart,
           additionalArgs: [
-            '--strong',
             '--build-summary-only',
             '--build-summary-output=$testSum'
           ],
@@ -663,34 +686,12 @@ class ExitCodesTest extends BaseTest {
 class ExitCodesTest_PreviewDart2 extends ExitCodesTest {
   @override
   bool get usePreviewDart2 => true;
-
-  @override
-  @failingTest
-  test_fatalErrors() {
-    // TODO(devoncarew): This test times out when used with @failingTest.
-    return new Future.error('failing test');
-  }
 }
 
 @reflectiveTest
 class ExitCodesTest_UseCFE extends ExitCodesTest {
   @override
   bool get useCFE => true;
-
-  @override
-  @failingTest
-  test_fatalErrors() {
-    // TODO(devoncarew): This test times out when used with @failingTest.
-    return new Future.error('failing test');
-  }
-
-  @override
-  @failingTest
-  test_fatalWarnings() => super.test_fatalWarnings();
-
-  @override
-  @failingTest
-  test_notFatalWarnings() => super.test_notFatalWarnings();
 }
 
 @reflectiveTest
@@ -731,10 +732,10 @@ linter:
     await _runLinter_defaultLints();
 
     /// Lints should be enabled.
-    expect(driver.context.analysisOptions.lint, isTrue);
+    expect(analysisOptions.lint, isTrue);
 
     /// Default list should include camel_case_types.
-    var lintNames = getLints(driver.context).map((r) => r.name);
+    var lintNames = analysisOptions.lintRules.map((r) => r.name);
     expect(lintNames, contains('camel_case_types'));
   }
 
@@ -748,16 +749,16 @@ linter:
     await _runLinter_lintsInOptions();
 
     /// Lints should be enabled.
-    expect(driver.context.analysisOptions.lint, isTrue);
+    expect(analysisOptions.lint, isTrue);
 
     /// The analysis options file only specifies 'camel_case_types'.
-    var lintNames = getLints(driver.context).map((r) => r.name);
+    var lintNames = analysisOptions.lintRules.map((r) => r.name);
     expect(lintNames, orderedEquals(['camel_case_types']));
   }
 
   test_noLints_lintsDisabled() async {
     await _runLinter_noLintsFlag();
-    expect(driver.context.analysisOptions.lint, isFalse);
+    expect(analysisOptions.lint, isFalse);
   }
 
   test_noLints_noGeneratedWarnings() async {
@@ -767,7 +768,7 @@ linter:
 
   test_noLints_noRegisteredLints() async {
     await _runLinter_noLintsFlag();
-    expect(getLints(driver.context), isEmpty);
+    expect(analysisOptions.lintRules, isEmpty);
   }
 
   YamlMap _parseOptions(String src) =>
@@ -843,8 +844,7 @@ flutter:
 class OptionsTest extends BaseTest {
   String get optionsFileName => AnalysisEngine.ANALYSIS_OPTIONS_YAML_FILE;
 
-  List<ErrorProcessor> get processors =>
-      driver.context.analysisOptions.errorProcessors;
+  List<ErrorProcessor> get processors => analysisOptions.errorProcessors;
 
   ErrorProcessor processorFor(AnalysisError error) =>
       processors.firstWhere((p) => p.appliesTo(error));
@@ -904,21 +904,13 @@ class OptionsTest extends BaseTest {
     ]);
     expect(processorFor(missing_return).severity, ErrorSeverity.ERROR);
     expect(bulletToDash(outSink),
-        contains("error - This function declares a return type of 'int'"));
+        contains("error - This function has a return type of 'int'"));
     expect(outSink.toString(), contains("1 error and 1 warning found."));
   }
 
   test_basic_language() async {
     await _driveBasic();
-    expect(driver.context.analysisOptions.enableSuperMixins, isTrue);
-  }
-
-  test_basic_strongMode() async {
-    await _driveBasic();
-    expect(driver.context.analysisOptions.strongMode, isTrue);
-    // https://github.com/dart-lang/sdk/issues/26129
-    AnalysisContext sdkContext = driver.context.sourceFactory.dartSdk.context;
-    expect(sdkContext.analysisOptions.strongMode, isTrue);
+    expect(analysisOptions.enableSuperMixins, isTrue);
   }
 
   test_includeDirective() async {
@@ -943,14 +935,7 @@ class OptionsTest extends BaseTest {
   test_previewDart2() async {
     await drive('data/options_tests_project/test_file.dart',
         args: ['--preview-dart-2']);
-    expect(driver.context.analysisOptions.useFastaParser, isFalse);
-  }
-
-  test_strongSdk() async {
-    String testDir = path.join(testDirectory, 'data', 'strong_sdk');
-    await drive(path.join(testDir, 'main.dart'), args: ['--strong']);
-    expect(driver.context.analysisOptions.strongMode, isTrue);
-    expect(outSink.toString(), contains('No issues found'));
+    expect(analysisOptions.useFastaParser, isFalse);
   }
 
   test_todo() async {
@@ -1015,42 +1000,37 @@ class OptionsTest_UseCFE extends OptionsTest {
 
   @override
   @failingTest
-  test_analysisOptions_excludes() => super.test_analysisOptions_excludes();
+  test_analysisOptions_excludes() =>
+      callFailingTest(super.test_analysisOptions_excludes);
 
   @override
   @failingTest
   test_analysisOptions_excludesRelativeToAnalysisOptions_explicit() =>
-      super.test_analysisOptions_excludesRelativeToAnalysisOptions_explicit();
+      callFailingTest(super
+          .test_analysisOptions_excludesRelativeToAnalysisOptions_explicit);
 
   @override
   @failingTest
   test_analysisOptions_excludesRelativeToAnalysisOptions_inferred() =>
-      super.test_analysisOptions_excludesRelativeToAnalysisOptions_inferred();
+      callFailingTest(super
+          .test_analysisOptions_excludesRelativeToAnalysisOptions_inferred);
 
   @override
   @failingTest
-  test_basic_filters() => super.test_basic_filters();
+  test_basic_filters() => callFailingTest(super.test_basic_filters);
 
   @override
   @failingTest
-  test_basic_language() => super.test_basic_language();
+  test_includeDirective() => callFailingTest(super.test_includeDirective);
 
   @override
   @failingTest
-  test_basic_strongMode() => super.test_basic_strongMode();
-
-  @override
-  @failingTest
-  test_includeDirective() => super.test_includeDirective();
-
-  @override
-  @failingTest
-  test_previewDart2() => super.test_previewDart2();
+  test_previewDart2() => callFailingTest(super.test_previewDart2);
 
   @override
   @failingTest
   test_withFlags_overrideFatalWarning() =>
-      super.test_withFlags_overrideFatalWarning();
+      callFailingTest(super.test_withFlags_overrideFatalWarning);
 }
 
 class TestSource implements Source {

@@ -4,8 +4,9 @@
 
 /// This library defines runtime operations on objects used by the code
 /// generator.
-part of dart._runtime;
+part of "runtime.dart";
 
+// TODO(jmesserly): remove this in favor of _Invocation.
 class InvocationImpl extends Invocation {
   final Symbol memberName;
   final List positionalArguments;
@@ -18,23 +19,21 @@ class InvocationImpl extends Invocation {
   InvocationImpl(memberName, List<Object> positionalArguments,
       {namedArguments,
       List typeArguments,
-      this.isMethod: false,
-      this.isGetter: false,
-      this.isSetter: false})
+      this.isMethod = false,
+      this.isGetter = false,
+      this.isSetter = false})
       : memberName =
             isSetter ? _setterSymbol(memberName) : _dartSymbol(memberName),
-        positionalArguments = new List.unmodifiable(positionalArguments),
+        positionalArguments = List.unmodifiable(positionalArguments),
         namedArguments = _namedArgsToSymbols(namedArguments),
         typeArguments = typeArguments == null
             ? const []
-            : new List.unmodifiable(typeArguments.map(wrapType));
+            : List.unmodifiable(typeArguments.map(wrapType));
 
   static Map<Symbol, dynamic> _namedArgsToSymbols(namedArgs) {
     if (namedArgs == null) return const {};
-    return new Map.unmodifiable(new Map.fromIterable(
-        getOwnPropertyNames(namedArgs),
-        key: _dartSymbol,
-        value: (k) => JS('', '#[#]', namedArgs, k)));
+    return Map.unmodifiable(Map.fromIterable(getOwnPropertyNames(namedArgs),
+        key: _dartSymbol, value: (k) => JS('', '#[#]', namedArgs, k)));
   }
 }
 
@@ -97,7 +96,7 @@ dloadRepl(obj, field) => dload(obj, replNameLookup(obj, field), false);
 // implemented by the Object base class as those methods can always be
 // statically resolved.
 dload(obj, field, [mirrors = undefined]) {
-  if (JS('bool', 'typeof # == "function" && # == "call"', obj, field)) {
+  if (JS('!', 'typeof # == "function" && # == "call"', obj, field)) {
     return obj;
   }
   var f = _canonicalMember(obj, field);
@@ -110,12 +109,11 @@ dload(obj, field, [mirrors = undefined]) {
     if (hasMethod(type, f)) return bind(obj, f, null);
 
     // Always allow for JS interop objects.
-    if (!JS('bool', '#', mirrors) && isJsInterop(obj)) {
+    if (!JS<bool>('!', '#', mirrors) && isJsInterop(obj)) {
       return JS('', '#[#]', obj, f);
     }
   }
-  return noSuchMethod(
-      obj, new InvocationImpl(field, JS('', '[]'), isGetter: true));
+  return noSuchMethod(obj, InvocationImpl(field, JS('', '[]'), isGetter: true));
 }
 
 // Version of dload that matches legacy mirrors behavior for JS types.
@@ -142,17 +140,17 @@ dput(obj, field, value, [mirrors = undefined]) {
   if (f != null) {
     var setterType = getSetterType(getType(obj), f);
     if (setterType != null) {
-      if (JS('bool', '#', mirrors))
+      if (JS('!', '#', mirrors))
         setterType = _stripGenericArguments(setterType);
       return JS('', '#[#] = #._check(#)', obj, f, setterType, value);
     }
     // Always allow for JS interop objects.
-    if (!JS('bool', '#', mirrors) && isJsInterop(obj)) {
+    if (!JS<bool>('!', '#', mirrors) && isJsInterop(obj)) {
       return JS('', '#[#] = #', obj, f, value);
     }
   }
   noSuchMethod(
-      obj, new InvocationImpl(field, JS('', '[#]', value), isSetter: true));
+      obj, InvocationImpl(field, JS('', '[#]', value), isSetter: true));
   return value;
 }
 
@@ -160,15 +158,15 @@ dput(obj, field, value, [mirrors = undefined]) {
 /// actuals.
 bool _checkApply(FunctionType type, List actuals, namedActuals) {
   // Check for too few required arguments.
-  var actualsCount = JS('int', '#.length', actuals);
+  int actualsCount = JS('!', '#.length', actuals);
   var required = type.args;
-  var requiredCount = JS('int', '#.length', required);
+  int requiredCount = JS('!', '#.length', required);
   if (actualsCount < requiredCount) return false;
 
   // Check for too many postional arguments.
   var extras = actualsCount - requiredCount;
   var optionals = type.optionals;
-  if (extras > JS('int', '#.length', optionals)) return false;
+  if (extras > JS<int>('!', '#.length', optionals)) return false;
 
   // Check if we have invalid named arguments.
   Iterable names;
@@ -176,7 +174,7 @@ bool _checkApply(FunctionType type, List actuals, namedActuals) {
   if (namedActuals != null) {
     names = getOwnPropertyNames(namedActuals);
     for (var name in names) {
-      if (!JS('bool', '#.hasOwnProperty(#)', named, name)) return false;
+      if (!JS('!', '#.hasOwnProperty(#)', named, name)) return false;
     }
   }
   // Now that we know the signature matches, we can perform type checks.
@@ -221,17 +219,19 @@ _toDisplayName(name) => JS('', '''(() => {
   })()''');
 
 Symbol _dartSymbol(name) {
-  return (JS('bool', 'typeof # === "symbol"', name))
+  return (JS<bool>('!', 'typeof # === "symbol"', name))
       ? JS('Symbol', '#(new #.new(#, #))', const_, PrivateSymbol,
           _toSymbolName(name), name)
-      : JS('Symbol', '#(#.new(#))', const_, Symbol, _toDisplayName(name));
+      : JS('Symbol', '#(new #.new(#))', const_, internal.Symbol,
+          _toDisplayName(name));
 }
 
 Symbol _setterSymbol(name) {
-  return (JS('bool', 'typeof # === "symbol"', name))
+  return (JS<bool>('!', 'typeof # === "symbol"', name))
       ? JS('Symbol', '#(new #.new(# + "=", #))', const_, PrivateSymbol,
           _toSymbolName(name), name)
-      : JS('Symbol', '#(#.new(# + "="))', const_, Symbol, _toDisplayName(name));
+      : JS('Symbol', '#(new #.new(# + "="))', const_, internal.Symbol,
+          _toDisplayName(name));
 }
 
 _checkAndCall(f, ftype, obj, typeArgs, args, named, displayName) =>
@@ -357,13 +357,12 @@ _dhelperRepl(obj, field, Function(Object) callback) {
 
 /// Shared code for dsend, dindex, and dsetindex.
 callMethod(obj, name, typeArgs, args, named, displayName) {
-  if (JS('bool', 'typeof # == "function" && # == "call"', obj, name)) {
+  if (JS('!', 'typeof # == "function" && # == "call"', obj, name)) {
     return dgcall(obj, typeArgs, args, named);
   }
   var symbol = _canonicalMember(obj, name);
   if (symbol == null) {
-    return noSuchMethod(
-        obj, new InvocationImpl(displayName, args, isMethod: true));
+    return noSuchMethod(obj, InvocationImpl(displayName, args, isMethod: true));
   }
   var f = obj != null ? JS('', '#[#]', obj, symbol) : null;
   var type = getType(obj);
@@ -409,7 +408,7 @@ _ignoreMemo(f) => JS('', '''(() => {
   };
 })()''');
 
-final _ignoreTypeFailure = JS('', '''(() => {
+final Object _ignoreTypeFailure = JS('', '''(() => {
   return $_ignoreMemo((actual, type) => {
       // TODO(vsm): Remove this hack ...
       // This is primarily due to the lack of generic methods,
@@ -424,8 +423,7 @@ final _ignoreTypeFailure = JS('', '''(() => {
 
     if (!!$isSubtype(type, $Iterable) && !!$isSubtype(actual, $Iterable) ||
         !!$isSubtype(type, $Future) && !!$isSubtype(actual, $Future) ||
-        !!$isSubtype(type, $Map) && !!$isSubtype(actual, $Map) ||
-        !!$isSubtype(type, $Stream) && !!$isSubtype(actual, $Stream)) {
+        !!$isSubtype(type, $Map) && !!$isSubtype(actual, $Map)) {
       console.warn('Ignoring cast fail from ' + $typeName(actual) +
                    ' to ' + $typeName(type));
       return true;
@@ -434,32 +432,33 @@ final _ignoreTypeFailure = JS('', '''(() => {
   });
 })()''');
 
+@notNull
 @JSExportName('is')
 bool instanceOf(obj, type) {
   if (obj == null) {
-    return JS('bool', '# == # || #', type, Null, _isTop(type));
+    return JS('!', '# == # || #', type, Null, _isTop(type));
   }
-  return JS('#', '!!#', isSubtype(getReifiedType(obj), type));
+  return JS('!', '!!#', isSubtype(getReifiedType(obj), type));
 }
 
 @JSExportName('as')
-cast(obj, type, bool isExplicit) {
+cast(obj, type, @notNull bool isImplicit) {
   if (obj == null) return obj;
   var actual = getReifiedType(obj);
   var result = isSubtype(actual, type);
   if (JS(
-      'bool',
+      '!',
       '# === true || # === null && # && '
       'dart.__ignoreWhitelistedErrors && #(#, #)',
       result,
       result,
-      isExplicit,
+      isImplicit,
       _ignoreTypeFailure,
       actual,
       type)) {
     return obj;
   }
-  return castError(obj, type, isExplicit);
+  return castError(obj, type, isImplicit);
 }
 
 bool test(bool obj) {
@@ -472,27 +471,31 @@ bool dtest(obj) {
   return obj;
 }
 
-void _throwBooleanConversionError() =>
-    throw new BooleanConversionAssertionError();
+void _throwBooleanConversionError() => throw BooleanConversionAssertionError();
 
 void booleanConversionFailed(obj) {
   var actual = typeName(getReifiedType(test(obj)));
-  throw new TypeErrorImpl(
-      "type '$actual' is not a 'bool' in boolean expression");
+  throw TypeErrorImpl("type '$actual' is not a 'bool' in boolean expression");
 }
 
 asInt(obj) {
   if (obj == null) return null;
 
-  if (JS('bool', 'Math.floor(#) != #', obj, obj)) {
+  if (JS('!', 'Math.floor(#) != #', obj, obj)) {
     castError(obj, JS('', '#', int), false);
   }
   return obj;
 }
 
 /// Checks that `x` is not null or undefined.
-// TODO(jmesserly): should we inline this?
-notNull(x) {
+//
+// TODO(jmesserly): inline this, either by generating it as a function into
+// the module, or via some other pattern such as:
+//
+//     <expr> || nullErr()
+//     (t0 = <expr>) != null ? t0 : nullErr()
+@JSExportName('notNull')
+_notNull(x) {
   if (x == null) throwNullValueError();
   return x;
 }
@@ -515,13 +518,13 @@ constMap<K, V>(JSArray elements) {
   map = lookupNonTerminal(map, K);
   var result = JS('', '#.get(#)', map, V);
   if (result != null) return result;
-  result = new ImmutableMap<K, V>.from(elements);
+  result = ImmutableMap<K, V>.from(elements);
   JS('', '#.set(#, #)', map, V, result);
   return result;
 }
 
 bool dassert(value) {
-  if (JS('bool', '# != null && #[#] instanceof #', value, value, _runtimeType,
+  if (JS('!', '# != null && #[#] instanceof #', value, value, _runtimeType,
       AbstractFunctionType)) {
     value = dcall(value, []);
   }
@@ -536,8 +539,8 @@ Map _primitiveErrorCache;
 const _maxErrorCache = 10;
 
 bool _isJsError(exception) {
-  return JS('bool', '#.Error != null && # instanceof #.Error', global_,
-      exception, global_);
+  return JS('!', '#.Error != null && # instanceof #.Error', global_, exception,
+      global_);
 }
 
 // Record/return the JS error for an exception.  If an error was already
@@ -546,7 +549,7 @@ recordJsError(exception, [newError]) {
   if (_isJsError(exception)) return exception;
 
   var useExpando =
-      exception != null && JS('bool', 'typeof # == "object"', exception);
+      exception != null && JS<bool>('!', 'typeof # == "object"', exception);
   var error;
   if (useExpando) {
     error = JS('', '#[#]', exception, _error);
@@ -728,29 +731,30 @@ bool equals(x, y) {
   // function minimal.
   // This pattern resulted from performance testing; it found that dispatching
   // was the fastest solution, even for primitive types.
-  return JS('bool', '# == null ? # == null : #[#](#)', x, y, x,
+  return JS('!', '# == null ? # == null : #[#](#)', x, y, x,
       extensionSymbol('_equals'), y);
 }
 
 int hashCode(obj) {
-  return obj == null ? 0 : JS('int', '#[#]', obj, extensionSymbol('hashCode'));
-}
-
-hashKey(k) {
-  if (k == null) return 0;
-  switch (JS('String', 'typeof #', k)) {
-    case "object":
-    case "function":
-      return JS('int', '#[#] & 0x3ffffff', k, extensionSymbol('hashCode'));
-  }
-  // For primitive types we can store the key directly in an ES6 Map.
-  return k;
+  return obj == null ? 0 : JS('!', '#[#]', obj, extensionSymbol('hashCode'));
 }
 
 @JSExportName('toString')
 String _toString(obj) {
   if (obj == null) return "null";
-  return JS('String', '#[#]()', obj, extensionSymbol('toString'));
+  if (obj is String) return obj;
+  return JS('!', '#[#]()', obj, extensionSymbol('toString'));
+}
+
+/// Converts to a non-null [String], equivalent to
+/// `dart.notNull(dart.toString(obj))`.
+///
+/// This is commonly used in string interpolation.
+@notNull
+String str(obj) {
+  if (obj == null) return "null";
+  if (obj is String) return obj;
+  return _notNull(JS('!', '#[#]()', obj, extensionSymbol('toString')));
 }
 
 // TODO(jmesserly): is the argument type verified statically?
@@ -761,24 +765,13 @@ noSuchMethod(obj, Invocation invocation) {
 
 /// The default implementation of `noSuchMethod` to match `Object.noSuchMethod`.
 defaultNoSuchMethod(obj, Invocation i) {
-  if (JS('bool', 'dart.__trapRuntimeErrors')) JS('', 'debugger');
-  throw new NoSuchMethodError.withInvocation(obj, i);
+  if (JS('!', 'dart.__trapRuntimeErrors')) JS('', 'debugger');
+  throw NoSuchMethodError.withInvocation(obj, i);
 }
 
 runtimeType(obj) {
   return obj == null ? Null : JS('', '#[dartx.runtimeType]', obj);
 }
-
-/// Implements Dart's interpolated strings as ES2015 tagged template literals.
-///
-/// For example: dart.str`hello ${name}`
-String str(strings, @rest values) => JS('', '''(() => {
-  let s = $strings[0];
-  for (let i = 0, len = $values.length; i < len; ) {
-    s += $notNull($_toString($values[i])) + $strings[++i];
-  }
-  return s;
-})()''');
 
 final identityHashCode_ = JS('', 'Symbol("_identityHashCode")');
 
@@ -801,14 +794,14 @@ final JsIterator = JS('', '''
 
 _canonicalMember(obj, name) {
   // Private names are symbols and are already canonical.
-  if (JS('bool', 'typeof # === "symbol"', name)) return name;
+  if (JS('!', 'typeof # === "symbol"', name)) return name;
 
-  if (obj != null && JS('bool', '#[#] != null', obj, _extensionType)) {
+  if (obj != null && JS<bool>('!', '#[#] != null', obj, _extensionType)) {
     return JS('', 'dartx.#', name);
   }
 
   // Check for certain names that we can't use in JS
-  if (JS('bool', '# == "constructor" || # == "prototype"', name, name)) {
+  if (JS('!', '# == "constructor" || # == "prototype"', name, name)) {
     JS('', '# = "+" + #', name, name);
   }
   return name;
@@ -818,7 +811,7 @@ _canonicalMember(obj, name) {
 ///
 /// Libraries are not actually deferred in DDC, so this just returns a future
 /// that completes immediately.
-Future loadLibrary() => new Future.value();
+Future loadLibrary() => Future.value();
 
 /// Defines lazy statics.
 void defineLazy(to, from) {

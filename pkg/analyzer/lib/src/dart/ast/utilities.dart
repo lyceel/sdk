@@ -2,8 +2,6 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-library analyzer.src.dart.ast.utilities;
-
 import 'dart:collection';
 
 import 'package:analyzer/dart/ast/ast.dart';
@@ -2623,10 +2621,10 @@ class ElementLocator_ElementMapper extends GeneralizingAstVisitor<Element> {
 
   @override
   Element visitAssignmentExpression(AssignmentExpression node) =>
-      node.bestElement;
+      node.staticElement;
 
   @override
-  Element visitBinaryExpression(BinaryExpression node) => node.bestElement;
+  Element visitBinaryExpression(BinaryExpression node) => node.staticElement;
 
   @override
   Element visitClassDeclaration(ClassDeclaration node) => node.element;
@@ -2659,9 +2657,9 @@ class ElementLocator_ElementMapper extends GeneralizingAstVisitor<Element> {
       if (identical(returnType, node)) {
         SimpleIdentifier name = parent.name;
         if (name != null) {
-          return name.bestElement;
+          return name.staticElement;
         }
-        Element element = node.bestElement;
+        Element element = node.staticElement;
         if (element is ClassElement) {
           return element.unnamedConstructor;
         }
@@ -2677,14 +2675,14 @@ class ElementLocator_ElementMapper extends GeneralizingAstVisitor<Element> {
         return grandParent.element;
       }
     }
-    return node.bestElement;
+    return node.staticElement;
   }
 
   @override
   Element visitImportDirective(ImportDirective node) => node.element;
 
   @override
-  Element visitIndexExpression(IndexExpression node) => node.bestElement;
+  Element visitIndexExpression(IndexExpression node) => node.staticElement;
 
   @override
   Element visitInstanceCreationExpression(InstanceCreationExpression node) =>
@@ -2698,19 +2696,20 @@ class ElementLocator_ElementMapper extends GeneralizingAstVisitor<Element> {
 
   @override
   Element visitMethodInvocation(MethodInvocation node) =>
-      node.methodName.bestElement;
+      node.methodName.staticElement;
 
   @override
   Element visitPartOfDirective(PartOfDirective node) => node.element;
 
   @override
-  Element visitPostfixExpression(PostfixExpression node) => node.bestElement;
+  Element visitPostfixExpression(PostfixExpression node) => node.staticElement;
 
   @override
-  Element visitPrefixedIdentifier(PrefixedIdentifier node) => node.bestElement;
+  Element visitPrefixedIdentifier(PrefixedIdentifier node) =>
+      node.staticElement;
 
   @override
-  Element visitPrefixExpression(PrefixExpression node) => node.bestElement;
+  Element visitPrefixExpression(PrefixExpression node) => node.staticElement;
 
   @override
   Element visitStringLiteral(StringLiteral node) {
@@ -2844,7 +2843,6 @@ class IncrementalAstCloner implements AstVisitor<AstNode> {
   AsExpression visitAsExpression(AsExpression node) {
     AsExpression copy = astFactory.asExpression(_cloneNode(node.expression),
         _mapToken(node.asOperator), _cloneNode(node.type));
-    copy.propagatedType = node.propagatedType;
     copy.staticType = node.staticType;
     return copy;
   }
@@ -2876,8 +2874,6 @@ class IncrementalAstCloner implements AstVisitor<AstNode> {
         _cloneNode(node.leftHandSide),
         _mapToken(node.operator),
         _cloneNode(node.rightHandSide));
-    copy.propagatedElement = node.propagatedElement;
-    copy.propagatedType = node.propagatedType;
     copy.staticElement = node.staticElement;
     copy.staticType = node.staticType;
     return copy;
@@ -2894,8 +2890,6 @@ class IncrementalAstCloner implements AstVisitor<AstNode> {
         _cloneNode(node.leftOperand),
         _mapToken(node.operator),
         _cloneNode(node.rightOperand));
-    copy.propagatedElement = node.propagatedElement;
-    copy.propagatedType = node.propagatedType;
     copy.staticElement = node.staticElement;
     copy.staticType = node.staticType;
     return copy;
@@ -2914,7 +2908,6 @@ class IncrementalAstCloner implements AstVisitor<AstNode> {
   BooleanLiteral visitBooleanLiteral(BooleanLiteral node) {
     BooleanLiteral copy =
         astFactory.booleanLiteral(_mapToken(node.literal), node.value);
-    copy.propagatedType = node.propagatedType;
     copy.staticType = node.staticType;
     return copy;
   }
@@ -2928,7 +2921,6 @@ class IncrementalAstCloner implements AstVisitor<AstNode> {
   CascadeExpression visitCascadeExpression(CascadeExpression node) {
     CascadeExpression copy = astFactory.cascadeExpression(
         _cloneNode(node.target), _cloneNodeList(node.cascadeSections));
-    copy.propagatedType = node.propagatedType;
     copy.staticType = node.staticType;
     return copy;
   }
@@ -3016,7 +3008,6 @@ class IncrementalAstCloner implements AstVisitor<AstNode> {
         _cloneNode(node.thenExpression),
         _mapToken(node.colon),
         _cloneNode(node.elseExpression));
-    copy.propagatedType = node.propagatedType;
     copy.staticType = node.staticType;
     return copy;
   }
@@ -3109,7 +3100,6 @@ class IncrementalAstCloner implements AstVisitor<AstNode> {
   DoubleLiteral visitDoubleLiteral(DoubleLiteral node) {
     DoubleLiteral copy =
         astFactory.doubleLiteral(_mapToken(node.literal), node.value);
-    copy.propagatedType = node.propagatedType;
     copy.staticType = node.staticType;
     return copy;
   }
@@ -3266,7 +3256,6 @@ class IncrementalAstCloner implements AstVisitor<AstNode> {
         _cloneNode(node.parameters),
         _cloneNode(node.body));
     copy.element = node.element;
-    copy.propagatedType = node.propagatedType;
     copy.staticType = node.staticType;
     return copy;
   }
@@ -3278,8 +3267,6 @@ class IncrementalAstCloner implements AstVisitor<AstNode> {
         _cloneNode(node.function),
         _cloneNode(node.typeArguments),
         _cloneNode(node.argumentList));
-    copy.propagatedElement = node.propagatedElement;
-    copy.propagatedType = node.propagatedType;
     copy.staticElement = node.staticElement;
     copy.staticType = node.staticType;
     return copy;
@@ -3384,8 +3371,6 @@ class IncrementalAstCloner implements AstVisitor<AstNode> {
           _mapToken(node.rightBracket));
     }
     copy.auxiliaryElements = node.auxiliaryElements;
-    copy.propagatedElement = node.propagatedElement;
-    copy.propagatedType = node.propagatedType;
     copy.staticElement = node.staticElement;
     copy.staticType = node.staticType;
     return copy;
@@ -3398,7 +3383,6 @@ class IncrementalAstCloner implements AstVisitor<AstNode> {
         _mapToken(node.keyword),
         _cloneNode(node.constructorName),
         _cloneNode(node.argumentList));
-    copy.propagatedType = node.propagatedType;
     copy.staticElement = node.staticElement;
     copy.staticType = node.staticType;
     return copy;
@@ -3408,7 +3392,6 @@ class IncrementalAstCloner implements AstVisitor<AstNode> {
   IntegerLiteral visitIntegerLiteral(IntegerLiteral node) {
     IntegerLiteral copy =
         astFactory.integerLiteral(_mapToken(node.literal), node.value);
-    copy.propagatedType = node.propagatedType;
     copy.staticType = node.staticType;
     return copy;
   }
@@ -3430,7 +3413,6 @@ class IncrementalAstCloner implements AstVisitor<AstNode> {
         _mapToken(node.isOperator),
         _mapToken(node.notOperator),
         _cloneNode(node.type));
-    copy.propagatedType = node.propagatedType;
     copy.staticType = node.staticType;
     return copy;
   }
@@ -3460,7 +3442,6 @@ class IncrementalAstCloner implements AstVisitor<AstNode> {
   LibraryIdentifier visitLibraryIdentifier(LibraryIdentifier node) {
     LibraryIdentifier copy =
         astFactory.libraryIdentifier(_cloneNodeList(node.components));
-    copy.propagatedType = node.propagatedType;
     copy.staticType = node.staticType;
     return copy;
   }
@@ -3473,7 +3454,6 @@ class IncrementalAstCloner implements AstVisitor<AstNode> {
         _mapToken(node.leftBracket),
         _cloneNodeList(node.elements),
         _mapToken(node.rightBracket));
-    copy.propagatedType = node.propagatedType;
     copy.staticType = node.staticType;
     return copy;
   }
@@ -3486,7 +3466,6 @@ class IncrementalAstCloner implements AstVisitor<AstNode> {
         _mapToken(node.leftBracket),
         _cloneNodeList(node.entries),
         _mapToken(node.rightBracket));
-    copy.propagatedType = node.propagatedType;
     copy.staticType = node.staticType;
     return copy;
   }
@@ -3519,7 +3498,6 @@ class IncrementalAstCloner implements AstVisitor<AstNode> {
         _cloneNode(node.methodName),
         _cloneNode(node.typeArguments),
         _cloneNode(node.argumentList));
-    copy.propagatedType = node.propagatedType;
     copy.staticType = node.staticType;
     return copy;
   }
@@ -3528,7 +3506,6 @@ class IncrementalAstCloner implements AstVisitor<AstNode> {
   NamedExpression visitNamedExpression(NamedExpression node) {
     NamedExpression copy = astFactory.namedExpression(
         _cloneNode(node.name), _cloneNode(node.expression));
-    copy.propagatedType = node.propagatedType;
     copy.staticType = node.staticType;
     return copy;
   }
@@ -3545,7 +3522,6 @@ class IncrementalAstCloner implements AstVisitor<AstNode> {
   @override
   NullLiteral visitNullLiteral(NullLiteral node) {
     NullLiteral copy = astFactory.nullLiteral(_mapToken(node.literal));
-    copy.propagatedType = node.propagatedType;
     copy.staticType = node.staticType;
     return copy;
   }
@@ -3557,7 +3533,6 @@ class IncrementalAstCloner implements AstVisitor<AstNode> {
         _mapToken(node.leftParenthesis),
         _cloneNode(node.expression),
         _mapToken(node.rightParenthesis));
-    copy.propagatedType = node.propagatedType;
     copy.staticType = node.staticType;
     return copy;
   }
@@ -3592,8 +3567,6 @@ class IncrementalAstCloner implements AstVisitor<AstNode> {
   PostfixExpression visitPostfixExpression(PostfixExpression node) {
     PostfixExpression copy = astFactory.postfixExpression(
         _cloneNode(node.operand), _mapToken(node.operator));
-    copy.propagatedElement = node.propagatedElement;
-    copy.propagatedType = node.propagatedType;
     copy.staticElement = node.staticElement;
     copy.staticType = node.staticType;
     return copy;
@@ -3605,7 +3578,6 @@ class IncrementalAstCloner implements AstVisitor<AstNode> {
         _cloneNode(node.prefix),
         _mapToken(node.period),
         _cloneNode(node.identifier));
-    copy.propagatedType = node.propagatedType;
     copy.staticType = node.staticType;
     return copy;
   }
@@ -3614,8 +3586,6 @@ class IncrementalAstCloner implements AstVisitor<AstNode> {
   PrefixExpression visitPrefixExpression(PrefixExpression node) {
     PrefixExpression copy = astFactory.prefixExpression(
         _mapToken(node.operator), _cloneNode(node.operand));
-    copy.propagatedElement = node.propagatedElement;
-    copy.propagatedType = node.propagatedType;
     copy.staticElement = node.staticElement;
     copy.staticType = node.staticType;
     return copy;
@@ -3625,7 +3595,6 @@ class IncrementalAstCloner implements AstVisitor<AstNode> {
   PropertyAccess visitPropertyAccess(PropertyAccess node) {
     PropertyAccess copy = astFactory.propertyAccess(_cloneNode(node.target),
         _mapToken(node.operator), _cloneNode(node.propertyName));
-    copy.propagatedType = node.propagatedType;
     copy.staticType = node.staticType;
     return copy;
   }
@@ -3647,7 +3616,6 @@ class IncrementalAstCloner implements AstVisitor<AstNode> {
   RethrowExpression visitRethrowExpression(RethrowExpression node) {
     RethrowExpression copy =
         astFactory.rethrowExpression(_mapToken(node.rethrowKeyword));
-    copy.propagatedType = node.propagatedType;
     copy.staticType = node.staticType;
     return copy;
   }
@@ -3690,8 +3658,6 @@ class IncrementalAstCloner implements AstVisitor<AstNode> {
     SimpleIdentifier copy = astFactory.simpleIdentifier(mappedToken,
         isDeclaration: node.inDeclarationContext());
     copy.auxiliaryElements = node.auxiliaryElements;
-    copy.propagatedElement = node.propagatedElement;
-    copy.propagatedType = node.propagatedType;
     copy.staticElement = node.staticElement;
     copy.staticType = node.staticType;
     return copy;
@@ -3701,7 +3667,6 @@ class IncrementalAstCloner implements AstVisitor<AstNode> {
   SimpleStringLiteral visitSimpleStringLiteral(SimpleStringLiteral node) {
     SimpleStringLiteral copy =
         astFactory.simpleStringLiteral(_mapToken(node.literal), node.value);
-    copy.propagatedType = node.propagatedType;
     copy.staticType = node.staticType;
     return copy;
   }
@@ -3710,7 +3675,6 @@ class IncrementalAstCloner implements AstVisitor<AstNode> {
   StringInterpolation visitStringInterpolation(StringInterpolation node) {
     StringInterpolation copy =
         astFactory.stringInterpolation(_cloneNodeList(node.elements));
-    copy.propagatedType = node.propagatedType;
     copy.staticType = node.staticType;
     return copy;
   }
@@ -3731,7 +3695,6 @@ class IncrementalAstCloner implements AstVisitor<AstNode> {
   SuperExpression visitSuperExpression(SuperExpression node) {
     SuperExpression copy =
         astFactory.superExpression(_mapToken(node.superKeyword));
-    copy.propagatedType = node.propagatedType;
     copy.staticType = node.staticType;
     return copy;
   }
@@ -3767,7 +3730,6 @@ class IncrementalAstCloner implements AstVisitor<AstNode> {
   AstNode visitSymbolLiteral(SymbolLiteral node) {
     SymbolLiteral copy = astFactory.symbolLiteral(
         _mapToken(node.poundSign), _mapTokens(node.components));
-    copy.propagatedType = node.propagatedType;
     copy.staticType = node.staticType;
     return copy;
   }
@@ -3776,7 +3738,6 @@ class IncrementalAstCloner implements AstVisitor<AstNode> {
   ThisExpression visitThisExpression(ThisExpression node) {
     ThisExpression copy =
         astFactory.thisExpression(_mapToken(node.thisKeyword));
-    copy.propagatedType = node.propagatedType;
     copy.staticType = node.staticType;
     return copy;
   }
@@ -3785,7 +3746,6 @@ class IncrementalAstCloner implements AstVisitor<AstNode> {
   ThrowExpression visitThrowExpression(ThrowExpression node) {
     ThrowExpression copy = astFactory.throwExpression(
         _mapToken(node.throwKeyword), _cloneNode(node.expression));
-    copy.propagatedType = node.propagatedType;
     copy.staticType = node.staticType;
     return copy;
   }
@@ -5369,7 +5329,6 @@ class ResolutionCopier implements AstVisitor<bool> {
     AdjacentStrings toNode = this._toNode as AdjacentStrings;
     if (_isEqualNodeLists(node.strings, toNode.strings)) {
       toNode.staticType = node.staticType;
-      toNode.propagatedType = node.propagatedType;
       return true;
     }
     return false;
@@ -5406,7 +5365,6 @@ class ResolutionCopier implements AstVisitor<bool> {
         _isEqualNodes(node.expression, toNode.expression),
         _isEqualTokens(node.asOperator, toNode.asOperator),
         _isEqualNodes(node.type, toNode.type))) {
-      toNode.propagatedType = node.propagatedType;
       toNode.staticType = node.staticType;
       return true;
     }
@@ -5445,8 +5403,6 @@ class ResolutionCopier implements AstVisitor<bool> {
         _isEqualNodes(node.leftHandSide, toNode.leftHandSide),
         _isEqualTokens(node.operator, toNode.operator),
         _isEqualNodes(node.rightHandSide, toNode.rightHandSide))) {
-      toNode.propagatedElement = node.propagatedElement;
-      toNode.propagatedType = node.propagatedType;
       toNode.staticElement = node.staticElement;
       toNode.staticType = node.staticType;
       return true;
@@ -5459,7 +5415,6 @@ class ResolutionCopier implements AstVisitor<bool> {
     AwaitExpression toNode = this._toNode as AwaitExpression;
     if (_and(_isEqualTokens(node.awaitKeyword, toNode.awaitKeyword),
         _isEqualNodes(node.expression, toNode.expression))) {
-      toNode.propagatedType = node.propagatedType;
       toNode.staticType = node.staticType;
       return true;
     }
@@ -5473,8 +5428,6 @@ class ResolutionCopier implements AstVisitor<bool> {
         _isEqualNodes(node.leftOperand, toNode.leftOperand),
         _isEqualTokens(node.operator, toNode.operator),
         _isEqualNodes(node.rightOperand, toNode.rightOperand))) {
-      toNode.propagatedElement = node.propagatedElement;
-      toNode.propagatedType = node.propagatedType;
       toNode.staticElement = node.staticElement;
       toNode.staticType = node.staticType;
       return true;
@@ -5502,7 +5455,6 @@ class ResolutionCopier implements AstVisitor<bool> {
     BooleanLiteral toNode = this._toNode as BooleanLiteral;
     if (_and(_isEqualTokens(node.literal, toNode.literal),
         node.value == toNode.value)) {
-      toNode.propagatedType = node.propagatedType;
       toNode.staticType = node.staticType;
       return true;
     }
@@ -5527,7 +5479,6 @@ class ResolutionCopier implements AstVisitor<bool> {
     CascadeExpression toNode = this._toNode as CascadeExpression;
     if (_and(_isEqualNodes(node.target, toNode.target),
         _isEqualNodeLists(node.cascadeSections, toNode.cascadeSections))) {
-      toNode.propagatedType = node.propagatedType;
       toNode.staticType = node.staticType;
       return true;
     }
@@ -5621,7 +5572,6 @@ class ResolutionCopier implements AstVisitor<bool> {
         _isEqualNodes(node.thenExpression, toNode.thenExpression),
         _isEqualTokens(node.colon, toNode.colon),
         _isEqualNodes(node.elseExpression, toNode.elseExpression))) {
-      toNode.propagatedType = node.propagatedType;
       toNode.staticType = node.staticType;
       return true;
     }
@@ -5751,7 +5701,6 @@ class ResolutionCopier implements AstVisitor<bool> {
     DoubleLiteral toNode = this._toNode as DoubleLiteral;
     if (_and(_isEqualTokens(node.literal, toNode.literal),
         node.value == toNode.value)) {
-      toNode.propagatedType = node.propagatedType;
       toNode.staticType = node.staticType;
       return true;
     }
@@ -5922,7 +5871,6 @@ class ResolutionCopier implements AstVisitor<bool> {
     if (_and(_isEqualNodes(node.parameters, toNode.parameters),
         _isEqualNodes(node.body, toNode.body))) {
       toNode.element = node.element;
-      toNode.propagatedType = node.propagatedType;
       toNode.staticType = node.staticType;
       return true;
     }
@@ -5937,9 +5885,6 @@ class ResolutionCopier implements AstVisitor<bool> {
         _isEqualNodes(node.function, toNode.function),
         _isEqualNodes(node.typeArguments, toNode.typeArguments),
         _isEqualNodes(node.argumentList, toNode.argumentList))) {
-      toNode.propagatedElement = node.propagatedElement;
-      toNode.propagatedInvokeType = node.propagatedInvokeType;
-      toNode.propagatedType = node.propagatedType;
       toNode.staticInvokeType = node.staticInvokeType;
       toNode.staticElement = node.staticElement;
       toNode.staticType = node.staticType;
@@ -6060,8 +6005,6 @@ class ResolutionCopier implements AstVisitor<bool> {
         _isEqualNodes(node.index, toNode.index),
         _isEqualTokens(node.rightBracket, toNode.rightBracket))) {
       toNode.auxiliaryElements = node.auxiliaryElements;
-      toNode.propagatedElement = node.propagatedElement;
-      toNode.propagatedType = node.propagatedType;
       toNode.staticElement = node.staticElement;
       toNode.staticType = node.staticType;
       return true;
@@ -6077,7 +6020,6 @@ class ResolutionCopier implements AstVisitor<bool> {
         _isEqualTokens(node.keyword, toNode.keyword),
         _isEqualNodes(node.constructorName, toNode.constructorName),
         _isEqualNodes(node.argumentList, toNode.argumentList))) {
-      toNode.propagatedType = node.propagatedType;
       toNode.staticElement = node.staticElement;
       toNode.staticType = node.staticType;
       return true;
@@ -6090,7 +6032,6 @@ class ResolutionCopier implements AstVisitor<bool> {
     IntegerLiteral toNode = this._toNode as IntegerLiteral;
     if (_and(_isEqualTokens(node.literal, toNode.literal),
         node.value == toNode.value)) {
-      toNode.propagatedType = node.propagatedType;
       toNode.staticType = node.staticType;
       return true;
     }
@@ -6121,7 +6062,6 @@ class ResolutionCopier implements AstVisitor<bool> {
         _isEqualTokens(node.isOperator, toNode.isOperator),
         _isEqualTokens(node.notOperator, toNode.notOperator),
         _isEqualNodes(node.type, toNode.type))) {
-      toNode.propagatedType = node.propagatedType;
       toNode.staticType = node.staticType;
       return true;
     }
@@ -6161,7 +6101,6 @@ class ResolutionCopier implements AstVisitor<bool> {
   bool visitLibraryIdentifier(LibraryIdentifier node) {
     LibraryIdentifier toNode = this._toNode as LibraryIdentifier;
     if (_isEqualNodeLists(node.components, toNode.components)) {
-      toNode.propagatedType = node.propagatedType;
       toNode.staticType = node.staticType;
       return true;
     }
@@ -6177,7 +6116,6 @@ class ResolutionCopier implements AstVisitor<bool> {
         _isEqualTokens(node.leftBracket, toNode.leftBracket),
         _isEqualNodeLists(node.elements, toNode.elements),
         _isEqualTokens(node.rightBracket, toNode.rightBracket))) {
-      toNode.propagatedType = node.propagatedType;
       toNode.staticType = node.staticType;
       return true;
     }
@@ -6193,7 +6131,6 @@ class ResolutionCopier implements AstVisitor<bool> {
         _isEqualTokens(node.leftBracket, toNode.leftBracket),
         _isEqualNodeLists(node.entries, toNode.entries),
         _isEqualTokens(node.rightBracket, toNode.rightBracket))) {
-      toNode.propagatedType = node.propagatedType;
       toNode.staticType = node.staticType;
       return true;
     }
@@ -6234,8 +6171,6 @@ class ResolutionCopier implements AstVisitor<bool> {
         _isEqualNodes(node.typeArguments, toNode.typeArguments),
         _isEqualNodes(node.methodName, toNode.methodName),
         _isEqualNodes(node.argumentList, toNode.argumentList))) {
-      toNode.propagatedInvokeType = node.propagatedInvokeType;
-      toNode.propagatedType = node.propagatedType;
       toNode.staticInvokeType = node.staticInvokeType;
       toNode.staticType = node.staticType;
       return true;
@@ -6248,7 +6183,6 @@ class ResolutionCopier implements AstVisitor<bool> {
     NamedExpression toNode = this._toNode as NamedExpression;
     if (_and(_isEqualNodes(node.name, toNode.name),
         _isEqualNodes(node.expression, toNode.expression))) {
-      toNode.propagatedType = node.propagatedType;
       toNode.staticType = node.staticType;
       return true;
     }
@@ -6275,7 +6209,6 @@ class ResolutionCopier implements AstVisitor<bool> {
   bool visitNullLiteral(NullLiteral node) {
     NullLiteral toNode = this._toNode as NullLiteral;
     if (_isEqualTokens(node.literal, toNode.literal)) {
-      toNode.propagatedType = node.propagatedType;
       toNode.staticType = node.staticType;
       return true;
     }
@@ -6289,7 +6222,6 @@ class ResolutionCopier implements AstVisitor<bool> {
         _isEqualTokens(node.leftParenthesis, toNode.leftParenthesis),
         _isEqualNodes(node.expression, toNode.expression),
         _isEqualTokens(node.rightParenthesis, toNode.rightParenthesis))) {
-      toNode.propagatedType = node.propagatedType;
       toNode.staticType = node.staticType;
       return true;
     }
@@ -6332,8 +6264,6 @@ class ResolutionCopier implements AstVisitor<bool> {
     PostfixExpression toNode = this._toNode as PostfixExpression;
     if (_and(_isEqualNodes(node.operand, toNode.operand),
         _isEqualTokens(node.operator, toNode.operator))) {
-      toNode.propagatedElement = node.propagatedElement;
-      toNode.propagatedType = node.propagatedType;
       toNode.staticElement = node.staticElement;
       toNode.staticType = node.staticType;
       return true;
@@ -6348,7 +6278,6 @@ class ResolutionCopier implements AstVisitor<bool> {
         _isEqualNodes(node.prefix, toNode.prefix),
         _isEqualTokens(node.period, toNode.period),
         _isEqualNodes(node.identifier, toNode.identifier))) {
-      toNode.propagatedType = node.propagatedType;
       toNode.staticType = node.staticType;
       return true;
     }
@@ -6360,8 +6289,6 @@ class ResolutionCopier implements AstVisitor<bool> {
     PrefixExpression toNode = this._toNode as PrefixExpression;
     if (_and(_isEqualTokens(node.operator, toNode.operator),
         _isEqualNodes(node.operand, toNode.operand))) {
-      toNode.propagatedElement = node.propagatedElement;
-      toNode.propagatedType = node.propagatedType;
       toNode.staticElement = node.staticElement;
       toNode.staticType = node.staticType;
       return true;
@@ -6376,7 +6303,6 @@ class ResolutionCopier implements AstVisitor<bool> {
         _isEqualNodes(node.target, toNode.target),
         _isEqualTokens(node.operator, toNode.operator),
         _isEqualNodes(node.propertyName, toNode.propertyName))) {
-      toNode.propagatedType = node.propagatedType;
       toNode.staticType = node.staticType;
       return true;
     }
@@ -6403,7 +6329,6 @@ class ResolutionCopier implements AstVisitor<bool> {
   bool visitRethrowExpression(RethrowExpression node) {
     RethrowExpression toNode = this._toNode as RethrowExpression;
     if (_isEqualTokens(node.rethrowKeyword, toNode.rethrowKeyword)) {
-      toNode.propagatedType = node.propagatedType;
       toNode.staticType = node.staticType;
       return true;
     }
@@ -6453,8 +6378,6 @@ class ResolutionCopier implements AstVisitor<bool> {
     if (_isEqualTokens(node.token, toNode.token)) {
       toNode.staticElement = node.staticElement;
       toNode.staticType = node.staticType;
-      toNode.propagatedElement = node.propagatedElement;
-      toNode.propagatedType = node.propagatedType;
       toNode.auxiliaryElements = node.auxiliaryElements;
       return true;
     }
@@ -6466,7 +6389,6 @@ class ResolutionCopier implements AstVisitor<bool> {
     SimpleStringLiteral toNode = this._toNode as SimpleStringLiteral;
     if (_and(_isEqualTokens(node.literal, toNode.literal),
         node.value == toNode.value)) {
-      toNode.propagatedType = node.propagatedType;
       toNode.staticType = node.staticType;
       return true;
     }
@@ -6477,7 +6399,6 @@ class ResolutionCopier implements AstVisitor<bool> {
   bool visitStringInterpolation(StringInterpolation node) {
     StringInterpolation toNode = this._toNode as StringInterpolation;
     if (_isEqualNodeLists(node.elements, toNode.elements)) {
-      toNode.propagatedType = node.propagatedType;
       toNode.staticType = node.staticType;
       return true;
     }
@@ -6503,7 +6424,6 @@ class ResolutionCopier implements AstVisitor<bool> {
   bool visitSuperExpression(SuperExpression node) {
     SuperExpression toNode = this._toNode as SuperExpression;
     if (_isEqualTokens(node.superKeyword, toNode.superKeyword)) {
-      toNode.propagatedType = node.propagatedType;
       toNode.staticType = node.staticType;
       return true;
     }
@@ -6549,7 +6469,6 @@ class ResolutionCopier implements AstVisitor<bool> {
     SymbolLiteral toNode = this._toNode as SymbolLiteral;
     if (_and(_isEqualTokens(node.poundSign, toNode.poundSign),
         _isEqualTokenLists(node.components, toNode.components))) {
-      toNode.propagatedType = node.propagatedType;
       toNode.staticType = node.staticType;
       return true;
     }
@@ -6560,7 +6479,6 @@ class ResolutionCopier implements AstVisitor<bool> {
   bool visitThisExpression(ThisExpression node) {
     ThisExpression toNode = this._toNode as ThisExpression;
     if (_isEqualTokens(node.thisKeyword, toNode.thisKeyword)) {
-      toNode.propagatedType = node.propagatedType;
       toNode.staticType = node.staticType;
       return true;
     }
@@ -6572,7 +6490,6 @@ class ResolutionCopier implements AstVisitor<bool> {
     ThrowExpression toNode = this._toNode as ThrowExpression;
     if (_and(_isEqualTokens(node.throwKeyword, toNode.throwKeyword),
         _isEqualNodes(node.expression, toNode.expression))) {
-      toNode.propagatedType = node.propagatedType;
       toNode.staticType = node.staticType;
       return true;
     }

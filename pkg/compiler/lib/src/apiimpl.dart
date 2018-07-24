@@ -18,8 +18,6 @@ import 'common.dart';
 import 'compiler.dart';
 import 'diagnostics/messages.dart' show Message;
 import 'environment.dart';
-import 'library_loader.dart';
-import 'io/source_file.dart';
 import 'options.dart' show CompilerOptions;
 import 'platform_configuration.dart' as platform_configuration;
 import 'resolved_uri_translator.dart';
@@ -96,9 +94,9 @@ class CompilerImpl extends Compiler {
       // and we can't depend on 'dart:io' classes.
       packages = new NonFilePackagesDirectoryPackages(options.packageRoot);
     } else if (options.packageConfig != null) {
-      Future<Binary> future =
+      Future<api.Input<List<int>>> future =
           callUserProvider(options.packageConfig, api.InputKind.binary);
-      return future.then((Binary binary) {
+      return future.then((api.Input<List<int>> binary) {
         packages =
             new MapPackages(pkgs.parse(binary.data, options.packageConfig));
       }).catchError((error) {
@@ -120,8 +118,8 @@ class CompilerImpl extends Compiler {
     return new Future.value();
   }
 
-  Future<Null> setupSdk() {
-    Future future = new Future.value(null);
+  Future setupSdk() {
+    var future = new Future.value(null);
     if (resolvedUriTranslator.isNotSet) {
       future = future.then((_) {
         return platform_configuration
@@ -159,6 +157,10 @@ class CompilerImpl extends Compiler {
     });
   }
 
+  String _formatMs(int ms) {
+    return (ms / 1000).toStringAsFixed(3) + 's';
+  }
+
   void computeTimings(Duration setupDuration, StringBuffer timings) {
     timings.writeln("Timings:");
     Duration totalDuration = measurer.wallClock.elapsed;
@@ -169,13 +171,13 @@ class CompilerImpl extends Compiler {
       Duration duration = task.duration;
       if (duration != Duration.zero) {
         cumulatedDuration += duration;
-        timings.writeln('    $running${task.name} took'
-            ' ${duration.inMilliseconds}msec');
+        timings.writeln('    $running${task.name}:'
+            ' ${_formatMs(duration.inMilliseconds)}');
         for (String subtask in task.subtasks) {
           int subtime = task.getSubtaskTime(subtask);
           String running = task.getSubtaskIsRunning(subtask) ? "*" : "";
           timings.writeln(
-              '    $running${task.name} > $subtask took ${subtime}msec');
+              '    $running${task.name} > $subtask: ${_formatMs(subtime)}');
         }
       }
     }
@@ -183,10 +185,11 @@ class CompilerImpl extends Compiler {
         totalDuration - cumulatedDuration - setupDuration - asyncDuration;
     double percent =
         unaccountedDuration.inMilliseconds * 100 / totalDuration.inMilliseconds;
-    timings.write('    Total compile-time ${totalDuration.inMilliseconds}msec;'
-        ' setup ${setupDuration.inMilliseconds}msec;'
-        ' async ${asyncDuration.inMilliseconds}msec;'
-        ' unaccounted ${unaccountedDuration.inMilliseconds}msec'
+    timings.write(
+        '    Total compile-time ${_formatMs(totalDuration.inMilliseconds)};'
+        ' setup ${_formatMs(setupDuration.inMilliseconds)};'
+        ' async ${_formatMs(asyncDuration.inMilliseconds)};'
+        ' unaccounted ${_formatMs(unaccountedDuration.inMilliseconds)}'
         ' (${percent.toStringAsFixed(2)}%)');
   }
 
@@ -242,11 +245,6 @@ class CompilerImpl extends Compiler {
       reportCrashInUserCode('Uncaught exception in package discovery', ex, s);
       rethrow;
     }
-  }
-
-  Uri resolvePatchUri(String libraryName) {
-    return LibraryLoaderTask.resolvePatchUri(
-        libraryName, options.platformConfigUri);
   }
 }
 

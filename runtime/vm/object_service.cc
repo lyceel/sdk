@@ -330,7 +330,7 @@ void Function::PrintJSONImpl(JSONStream* stream, bool ref) const {
   if ((kind() == RawFunction::kImplicitGetter) ||
       (kind() == RawFunction::kImplicitSetter) ||
       (kind() == RawFunction::kImplicitStaticFinalGetter)) {
-    const Field& field = Field::Handle(LookupImplicitGetterSetterField());
+    const Field& field = Field::Handle(accessor_field());
     if (!field.IsNull()) {
       jsobj.AddProperty("_field", field);
     }
@@ -1177,10 +1177,6 @@ void Double::PrintJSONImpl(JSONStream* stream, bool ref) const {
   jsobj.AddProperty("kind", "Double");
   jsobj.AddServiceId(*this);
   jsobj.AddProperty("valueAsString", ToCString());
-}
-
-void Bigint::PrintJSONImpl(JSONStream* stream, bool ref) const {
-  Integer::PrintJSONImpl(stream, ref);
 }
 
 void String::PrintJSONImpl(JSONStream* stream, bool ref) const {

@@ -2,6 +2,7 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+import 'dart:core' hide MapEntry;
 import 'package:kernel/kernel.dart';
 import 'package:kernel/core_types.dart';
 import 'package:kernel/class_hierarchy.dart';
@@ -57,6 +58,12 @@ class DevCompilerTarget extends Target {
   bool get nativeExtensionExpectsString => false;
 
   @override
+  bool get errorOnUnexactWebIntLiterals => true;
+
+  @override
+  bool get enableNoSuchMethodForwarders => true;
+
+  @override
   void performModularTransformationsOnLibraries(
       CoreTypes coreTypes, ClassHierarchy hierarchy, List<Library> libraries,
       {void logger(String msg)}) {}
@@ -68,24 +75,64 @@ class DevCompilerTarget extends Target {
   @override
   Expression instantiateInvocation(CoreTypes coreTypes, Expression receiver,
       String name, Arguments arguments, int offset, bool isSuper) {
-    // TODO(sigmund): implement;
-    return new InvalidExpression(null);
+    // TODO(jmesserly): preserve source information?
+    // (These method are synthetic. Also unclear if the offset will correspond
+    // to the file where the class resides, or the file where the method we're
+    // mocking resides).
+    Expression createInvocation(String name, List<Expression> positional) {
+      // TODO(jmesserly): this uses the implementation _Invocation class,
+      // because the CFE does not resolve the redirecting factory constructors
+      // like it would for user code. Our code generator expects all redirecting
+      // factories to be resolved to the real constructor.
+      var ctor = coreTypes.index
+          .getClass('dart:core', '_Invocation')
+          .constructors
+          .firstWhere((c) => c.name.name == name);
+      return ConstructorInvocation(ctor, Arguments(positional));
+    }
+
+    if (name.startsWith('get:')) {
+      return createInvocation('getter', [SymbolLiteral(name.substring(4))]);
+    }
+    if (name.startsWith('set:')) {
+      return createInvocation('setter', [
+        SymbolLiteral(name.substring(4) + '='),
+        arguments.positional.single
+      ]);
+    }
+    var ctorArgs = <Expression>[SymbolLiteral(name)];
+    bool isGeneric = arguments.types.isNotEmpty;
+    if (isGeneric) {
+      ctorArgs.add(
+          ListLiteral(arguments.types.map((t) => TypeLiteral(t)).toList()));
+    } else {
+      ctorArgs.add(NullLiteral());
+    }
+    ctorArgs.add(ListLiteral(arguments.positional));
+    if (arguments.named.isNotEmpty) {
+      ctorArgs.add(MapLiteral(
+          arguments.named
+              .map((n) => MapEntry(SymbolLiteral(n.name), n.value))
+              .toList(),
+          keyType: coreTypes.symbolClass.rawType));
+    }
+    return createInvocation('method', ctorArgs);
   }
 
   @override
   Expression instantiateNoSuchMethodError(CoreTypes coreTypes,
       Expression receiver, String name, Arguments arguments, int offset,
-      {bool isMethod: false,
-      bool isGetter: false,
-      bool isSetter: false,
-      bool isField: false,
-      bool isLocalVariable: false,
-      bool isDynamic: false,
-      bool isSuper: false,
-      bool isStatic: false,
-      bool isConstructor: false,
-      bool isTopLevel: false}) {
+      {bool isMethod = false,
+      bool isGetter = false,
+      bool isSetter = false,
+      bool isField = false,
+      bool isLocalVariable = false,
+      bool isDynamic = false,
+      bool isSuper = false,
+      bool isStatic = false,
+      bool isConstructor = false,
+      bool isTopLevel = false}) {
     // TODO(sigmund): implement;
-    return new InvalidExpression(null);
+    return InvalidExpression(null);
   }
 }

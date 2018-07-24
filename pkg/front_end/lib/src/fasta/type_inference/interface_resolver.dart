@@ -2,20 +2,86 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE.md file.
 
-import 'package:front_end/src/base/instrumentation.dart';
-import 'package:front_end/src/fasta/builder/library_builder.dart';
-import 'package:front_end/src/fasta/kernel/kernel_shadow_ast.dart';
-import 'package:front_end/src/fasta/messages.dart';
-import 'package:front_end/src/fasta/names.dart';
-import 'package:front_end/src/fasta/problems.dart';
-import 'package:front_end/src/fasta/type_inference/type_inference_engine.dart';
-import 'package:front_end/src/fasta/type_inference/type_inferrer.dart';
-import 'package:front_end/src/fasta/type_inference/type_schema_environment.dart';
-import 'package:kernel/ast.dart';
-import 'package:kernel/class_hierarchy.dart';
+import 'package:kernel/ast.dart'
+    show
+        Arguments,
+        Class,
+        DartType,
+        DynamicType,
+        Expression,
+        Field,
+        FunctionNode,
+        FunctionType,
+        Member,
+        Name,
+        NamedExpression,
+        Procedure,
+        ProcedureKind,
+        ReturnStatement,
+        SuperMethodInvocation,
+        SuperPropertyGet,
+        SuperPropertySet,
+        TypeParameter,
+        TypeParameterType,
+        VariableDeclaration,
+        VariableGet,
+        VoidType;
+
+import 'package:kernel/class_hierarchy.dart' show ClassHierarchy;
+
 import 'package:kernel/transformations/flags.dart' show TransformerFlag;
-import 'package:kernel/type_algebra.dart';
-import 'package:kernel/type_environment.dart';
+
+import 'package:kernel/type_algebra.dart' show Substitution;
+
+import 'package:kernel/type_environment.dart' show TypeEnvironment;
+
+import '../../base/instrumentation.dart'
+    show
+        Instrumentation,
+        InstrumentationValueForForwardingStub,
+        InstrumentationValueLiteral;
+
+import '../builder/builder.dart' show LibraryBuilder;
+
+import '../kernel/kernel_library_builder.dart' show KernelLibraryBuilder;
+
+import '../kernel/kernel_shadow_ast.dart'
+    show
+        ShadowClass,
+        ShadowField,
+        ShadowMember,
+        ShadowProcedure,
+        VariableDeclarationJudgment;
+
+import '../messages.dart'
+    show
+        messageDeclaredMemberConflictsWithInheritedMember,
+        messageDeclaredMemberConflictsWithInheritedMemberCause,
+        messageInheritedMembersConflict,
+        messageInheritedMembersConflictCause1,
+        messageInheritedMembersConflictCause2,
+        noLength,
+        templateCantInferTypeDueToCircularity,
+        templateCantInferTypeDueToInconsistentOverrides;
+
+import '../names.dart' show indexSetName;
+
+import '../problems.dart' show unhandled;
+
+import 'type_inference_engine.dart'
+    show
+        FieldInitializerInferenceNode,
+        IncludesTypeParametersCovariantly,
+        InferenceNode,
+        TypeInferenceEngine;
+
+import 'type_inferrer.dart' show getNamedFormal;
+
+import 'type_schema_environment.dart'
+    show
+        getNamedParameterType,
+        getPositionalParameterType,
+        substituteTypeParams;
 
 /// Concrete class derived from [InferenceNode] to represent type inference of
 /// getters, setters, and fields based on inheritance.
@@ -228,8 +294,7 @@ class ForwardingNode extends Procedure {
     IncludesTypeParametersCovariantly needsCheckVisitor =
         enclosingClass.typeParameters.isEmpty
             ? null
-            : ShadowClass
-                    .getClassInferenceInfo(enclosingClass)
+            : ShadowClass.getClassInferenceInfo(enclosingClass)
                     .needsCheckVisitor ??=
                 new IncludesTypeParametersCovariantly(
                     enclosingClass.typeParameters);
@@ -473,6 +538,7 @@ class ForwardingNode extends Procedure {
         isForwardingStub: true,
         fileUri: enclosingClass.fileUri,
         forwardingStubInterfaceTarget: finalTarget)
+      ..startFileOffset = enclosingClass.fileOffset
       ..fileOffset = enclosingClass.fileOffset
       ..parent = enclosingClass;
   }
@@ -610,7 +676,7 @@ class ForwardingNode extends Procedure {
 /// infer covariance annotations, and to create forwarwding stubs when necessary
 /// to meet covariance requirements.
 class InterfaceResolver {
-  final TypeInferenceEngineImpl _typeInferenceEngine;
+  final TypeInferenceEngine _typeInferenceEngine;
 
   final TypeEnvironment _typeEnvironment;
 
@@ -709,8 +775,8 @@ class InterfaceResolver {
     }
     var positionalParameters = method.function.positionalParameters;
     for (int i = 0; i < positionalParameters.length; ++i) {
-      if (ShadowVariableDeclaration
-          .isImplicitlyTyped(positionalParameters[i])) {
+      if (VariableDeclarationJudgment.isImplicitlyTyped(
+          positionalParameters[i])) {
         // Note that if the parameter is not present in the overridden method,
         // getPositionalParameterType treats it as dynamic.  This is consistent
         // with the behavior called for in the informal top level type inference
@@ -736,7 +802,7 @@ class InterfaceResolver {
     }
     var namedParameters = method.function.namedParameters;
     for (int i = 0; i < namedParameters.length; i++) {
-      if (ShadowVariableDeclaration.isImplicitlyTyped(namedParameters[i])) {
+      if (VariableDeclarationJudgment.isImplicitlyTyped(namedParameters[i])) {
         var name = namedParameters[i].name;
         namedParameters[i].type = matchTypes(
             overriddenTypes.map((type) => getNamedParameterType(type, name)),
@@ -767,8 +833,38 @@ class InterfaceResolver {
     setters.length = candidates.length;
     int getterIndex = 0;
     int setterIndex = 0;
+    // To detect conflicts between instance members (possibly inherited ones)
+    // and static members, use a map from names to lists of members.  There can
+    // be more than one static member with a given name, e.g., if there is a
+    // getter and a setter.  We will report both conflicts.
+    Map<Name, List<Member>> staticMembers = {};
+    for (var procedure in class_.procedures) {
+      if (procedure.isStatic) {
+        staticMembers.putIfAbsent(procedure.name, () => []).add(procedure);
+      }
+    }
+    for (var field in class_.fields) {
+      if (field.isStatic) {
+        staticMembers.putIfAbsent(field.name, () => []).add(field);
+      }
+    }
     forEachApiMember(candidates, (int start, int end, Name name) {
       Procedure member = candidates[start];
+      // We should not have a method, getter, or setter in our interface that
+      // conflicts with a static method, getter, or setter declared in the
+      // class.
+      List<Member> conflicts = staticMembers[name];
+      if (conflicts != null) {
+        for (var conflict in conflicts) {
+          library.addProblem(messageDeclaredMemberConflictsWithInheritedMember,
+              conflict.fileOffset, noLength, conflict.fileUri,
+              context: [
+                messageDeclaredMemberConflictsWithInheritedMemberCause
+                    .withLocation(member.fileUri, member.fileOffset, noLength)
+              ]);
+        }
+        return;
+      }
       ProcedureKind kind = _kindOf(member);
       if (kind != ProcedureKind.Getter && kind != ProcedureKind.Setter) {
         for (int i = start + 1; i < end; ++i) {
@@ -810,6 +906,20 @@ class InterfaceResolver {
                           conflict.fileUri, conflict.fileOffset, noLength)
                     ]);
               }
+            } else {
+              // If it's a setter conflicting with a method and both are
+              // declared in the same class, it hasn't been signaled as a
+              // duplicated definition so it's reported here.
+              library.addProblem(
+                  messageDeclaredMemberConflictsWithInheritedMember,
+                  member.fileOffset,
+                  noLength,
+                  member.fileUri,
+                  context: [
+                    messageDeclaredMemberConflictsWithInheritedMemberCause
+                        .withLocation(
+                            conflict.fileUri, conflict.fileOffset, noLength)
+                  ]);
             }
             return;
           }
@@ -822,6 +932,11 @@ class InterfaceResolver {
         var forwardingNode = new ForwardingNode(
             this, null, class_, name, kind, candidates, start, end);
         getters[getterIndex++] = forwardingNode.finalize();
+        if (library is KernelLibraryBuilder &&
+            forwardingNode.finalize() != forwardingNode.resolve()) {
+          library.forwardersOrigins.add(forwardingNode.finalize());
+          library.forwardersOrigins.add(forwardingNode.resolve());
+        }
         return;
       }
 
@@ -934,12 +1049,18 @@ class InterfaceResolver {
     setters.length = setterIndex;
   }
 
-  void finalizeCovariance(Class class_, List<Member> apiMembers) {
+  void finalizeCovariance(
+      Class class_, List<Member> apiMembers, LibraryBuilder library) {
     for (int i = 0; i < apiMembers.length; i++) {
       var member = apiMembers[i];
       Member resolution;
       if (member is ForwardingNode) {
         apiMembers[i] = resolution = member.finalize();
+        if (library is KernelLibraryBuilder &&
+            member.finalize() != member.resolve()) {
+          library.forwardersOrigins.add(member.finalize());
+          library.forwardersOrigins.add(member.resolve());
+        }
       } else {
         resolution = member;
       }
@@ -1017,6 +1138,9 @@ class InterfaceResolver {
           procedure._field.initializer != null) {
         node = new FieldInitializerInferenceNode(
             _typeInferenceEngine, procedure._field, library);
+      }
+
+      if (node != null && procedure is SyntheticAccessor) {
         ShadowField.setInferenceNode(procedure._field, node);
       }
     }
@@ -1200,10 +1324,10 @@ class InterfaceResolver {
     }
     var function = procedure.function;
     for (var parameter in function.positionalParameters) {
-      if (ShadowVariableDeclaration.isImplicitlyTyped(parameter)) return true;
+      if (VariableDeclarationJudgment.isImplicitlyTyped(parameter)) return true;
     }
     for (var parameter in function.namedParameters) {
-      if (ShadowVariableDeclaration.isImplicitlyTyped(parameter)) return true;
+      if (VariableDeclarationJudgment.isImplicitlyTyped(parameter)) return true;
     }
     return false;
   }

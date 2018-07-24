@@ -253,8 +253,7 @@ bool AotCallSpecializer::TryInlineFieldAccess(InstanceCallInstr* call) {
 
 bool AotCallSpecializer::TryInlineFieldAccess(StaticCallInstr* call) {
   if (call->function().IsImplicitGetterFunction()) {
-    Field& field =
-        Field::ZoneHandle(call->function().LookupImplicitGetterSetterField());
+    Field& field = Field::ZoneHandle(call->function().accessor_field());
     if (should_clone_fields_) {
       field = field.CloneFromOriginal();
     }
@@ -272,8 +271,7 @@ bool AotCallSpecializer::IsSupportedIntOperandForStaticDoubleOp(
       return true;
     }
 
-    if (FLAG_limit_ints_to_64_bits &&
-        FlowGraphCompiler::SupportsUnboxedInt64() &&
+    if (FlowGraphCompiler::SupportsUnboxedInt64() &&
         FlowGraphCompiler::CanConvertInt64ToDouble()) {
       return true;
     }
@@ -286,8 +284,7 @@ Value* AotCallSpecializer::PrepareStaticOpInput(Value* input,
                                                 intptr_t cid,
                                                 Instruction* call) {
   ASSERT(I->strong() && FLAG_use_strong_mode_types);
-  ASSERT((cid == kDoubleCid) ||
-         (FLAG_limit_ints_to_64_bits && (cid == kMintCid)));
+  ASSERT((cid == kDoubleCid) || (cid == kMintCid));
 
   const String& function_name =
       (call->IsInstanceCall()
@@ -303,8 +300,7 @@ Value* AotCallSpecializer::PrepareStaticOpInput(Value* input,
 
     if (input->Type()->ToNullableCid() == kSmiCid) {
       conversion = new (Z) SmiToDoubleInstr(input, call->token_pos());
-    } else if (FLAG_limit_ints_to_64_bits &&
-               FlowGraphCompiler::SupportsUnboxedInt64() &&
+    } else if (FlowGraphCompiler::SupportsUnboxedInt64() &&
                FlowGraphCompiler::CanConvertInt64ToDouble()) {
       conversion = new (Z) Int64ToDoubleInstr(input, Thread::kNoDeoptId,
                                               Instruction::kNotSpeculative);
@@ -325,8 +321,7 @@ Value* AotCallSpecializer::PrepareStaticOpInput(Value* input,
 Value* AotCallSpecializer::PrepareReceiverOfDevirtualizedCall(Value* input,
                                                               intptr_t cid) {
   ASSERT(I->strong() && FLAG_use_strong_mode_types);
-  ASSERT((cid == kDoubleCid) ||
-         (FLAG_limit_ints_to_64_bits && (cid == kMintCid)));
+  ASSERT((cid == kDoubleCid) || (cid == kMintCid));
 
   // Can't assert !input->Type()->is_nullable() here as PushArgument receives
   // value prior to a CheckNull in case of devirtualized call.
@@ -374,8 +369,7 @@ bool AotCallSpecializer::TryOptimizeInstanceCallUsingStaticTypes(
       CompileType* left_type = left_value->Type();
       CompileType* right_type = right_value->Type();
       if (left_type->IsNullableInt() && right_type->IsNullableInt()) {
-        if (FLAG_limit_ints_to_64_bits &&
-            FlowGraphCompiler::SupportsUnboxedInt64()) {
+        if (FlowGraphCompiler::SupportsUnboxedInt64()) {
           if (Token::IsRelationalOperator(op_kind)) {
             left_value = PrepareStaticOpInput(left_value, kMintCid, instr);
             right_value = PrepareStaticOpInput(right_value, kMintCid, instr);
@@ -445,8 +439,7 @@ bool AotCallSpecializer::TryOptimizeInstanceCallUsingStaticTypes(
       CompileType* right_type = right_value->Type();
       if (left_type->IsNullableInt() && right_type->IsNullableInt() &&
           (op_kind != Token::kDIV)) {
-        if (FLAG_limit_ints_to_64_bits &&
-            FlowGraphCompiler::SupportsUnboxedInt64()) {
+        if (FlowGraphCompiler::SupportsUnboxedInt64()) {
           if ((op_kind == Token::kSHR) || (op_kind == Token::kSHL)) {
             // TODO(dartbug.com/30480): Enable 64-bit integer shifts.
             // replacement = new ShiftInt64OpInstr(
@@ -526,8 +519,7 @@ bool AotCallSpecializer::TryOptimizeStaticCallUsingStaticTypes(
   // instance calls of these operators into static calls.
 
   if (owner.id() == kIntegerCid) {
-    if (!FLAG_limit_ints_to_64_bits ||
-        !FlowGraphCompiler::SupportsUnboxedInt64()) {
+    if (!FlowGraphCompiler::SupportsUnboxedInt64()) {
       return false;
     }
 
@@ -608,6 +600,20 @@ bool AotCallSpecializer::TryOptimizeStaticCallUsingStaticTypes(
                 op_kind, left_value, right_value, Thread::kNoDeoptId,
                 instr->token_pos(), Instruction::kNotSpeculative);
           }
+        }
+        break;
+      }
+
+      case Token::kSHL:
+      case Token::kSHR: {
+        Value* left_value = instr->PushArgumentAt(receiver_index)->value();
+        Value* right_value = instr->PushArgumentAt(receiver_index + 1)->value();
+        CompileType* right_type = right_value->Type();
+        if (right_type->IsNullableInt()) {
+          left_value = PrepareReceiverOfDevirtualizedCall(left_value, kMintCid);
+          right_value = PrepareStaticOpInput(right_value, kMintCid, instr);
+          replacement = new (Z) ShiftInt64OpInstr(
+              op_kind, left_value, right_value, Thread::kNoDeoptId);
         }
         break;
       }
@@ -744,8 +750,12 @@ void AotCallSpecializer::VisitInstanceCall(InstanceCallInstr* instr) {
   const ICData& unary_checks =
       ICData::ZoneHandle(Z, instr->ic_data()->AsUnaryClassChecks());
   const intptr_t number_of_checks = unary_checks.NumberOfChecks();
-  if (speculative_policy_->IsAllowedForInlining(instr->deopt_id()) &&
-      number_of_checks > 0) {
+  if (FLAG_use_strong_mode_types && I->strong()) {
+    // In AOT strong mode, we avoid deopting speculation.
+    // TODO(ajcbik): replace this with actual analysis phase
+    //               that determines if checks are removed later.
+  } else if (speculative_policy_->IsAllowedForInlining(instr->deopt_id()) &&
+             number_of_checks > 0) {
     if ((op_kind == Token::kINDEX) &&
         TryReplaceWithIndexedOp(instr, &unary_checks)) {
       return;
@@ -794,7 +804,8 @@ void AotCallSpecializer::VisitInstanceCall(InstanceCallInstr* instr) {
   if (has_one_target) {
     RawFunction::Kind function_kind =
         Function::Handle(Z, unary_checks.GetTargetAt(0)).kind();
-    if (!flow_graph()->InstanceCallNeedsClassCheck(instr, function_kind)) {
+    if (flow_graph()->CheckForInstanceCall(instr, function_kind) ==
+        FlowGraph::ToCheck::kNoCheck) {
       CallTargets* targets = CallTargets::Create(Z, unary_checks);
       ASSERT(targets->HasSingleTarget());
       const Function& target = targets->FirstTarget();

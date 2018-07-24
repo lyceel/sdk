@@ -21,7 +21,6 @@
 namespace dart {
 
 DECLARE_FLAG(bool, trace_service);
-DECLARE_FLAG(bool, show_kernel_isolate);
 
 #ifndef PRODUCT
 class RegisterRunningIsolatesVisitor : public IsolateVisitor {
@@ -47,12 +46,7 @@ class RegisterRunningIsolatesVisitor : public IsolateVisitor {
 
   virtual void VisitIsolate(Isolate* isolate) {
     ASSERT(ServiceIsolate::IsServiceIsolate(Isolate::Current()));
-    bool is_kernel_isolate = false;
-#ifndef DART_PRECOMPILED_RUNTIME
-    is_kernel_isolate =
-        KernelIsolate::IsKernelIsolate(isolate) && !FLAG_show_kernel_isolate;
-#endif
-    if (IsVMInternalIsolate(isolate) || is_kernel_isolate) {
+    if (IsVMInternalIsolate(isolate)) {
       // We do not register the service (and descendants), the vm-isolate, or
       // the kernel isolate.
       return;
@@ -356,7 +350,9 @@ static void ContentsFinalizer(void* isolate_callback_data,
   delete[] data;
 }
 
-static void FilenameFinalizer(void* peer) {
+static void FilenameFinalizer(void* isolate_callback_data,
+                              Dart_WeakPersistentHandle handle,
+                              void* peer) {
   char* filename = reinterpret_cast<char*>(peer);
   delete[] filename;
 }
@@ -395,12 +391,13 @@ DEFINE_NATIVE_ENTRY(VMService_DecodeAssets, 1) {
   intptr_t idx = 0;
   while (archive.HasMore()) {
     char* filename = archive.NextFilename();
+    intptr_t filename_length = strlen(filename);
     uint8_t* contents = archive.NextContent();
     intptr_t contents_length = archive.NextContentLength();
 
     Dart_Handle dart_filename = Dart_NewExternalLatin1String(
-        reinterpret_cast<uint8_t*>(filename), strlen(filename), filename,
-        FilenameFinalizer);
+        reinterpret_cast<uint8_t*>(filename), filename_length, filename,
+        filename_length, FilenameFinalizer);
     ASSERT(!Dart_IsError(dart_filename));
 
     Dart_Handle dart_contents = Dart_NewExternalTypedDataWithFinalizer(

@@ -4,10 +4,11 @@
 
 library fasta.parser.listener;
 
-import '../../scanner/token.dart' show Token, TokenType;
+import '../../scanner/token.dart' show Token;
 
-import '../fasta_codes.dart'
-    show Message, messageNativeClauseShouldBeAnnotation;
+import '../fasta_codes.dart' show Message;
+
+import '../quote.dart' show UnescapeErrorListener;
 
 import 'assert.dart' show Assert;
 
@@ -16,8 +17,6 @@ import 'formal_parameter_kind.dart' show FormalParameterKind;
 import 'identifier_context.dart' show IdentifierContext;
 
 import 'member_kind.dart' show MemberKind;
-
-import 'parser_error.dart' show ParserError;
 
 /// A parser event listener that does nothing except throw exceptions
 /// on parser errors.
@@ -30,9 +29,7 @@ import 'parser_error.dart' show ParserError;
 ///
 /// Events starting with `handle` are used when isn't possible to have a begin
 /// event.
-class Listener {
-  final List<ParserError> recoverableErrors = <ParserError>[];
-
+class Listener implements UnescapeErrorListener {
   Uri get uri => null;
 
   void logEvent(String name) {}
@@ -898,20 +895,32 @@ class Listener {
     logEvent("NoTypeArguments");
   }
 
-  void beginTypeVariable(Token token) {}
-
-  /// Handle the end of a type formal parameter (e.g. "X extends Y").
+  /// Handle the begin of a type formal parameter (e.g. "X extends Y").
   /// Substructures:
   /// - Metadata
   /// - Name (identifier)
+  void beginTypeVariable(Token token) {}
+
+  /// Called when [beginTypeVariable] has been called for all of the variables
+  /// in a group, and before [endTypeVariable] has been called for any of the
+  /// variables in that same group.
+  void handleTypeVariablesDefined(Token token, int count) {}
+
+  /// Handle the end of a type formal parameter (e.g. "X extends Y")
+  /// where [index] is the index of the type variable in the list of
+  /// type variables being declared.
+  ///
+  /// Substructures:
   /// - Type bound
-  void endTypeVariable(Token token, Token extendsOrSuper) {
+  ///
+  /// See [beginTypeVariable] for additional substructures.
+  void endTypeVariable(Token token, int index, Token extendsOrSuper) {
     logEvent("TypeVariable");
   }
 
   void beginTypeVariables(Token token) {}
 
-  void endTypeVariables(int count, Token beginToken, Token endToken) {
+  void endTypeVariables(Token beginToken, Token endToken) {
     logEvent("TypeVariables");
   }
 
@@ -942,7 +951,7 @@ class Listener {
     logEvent("WhileStatement");
   }
 
-  void handleAsOperator(Token operator, Token endToken) {
+  void handleAsOperator(Token operator) {
     logEvent("AsOperator");
   }
 
@@ -987,7 +996,7 @@ class Listener {
   /// - type variables
   /// - return type
   /// - formal parameters
-  void endFunctionTypedFormalParameter() {
+  void endFunctionTypedFormalParameter(Token nameToken) {
     logEvent("FunctionTypedFormalParameter");
   }
 
@@ -1003,7 +1012,7 @@ class Listener {
     logEvent("IndexedExpression");
   }
 
-  void handleIsOperator(Token operator, Token not, Token endToken) {
+  void handleIsOperator(Token isOperator, Token not) {
     logEvent("IsOperator");
   }
 
@@ -1113,10 +1122,18 @@ class Listener {
     logEvent("InvalidOperatorName");
   }
 
+  /// Handle the condition in a control structure:
+  /// - if statement
+  /// - do while loop
+  /// - switch statement
+  /// - while loop
   void handleParenthesizedCondition(Token token) {
     logEvent("ParenthesizedCondition");
   }
 
+  /// Handle a parenthesized expression.
+  /// These may be within the condition expression of a control structure
+  /// but will not be the condition of a control structure.
   void handleParenthesizedExpression(Token token) {
     logEvent("ParenthesizedExpression");
   }
@@ -1191,34 +1208,17 @@ class Listener {
     logEvent("YieldStatement");
   }
 
-  /// An unrecoverable error is an error that the parser can't recover from
-  /// itself, and recovery is left to the listener. If the listener can
-  /// recover, it should return a non-null continuation token whose `next`
-  /// pointer is the token the parser should continue from. Error recovery
-  /// is tightly coupled to the parser implementation, so to recover from an
-  /// error, one must carefully examine the code in the parser that generates
-  /// the error.
-  ///
-  /// If the listener can't recover, it can throw an exception or return
-  /// `null`. In the latter case, the parser simply skips to EOF which will
-  /// often result in additional parser errors as the parser returns from its
-  /// recursive state.
-  Token handleUnrecoverableError(Token token, Message message) {
-    throw new ParserError.fromTokens(token, token, message);
-  }
-
   /// The parser noticed a syntax error, but was able to recover from it. The
   /// error should be reported using the [message], and the code between the
   /// beginning of the [startToken] and the end of the [endToken] should be
   /// highlighted. The [startToken] and [endToken] can be the same token.
   void handleRecoverableError(
-      Message message, Token startToken, Token endToken) {
-    /// TODO(danrubel): Ignore this error until we deprecate `native` support.
-    if (message == messageNativeClauseShouldBeAnnotation) {
-      return;
-    }
-    recoverableErrors
-        .add(new ParserError.fromTokens(startToken, endToken, message));
+      Message message, Token startToken, Token endToken) {}
+
+  @override
+  void handleUnescapeError(
+      Message message, Token location, int stringOffset, int length) {
+    handleRecoverableError(message, location, location);
   }
 
   /// Signals to the listener that the previous statement contained a semantic
@@ -1237,12 +1237,4 @@ class Listener {
   /// has a type substitution comment /*=T*. So, the type that has been just
   /// parsed should be discarded, and a new type should be parsed instead.
   void discardTypeReplacedWithCommentTypeAssign() {}
-
-  /// Creates a new synthetic token whose `next` pointer points to [next].
-  ///
-  /// If [next] is `null`, `null` is returned.
-  Token newSyntheticToken(Token next) {
-    if (next == null) return null;
-    return new Token(TokenType.RECOVERY, next.charOffset)..next = next;
-  }
 }

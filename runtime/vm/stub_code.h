@@ -74,9 +74,14 @@ class SnapshotWriter;
   V(TypeRefTypeTest)                                                           \
   V(UnreachableTypeTest)                                                       \
   V(SlowTypeTest)                                                              \
+  V(LazySpecializeTypeTest)                                                    \
   V(CallClosureNoSuchMethod)                                                   \
   V(FrameAwaitingMaterialization)                                              \
-  V(AsynchronousGapMarker)
+  V(AsynchronousGapMarker)                                                     \
+  V(NullErrorSharedWithFPURegs)                                                \
+  V(NullErrorSharedWithoutFPURegs)                                             \
+  V(StackOverflowSharedWithFPURegs)                                            \
+  V(StackOverflowSharedWithoutFPURegs)
 
 #else
 #define VM_STUB_CODE_LIST(V)                                                   \
@@ -94,6 +99,7 @@ class SnapshotWriter;
   V(TypeRefTypeTest)                                                           \
   V(UnreachableTypeTest)                                                       \
   V(SlowTypeTest)                                                              \
+  V(LazySpecializeTypeTest)                                                    \
   V(FrameAwaitingMaterialization)                                              \
   V(AsynchronousGapMarker)
 
@@ -145,7 +151,7 @@ class StubCode : public AllStatic {
 
   // Check if specified pc is in the dart invocation stub used for
   // transitioning into dart code.
-  static bool InInvocationStub(uword pc);
+  static bool InInvocationStub(uword pc, bool is_interpreted_frame);
 
   // Check if the specified pc is in the jump to frame stub.
   static bool InJumpToFrameStub(uword pc);
@@ -198,6 +204,12 @@ class StubCode : public AllStatic {
   static RawCode* Generate(const char* name,
                            void (*GenerateStub)(Assembler* assembler));
 
+  static void GenerateSharedStub(Assembler* assembler,
+                                 bool save_fpu_registers,
+                                 const RuntimeEntry* target,
+                                 intptr_t self_code_stub_offset_from_thread,
+                                 bool allow_return);
+
   static void GenerateMegamorphicMissStub(Assembler* assembler);
   static void GenerateAllocationStubForClass(Assembler* assembler,
                                              const Class& cls);
@@ -214,6 +226,23 @@ class StubCode : public AllStatic {
 };
 
 enum DeoptStubKind { kLazyDeoptFromReturn, kLazyDeoptFromThrow, kEagerDeopt };
+
+// Invocation mode for TypeCheck runtime entry that describes
+// where we are calling it from.
+enum TypeCheckMode {
+  // TypeCheck is invoked from LazySpecializeTypeTest stub.
+  // It should replace stub on the type with a specialized version.
+  kTypeCheckFromLazySpecializeStub,
+
+  // TypeCheck is invoked from the SlowTypeTest stub.
+  // This means that cache can be lazily created (if needed)
+  // and dst_name can be fetched from the pool.
+  kTypeCheckFromSlowStub,
+
+  // TypeCheck is invoked from normal inline AssertAssignable.
+  // Both cache and dst_name must be already populated.
+  kTypeCheckFromInline
+};
 
 // Zap value used to indicate unused CODE_REG in deopt.
 static const uword kZapCodeReg = 0xf1f1f1f1;

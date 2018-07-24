@@ -9,8 +9,8 @@
 
 #include <errno.h>
 #include <fcntl.h>
-#include <fdio/namespace.h>
-#include <fdio/private.h>
+#include <lib/fdio/namespace.h>
+#include <lib/fdio/private.h>
 #include <zircon/status.h>
 
 #include "bin/file.h"
@@ -33,7 +33,7 @@ class NamespaceImpl {
 
   explicit NamespaceImpl(const char* path)
       : fdio_ns_(NULL),
-        rootfd_(TEMP_FAILURE_RETRY(open64(path, O_DIRECTORY))),
+        rootfd_(TEMP_FAILURE_RETRY(open(path, O_DIRECTORY))),
         cwd_(strdup("/")) {
     ASSERT(rootfd_ > 0);
     cwdfd_ = dup(rootfd_);
@@ -41,15 +41,15 @@ class NamespaceImpl {
   }
 
   ~NamespaceImpl() {
+    NO_RETRY_EXPECTED(close(rootfd_));
+    free(cwd_);
+    NO_RETRY_EXPECTED(close(cwdfd_));
     if (fdio_ns_ != NULL) {
       zx_status_t status = fdio_ns_destroy(fdio_ns_);
       if (status != ZX_OK) {
         Log::PrintErr("fdio_ns_destroy: %s\n", zx_status_get_string(status));
       }
     }
-    NO_RETRY_EXPECTED(close(rootfd_));
-    free(cwd_);
-    NO_RETRY_EXPECTED(close(cwdfd_));
   }
 
   intptr_t rootfd() const { return rootfd_; }
@@ -59,7 +59,7 @@ class NamespaceImpl {
   bool SetCwd(Namespace* namespc, const char* new_path) {
     NamespaceScope ns(namespc, new_path);
     const intptr_t new_cwdfd =
-        TEMP_FAILURE_RETRY(openat64(ns.fd(), ns.path(), O_DIRECTORY));
+        TEMP_FAILURE_RETRY(openat(ns.fd(), ns.path(), O_DIRECTORY));
     if (new_cwdfd != 0) {
       return false;
     }

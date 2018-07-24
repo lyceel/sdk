@@ -4,9 +4,7 @@
 
 library dart2js.frontend_strategy;
 
-import '../compiler_new.dart' as api;
 import 'common/backend_api.dart';
-import 'common/tasks.dart';
 import 'common.dart';
 import 'common_elements.dart';
 import 'compiler.dart' show Compiler;
@@ -14,6 +12,7 @@ import 'deferred_load.dart' show DeferredLoadTask;
 import 'elements/entities.dart';
 import 'elements/types.dart';
 import 'enqueue.dart';
+import 'js_backend/allocator_analysis.dart' show KAllocatorAnalysis;
 import 'js_backend/backend_usage.dart';
 import 'js_backend/interceptor_data.dart';
 import 'js_backend/native_data.dart';
@@ -22,16 +21,15 @@ import 'js_backend/runtime_types.dart';
 import 'library_loader.dart';
 import 'native/enqueue.dart' show NativeResolutionEnqueuer;
 import 'native/resolver.dart';
-import 'universe/class_hierarchy_builder.dart';
+import 'universe/class_hierarchy.dart';
 import 'universe/world_builder.dart';
 import 'universe/world_impact.dart';
 
 /// Strategy pattern that defines the connection between the input format and
 /// the resolved element model.
 abstract class FrontendStrategy {
-  /// Creates library loader task for this strategy.
-  LibraryLoaderTask createLibraryLoader(api.CompilerInput compilerInput,
-      DiagnosticReporter reporter, Measurer measurer);
+  /// Registers a set of loaded libraries with this strategy.
+  void registerLoadedLibraries(LoadedLibraries loadedLibraries);
 
   /// Returns the [ElementEnvironment] for the element model used in this
   /// strategy.
@@ -70,6 +68,7 @@ abstract class FrontendStrategy {
       InterceptorDataBuilder interceptorDataBuilder,
       BackendUsageBuilder backendUsageBuilder,
       RuntimeTypesNeedBuilder rtiNeedBuilder,
+      KAllocatorAnalysis allocatorAnalysis,
       NativeResolutionEnqueuer nativeResolutionEnqueuer,
       NoSuchMethodRegistry noSuchMethodRegistry,
       SelectorConstraintsStrategy selectorConstraintsStrategy,
@@ -86,8 +85,7 @@ abstract class FrontendStrategy {
 
   /// Computes the main function from [mainLibrary] adding additional world
   /// impact to [impactBuilder].
-  FunctionEntity computeMain(
-      LibraryEntity mainLibrary, WorldImpactBuilder impactBuilder);
+  FunctionEntity computeMain(WorldImpactBuilder impactBuilder);
 
   /// Creates the [RuntimeTypesNeedBuilder] for this strategy.
   RuntimeTypesNeedBuilder createRuntimeTypesNeedBuilder();

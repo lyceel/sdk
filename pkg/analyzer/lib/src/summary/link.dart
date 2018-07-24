@@ -114,6 +114,7 @@ Map<String, LinkedLibraryBuilder> link(
     GetUnitCallback getUnit,
     GetDeclaredVariable getDeclaredVariable,
     bool strong) {
+  // TODO(brianwilkerson) Remove the parameter 'strong'.
   Map<String, LinkedLibraryBuilder> linkedLibraries =
       setupForLink(libraryUris, getUnit, getDeclaredVariable);
   relink(linkedLibraries, getDependency, getUnit, strong);
@@ -2225,7 +2226,7 @@ class ExprTypeComputer {
     UnlinkedExpr unlinkedConst = unlinkedExecutable.bodyExpr;
     var errorListener = AnalysisErrorListener.NULL_LISTENER;
     var astRewriteVisitor = new AstRewriteVisitor(
-        library, unit.source, typeProvider, errorListener);
+        linker.typeSystem, library, unit.source, typeProvider, errorListener);
     // TODO(paulberry): Do we need to pass a nameScope to
     // resolverVisitor to get type variables to resolve properly?
     var resolverVisitor = new ResolverVisitor(
@@ -2913,8 +2914,8 @@ class FunctionTypeAliasElementForLink extends Object
         return context.typeSystem
             .instantiateToBounds(new FunctionTypeImpl.forTypedef(this));
       } else {
-        return new FunctionTypeImpl.elementWithNameAndArgs(
-            this, name, typeArguments, true);
+        return new FunctionTypeImpl.forTypedef(this,
+            typeArguments: typeArguments);
       }
     } else {
       return _type ??= new FunctionTypeImpl.forTypedef(this);
@@ -2989,8 +2990,7 @@ class GenericFunctionTypeElementForLink extends Object
 
   @override
   FunctionType get type {
-    return _type ??= new FunctionTypeImpl.elementWithNameAndArgs(
-        this, null, allEnclosingTypeParameterTypes, false);
+    return _type ??= new FunctionTypeImpl(this);
   }
 
   @override
@@ -3087,8 +3087,8 @@ class GenericTypeAliasElementForLink extends Object
         return context.typeSystem
             .instantiateToBounds(new FunctionTypeImpl.forTypedef(this));
       } else {
-        return new FunctionTypeImpl.elementWithNameAndArgs(
-            this, name, typeArguments, true);
+        return new FunctionTypeImpl.forTypedef(this,
+            typeArguments: typeArguments);
       }
     } else {
       return new FunctionTypeImpl.forTypedef(this);
@@ -3307,9 +3307,9 @@ abstract class LibraryElementForLink<
   LibraryCycleForLink get libraryCycleForLink;
 
   @override
-  FunctionElement get loadLibraryFunction =>
-      _loadLibraryFunction ??= LibraryElementImpl
-          .createLoadLibraryFunctionForLibrary(_linker.typeProvider, this);
+  FunctionElement get loadLibraryFunction => _loadLibraryFunction ??=
+      LibraryElementImpl.createLoadLibraryFunctionForLibrary(
+          _linker.typeProvider, this);
 
   @override
   String get name {

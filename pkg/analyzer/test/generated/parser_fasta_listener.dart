@@ -795,9 +795,9 @@ class ForwardingTestListener extends ForwardingListener {
   }
 
   @override
-  void endFunctionTypedFormalParameter() {
+  void endFunctionTypedFormalParameter(Token nameToken) {
     end('FunctionTypedFormalParameter');
-    super.endFunctionTypedFormalParameter();
+    super.endFunctionTypedFormalParameter(nameToken);
   }
 
   @override
@@ -1037,15 +1037,15 @@ class ForwardingTestListener extends ForwardingListener {
   }
 
   @override
-  void endTypeVariable(Token token, Token extendsOrSuper) {
+  void endTypeVariable(Token token, int index, Token extendsOrSuper) {
     end('TypeVariable');
-    super.endTypeVariable(token, extendsOrSuper);
+    super.endTypeVariable(token, index, extendsOrSuper);
   }
 
   @override
-  void endTypeVariables(int count, Token beginToken, Token endToken) {
+  void endTypeVariables(Token beginToken, Token endToken) {
     end('TypeVariables');
-    super.endTypeVariables(count, beginToken, endToken);
+    super.endTypeVariables(beginToken, endToken);
   }
 
   @override
@@ -1158,7 +1158,9 @@ class ForwardingTestListener extends ForwardingListener {
 
   @override
   void handleImportPrefix(Token deferredKeyword, Token asKeyword) {
-    expectIn('Import');
+    // This event normally happens within "Import",
+    // but happens within "CompilationUnit" during recovery.
+    expectInOneOf(const ['Import', 'CompilationUnit']);
     listener.handleImportPrefix(deferredKeyword, asKeyword);
   }
 
@@ -1166,5 +1168,10 @@ class ForwardingTestListener extends ForwardingListener {
   void handleScript(Token token) {
     expectIn('CompilationUnit');
     listener.handleScript(token);
+  }
+
+  @override
+  void handleTypeVariablesDefined(Token token, int count) {
+    listener.handleTypeVariablesDefined(token, count);
   }
 }

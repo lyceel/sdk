@@ -20,20 +20,21 @@ import 'deferred_load.dart' show OutputUnit;
 import 'elements/entities.dart';
 import 'js/js.dart' as jsAst;
 import 'js_backend/js_backend.dart' show JavaScriptBackend;
+import 'types/abstract_value_domain.dart';
 import 'types/types.dart'
     show
         GlobalTypeInferenceElementResult,
         GlobalTypeInferenceMemberResult,
-        TypeMask;
-import 'universe/world_builder.dart'
-    show CodegenWorldBuilder, ReceiverConstraint;
+        GlobalTypeInferenceResults;
+import 'universe/world_builder.dart' show CodegenWorldBuilder;
 import 'universe/world_impact.dart'
     show ImpactUseCase, WorldImpact, WorldImpactVisitorImpl;
-import 'world.dart' show ClosedWorld;
+import 'world.dart' show JClosedWorld;
 
 class ElementInfoCollector {
   final Compiler compiler;
-  final ClosedWorld closedWorld;
+  final JClosedWorld closedWorld;
+  final GlobalTypeInferenceResults _globalInferenceResults;
 
   ElementEnvironment get environment => closedWorld.elementEnvironment;
   CodegenWorldBuilder get codegenWorldBuilder => compiler.codegenWorldBuilder;
@@ -43,7 +44,8 @@ class ElementInfoCollector {
   final Map<ConstantValue, Info> _constantToInfo = <ConstantValue, Info>{};
   final Map<OutputUnit, OutputUnitInfo> _outputToInfo = {};
 
-  ElementInfoCollector(this.compiler, this.closedWorld);
+  ElementInfoCollector(
+      this.compiler, this.closedWorld, this._globalInferenceResults);
 
   void run() {
     compiler.dumpInfoTask._constantToNode.forEach((constant, node) {
@@ -57,7 +59,6 @@ class ElementInfoCollector {
       result.constants.add(info);
     });
     environment.libraries.forEach(visitLibrary);
-    closedWorld.allTypedefs.forEach(visitTypedef);
   }
 
   /// Whether to emit information about [entity].
@@ -108,35 +109,27 @@ class ElementInfoCollector {
     return info;
   }
 
-  TypedefInfo visitTypedef(TypedefEntity typdef) {
-    var type = environment.getFunctionTypeOfTypedef(typdef);
-    TypedefInfo info =
-        new TypedefInfo(typdef.name, '$type', _unitInfoForEntity(typdef));
-    _entityToInfo[typdef] = info;
-    LibraryInfo lib = _entityToInfo[typdef.library];
-    lib.typedefs.add(info);
-    info.parent = lib;
-    result.typedefs.add(info);
-    return info;
-  }
-
   GlobalTypeInferenceMemberResult _resultOfMember(MemberEntity e) =>
-      compiler.globalInference.results.resultOfMember(e);
+      _globalInferenceResults.resultOfMember(e);
 
   GlobalTypeInferenceElementResult _resultOfParameter(Local e) =>
-      compiler.globalInference.results.resultOfParameter(e);
+      _globalInferenceResults.resultOfParameter(e);
 
   FieldInfo visitField(FieldEntity field, {ClassEntity containingClass}) {
     var isInInstantiatedClass = false;
     if (containingClass != null) {
-      isInInstantiatedClass = closedWorld.isInstantiated(containingClass);
+      isInInstantiatedClass =
+          closedWorld.classHierarchy.isInstantiated(containingClass);
     }
     if (!isInInstantiatedClass && !_hasBeenResolved(field)) {
       return null;
     }
-    TypeMask inferredType = _resultOfMember(field).type;
+    AbstractValue inferredType = _resultOfMember(field).type;
     // If a field has an empty inferred type it is never used.
-    if (inferredType == null || inferredType.isEmpty) return null;
+    if (inferredType == null ||
+        closedWorld.abstractValueDomain.isEmpty(inferredType)) {
+      return null;
+    }
 
     int size = compiler.dumpInfoTask.sizeOf(field);
     String code = compiler.dumpInfoTask.codeOf(field);
@@ -149,7 +142,7 @@ class ElementInfoCollector {
         type: '${environment.getFieldType(field)}',
         inferredType: '$inferredType',
         code: code,
-        outputUnit: _unitInfoForEntity(field),
+        outputUnit: _unitInfoForMember(field),
         isConst: field.isConst);
     _entityToInfo[field] = info;
     if (codegenWorldBuilder.hasConstantFieldInitializer(field)) {
@@ -181,7 +174,7 @@ class ElementInfoCollector {
     ClassInfo classInfo = new ClassInfo(
         name: clazz.name,
         isAbstract: clazz.isAbstract,
-        outputUnit: _unitInfoForEntity(clazz));
+        outputUnit: _unitInfoForClass(clazz));
     _entityToInfo[clazz] = classInfo;
 
     int size = compiler.dumpInfoTask.sizeOf(clazz);
@@ -234,7 +227,7 @@ class ElementInfoCollector {
   ClosureInfo visitClosureClass(ClassEntity element) {
     ClosureInfo closureInfo = new ClosureInfo(
         name: element.name,
-        outputUnit: _unitInfoForEntity(element),
+        outputUnit: _unitInfoForClass(element),
         size: compiler.dumpInfoTask.sizeOf(element));
     _entityToInfo[element] = closureInfo;
 
@@ -299,7 +292,9 @@ class ElementInfoCollector {
     String returnType = '${functionType.returnType}';
 
     String inferredReturnType = '${_resultOfMember(function).returnType}';
-    String sideEffects = '${closedWorld.getSideEffectsOfElement(function)}';
+    String sideEffects = '${compiler
+        .globalInference.resultsForTesting.inferredData
+        .getSideEffectsOfElement(function)}';
 
     int inlinedCount = compiler.dumpInfoTask.inlineCount[function];
     if (inlinedCount == null) inlinedCount = 0;
@@ -315,7 +310,7 @@ class ElementInfoCollector {
         inlinedCount: inlinedCount,
         code: code,
         type: functionType.toString(),
-        outputUnit: _unitInfoForEntity(function));
+        outputUnit: _unitInfoForMember(function));
     _entityToInfo[function] = info;
 
     int closureSize = _addClosureInfo(info, function);
@@ -368,9 +363,14 @@ class ElementInfoCollector {
     });
   }
 
-  OutputUnitInfo _unitInfoForEntity(Entity entity) {
+  OutputUnitInfo _unitInfoForMember(MemberEntity entity) {
     return _infoFromOutputUnit(
-        compiler.backend.outputUnitData.outputUnitForEntity(entity));
+        compiler.backend.outputUnitData.outputUnitForMember(entity));
+  }
+
+  OutputUnitInfo _unitInfoForClass(ClassEntity entity) {
+    return _infoFromOutputUnit(
+        compiler.backend.outputUnitData.outputUnitForClass(entity));
   }
 
   OutputUnitInfo _unitInfoForConstant(ConstantValue constant) {
@@ -386,8 +386,8 @@ class ElementInfoCollector {
 
 class Selection {
   final Entity selectedEntity;
-  final ReceiverConstraint mask;
-  Selection(this.selectedEntity, this.mask);
+  final Object receiverConstraint;
+  Selection(this.selectedEntity, this.receiverConstraint);
 }
 
 /// Interface used to record information from different parts of the compiler so
@@ -463,7 +463,7 @@ class DumpInfoTask extends CompilerTask implements InfoReporter {
   /// Returns an iterable of [Selection]s that are used by [entity]. Each
   /// [Selection] contains an entity that is used and the selector that
   /// selected the entity.
-  Iterable<Selection> getRetaining(Entity entity, ClosedWorld closedWorld) {
+  Iterable<Selection> getRetaining(Entity entity, JClosedWorld closedWorld) {
     WorldImpact impact = impacts[entity];
     if (impact == null) return const <Selection>[];
 
@@ -472,11 +472,12 @@ class DumpInfoTask extends CompilerTask implements InfoReporter {
         entity,
         impact,
         new WorldImpactVisitorImpl(visitDynamicUse: (dynamicUse) {
+          AbstractValue mask = dynamicUse.receiverConstraint;
           selections.addAll(closedWorld
               // TODO(het): Handle `call` on `Closure` through
               // `world.includesClosureCall`.
-              .locateMembers(dynamicUse.selector, dynamicUse.mask)
-              .map((MemberEntity e) => new Selection(e, dynamicUse.mask)));
+              .locateMembers(dynamicUse.selector, mask)
+              .map((MemberEntity e) => new Selection(e, mask)));
         }, visitStaticUse: (staticUse) {
           selections.add(new Selection(staticUse.element, null));
         }),
@@ -547,9 +548,12 @@ class DumpInfoTask extends CompilerTask implements InfoReporter {
     return sb.toString();
   }
 
-  void dumpInfo(ClosedWorld closedWorld) {
+  void dumpInfo(JClosedWorld closedWorld,
+      GlobalTypeInferenceResults globalInferenceResults) {
     measure(() {
-      infoCollector = new ElementInfoCollector(compiler, closedWorld)..run();
+      infoCollector = new ElementInfoCollector(
+          compiler, closedWorld, globalInferenceResults)
+        ..run();
       StringBuffer jsonBuffer = new StringBuffer();
       dumpInfoJson(jsonBuffer, closedWorld);
       compiler.outputProvider.createOutputSink(
@@ -561,7 +565,7 @@ class DumpInfoTask extends CompilerTask implements InfoReporter {
     });
   }
 
-  void dumpInfoJson(StringSink buffer, ClosedWorld closedWorld) {
+  void dumpInfoJson(StringSink buffer, JClosedWorld closedWorld) {
     JsonEncoder encoder = const JsonEncoder.withIndent('  ');
     Stopwatch stopwatch = new Stopwatch();
     stopwatch.start();
@@ -579,7 +583,8 @@ class DumpInfoTask extends CompilerTask implements InfoReporter {
         // Don't register dart2js builtin functions that are not recorded.
         Info useInfo = infoCollector._entityToInfo[selection.selectedEntity];
         if (useInfo == null) continue;
-        info.uses.add(new DependencyInfo(useInfo, '${selection.mask}'));
+        info.uses.add(
+            new DependencyInfo(useInfo, '${selection.receiverConstraint}'));
       }
     }
 
@@ -593,7 +598,8 @@ class DumpInfoTask extends CompilerTask implements InfoReporter {
       for (Selection selection in uses) {
         Info useInfo = infoCollector._entityToInfo[selection.selectedEntity];
         if (useInfo == null) continue;
-        info.uses.add(new DependencyInfo(useInfo, '${selection.mask}'));
+        info.uses.add(
+            new DependencyInfo(useInfo, '${selection.receiverConstraint}'));
       }
     }
 

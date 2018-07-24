@@ -4,10 +4,10 @@
 
 #include "vm/raw_object.h"
 
-#include "vm/become.h"
 #include "vm/class_table.h"
 #include "vm/dart.h"
-#include "vm/freelist.h"
+#include "vm/heap/become.h"
+#include "vm/heap/freelist.h"
 #include "vm/isolate.h"
 #include "vm/object.h"
 #include "vm/visitor.h"
@@ -276,7 +276,7 @@ intptr_t RawObject::VisitPointersPredefined(ObjectPointerVisitor* visitor,
       size = Size();
       break;
     default:
-      OS::Print("Class Id: %" Pd "\n", class_id);
+      OS::PrintErr("Class Id: %" Pd "\n", class_id);
       UNREACHABLE();
       break;
   }
@@ -378,7 +378,6 @@ REGULAR_VISITOR(ApiError)
 REGULAR_VISITOR(LanguageError)
 REGULAR_VISITOR(UnhandledException)
 REGULAR_VISITOR(UnwindError)
-REGULAR_VISITOR(Bigint)
 REGULAR_VISITOR(ExternalOneByteString)
 REGULAR_VISITOR(ExternalTwoByteString)
 COMPRESSED_VISITOR(GrowableObjectArray)

@@ -113,8 +113,6 @@ main(args) {
   new Class2().method5<int>(0);
   new Class3().method6<int>(0);
   dynamic c3 = args != null ? new Class3() : new Class2();
-  // TODO(johnniwinther): Expected bounds should be `dynamic` when CFE supports
-  // instantiate-to-bound.
   c3.method6(0); // Missing type arguments.
   try {
     dynamic c2 = args == null ? new Class3() : new Class2();
@@ -162,8 +160,8 @@ Class3.method6:
 "foo" is int = false
 
 Class3.method6:
-0 is Object = true
-"foo" is Object = true
+0 is dynamic = true
+"foo" is dynamic = true
 
 Class2.method6:
 0 is int = true
@@ -176,13 +174,14 @@ noSuchMethod: Class2.method6<int>
 
 main(List<String> args) {
   asyncTest(() async {
-    Compiler compiler = await runWithD8(memorySourceFiles: {
+    D8Result result = await runWithD8(memorySourceFiles: {
       'main.dart': SOURCE
     }, options: [
       Flags.strongMode,
       Flags.disableRtiOptimization,
     ], expectedOutput: OUTPUT, printJs: args.contains('-v'));
-    ClosedWorld closedWorld = compiler.backendClosedWorldForTesting;
+    Compiler compiler = result.compilationResult.compiler;
+    JClosedWorld closedWorld = compiler.backendClosedWorldForTesting;
     ElementEnvironment elementEnvironment = closedWorld.elementEnvironment;
 
     void checkMethod(String methodName,

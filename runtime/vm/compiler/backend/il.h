@@ -27,7 +27,6 @@ class ComparisonInstr;
 class Definition;
 class Environment;
 class FlowGraph;
-class FlowGraphBuilder;
 class FlowGraphCompiler;
 class FlowGraphVisitor;
 class Instruction;
@@ -177,7 +176,7 @@ class CompileType : public ZoneAllocated {
 
   // Returns true if value of this type is either int or null.
   bool IsNullableInt() {
-    if ((cid_ == kSmiCid) || (cid_ == kMintCid) || (cid_ == kBigintCid)) {
+    if ((cid_ == kSmiCid) || (cid_ == kMintCid)) {
       return true;
     }
     if ((cid_ == kIllegalCid) || (cid_ == kDynamicCid)) {
@@ -454,134 +453,151 @@ class EmbeddedArray<T, 0> {
 
 // Instructions.
 
-// M is a single argument macro.  It is applied to each concrete instruction
-// type name.  The concrete instruction classes are the name with Instr
-// concatenated.
+// M is a two argument macro. It is applied to each concrete instruction type
+// name. The concrete instruction classes are the name with Instr concatenated.
+
+struct InstrAttrs {
+  enum Attributes {
+    _ = 0,  // No special attributes.
+            //
+    // The instruction is guaranteed to not trigger GC on a non-exceptional
+    // path. If the conditions depend on parameters of the instruction, do not
+    // use this attribute but overload CanTriggerGC() instead.
+    kNoGC = 1
+  };
+};
+
 #define FOR_EACH_INSTRUCTION(M)                                                \
-  M(GraphEntry)                                                                \
-  M(JoinEntry)                                                                 \
-  M(TargetEntry)                                                               \
-  M(IndirectEntry)                                                             \
-  M(CatchBlockEntry)                                                           \
-  M(Phi)                                                                       \
-  M(Redefinition)                                                              \
-  M(Parameter)                                                                 \
-  M(LoadIndexedUnsafe)                                                         \
-  M(StoreIndexedUnsafe)                                                        \
-  M(TailCall)                                                                  \
-  M(ParallelMove)                                                              \
-  M(PushArgument)                                                              \
-  M(Return)                                                                    \
-  M(Throw)                                                                     \
-  M(ReThrow)                                                                   \
-  M(Stop)                                                                      \
-  M(Goto)                                                                      \
-  M(IndirectGoto)                                                              \
-  M(Branch)                                                                    \
-  M(AssertAssignable)                                                          \
-  M(AssertSubtype)                                                             \
-  M(AssertBoolean)                                                             \
-  M(SpecialParameter)                                                          \
-  M(ClosureCall)                                                               \
-  M(InstanceCall)                                                              \
-  M(PolymorphicInstanceCall)                                                   \
-  M(StaticCall)                                                                \
-  M(LoadLocal)                                                                 \
-  M(DropTemps)                                                                 \
-  M(StoreLocal)                                                                \
-  M(StrictCompare)                                                             \
-  M(EqualityCompare)                                                           \
-  M(RelationalOp)                                                              \
-  M(NativeCall)                                                                \
-  M(DebugStepCheck)                                                            \
-  M(LoadIndexed)                                                               \
-  M(LoadCodeUnits)                                                             \
-  M(StoreIndexed)                                                              \
-  M(StoreInstanceField)                                                        \
-  M(InitStaticField)                                                           \
-  M(LoadStaticField)                                                           \
-  M(StoreStaticField)                                                          \
-  M(BooleanNegate)                                                             \
-  M(InstanceOf)                                                                \
-  M(CreateArray)                                                               \
-  M(AllocateObject)                                                            \
-  M(LoadField)                                                                 \
-  M(LoadUntagged)                                                              \
-  M(LoadClassId)                                                               \
-  M(InstantiateType)                                                           \
-  M(InstantiateTypeArguments)                                                  \
-  M(AllocateContext)                                                           \
-  M(AllocateUninitializedContext)                                              \
-  M(CloneContext)                                                              \
-  M(BinarySmiOp)                                                               \
-  M(CheckedSmiComparison)                                                      \
-  M(CheckedSmiOp)                                                              \
-  M(BinaryInt32Op)                                                             \
-  M(UnarySmiOp)                                                                \
-  M(UnaryDoubleOp)                                                             \
-  M(CheckStackOverflow)                                                        \
-  M(SmiToDouble)                                                               \
-  M(Int32ToDouble)                                                             \
-  M(Int64ToDouble)                                                             \
-  M(DoubleToInteger)                                                           \
-  M(DoubleToSmi)                                                               \
-  M(DoubleToDouble)                                                            \
-  M(DoubleToFloat)                                                             \
-  M(FloatToDouble)                                                             \
-  M(CheckClass)                                                                \
-  M(CheckClassId)                                                              \
-  M(CheckSmi)                                                                  \
-  M(CheckNull)                                                                 \
-  M(Constant)                                                                  \
-  M(UnboxedConstant)                                                           \
-  M(CheckEitherNonSmi)                                                         \
-  M(BinaryDoubleOp)                                                            \
-  M(DoubleTestOp)                                                              \
-  M(MathUnary)                                                                 \
-  M(MathMinMax)                                                                \
-  M(Box)                                                                       \
-  M(Unbox)                                                                     \
-  M(BoxInt64)                                                                  \
-  M(UnboxInt64)                                                                \
-  M(CaseInsensitiveCompareUC16)                                                \
-  M(BinaryInt64Op)                                                             \
-  M(ShiftInt64Op)                                                              \
-  M(UnaryInt64Op)                                                              \
-  M(CheckArrayBound)                                                           \
-  M(GenericCheckBound)                                                         \
-  M(Constraint)                                                                \
-  M(StringToCharCode)                                                          \
-  M(OneByteStringFromCharCode)                                                 \
-  M(StringInterpolate)                                                         \
-  M(InvokeMathCFunction)                                                       \
-  M(TruncDivMod)                                                               \
-  M(GuardFieldClass)                                                           \
-  M(GuardFieldLength)                                                          \
-  M(IfThenElse)                                                                \
-  M(MaterializeObject)                                                         \
-  M(TestSmi)                                                                   \
-  M(TestCids)                                                                  \
-  M(ExtractNthOutput)                                                          \
-  M(BinaryUint32Op)                                                            \
-  M(ShiftUint32Op)                                                             \
-  M(UnaryUint32Op)                                                             \
-  M(BoxUint32)                                                                 \
-  M(UnboxUint32)                                                               \
-  M(BoxInt32)                                                                  \
-  M(UnboxInt32)                                                                \
-  M(UnboxedIntConverter)                                                       \
-  M(Deoptimize)                                                                \
-  M(SimdOp)
+  M(GraphEntry, kNoGC)                                                         \
+  M(JoinEntry, kNoGC)                                                          \
+  M(TargetEntry, kNoGC)                                                        \
+  M(IndirectEntry, kNoGC)                                                      \
+  M(CatchBlockEntry, kNoGC)                                                    \
+  M(Phi, kNoGC)                                                                \
+  M(Redefinition, kNoGC)                                                       \
+  M(Parameter, kNoGC)                                                          \
+  M(LoadIndexedUnsafe, kNoGC)                                                  \
+  M(StoreIndexedUnsafe, kNoGC)                                                 \
+  M(TailCall, kNoGC)                                                           \
+  M(ParallelMove, kNoGC)                                                       \
+  M(PushArgument, kNoGC)                                                       \
+  M(Return, kNoGC)                                                             \
+  M(Throw, kNoGC)                                                              \
+  M(ReThrow, kNoGC)                                                            \
+  M(Stop, _)                                                                   \
+  M(Goto, kNoGC)                                                               \
+  M(IndirectGoto, kNoGC)                                                       \
+  M(Branch, kNoGC)                                                             \
+  M(AssertAssignable, _)                                                       \
+  M(AssertSubtype, _)                                                          \
+  M(AssertBoolean, _)                                                          \
+  M(SpecialParameter, kNoGC)                                                   \
+  M(ClosureCall, _)                                                            \
+  M(InstanceCall, _)                                                           \
+  M(PolymorphicInstanceCall, _)                                                \
+  M(StaticCall, _)                                                             \
+  M(LoadLocal, kNoGC)                                                          \
+  M(DropTemps, kNoGC)                                                          \
+  M(MakeTemp, kNoGC)                                                           \
+  M(StoreLocal, kNoGC)                                                         \
+  M(StrictCompare, kNoGC)                                                      \
+  M(EqualityCompare, kNoGC)                                                    \
+  M(RelationalOp, kNoGC)                                                       \
+  M(NativeCall, _)                                                             \
+  M(DebugStepCheck, _)                                                         \
+  M(LoadIndexed, kNoGC)                                                        \
+  M(LoadCodeUnits, kNoGC)                                                      \
+  M(StoreIndexed, kNoGC)                                                       \
+  M(StoreInstanceField, _)                                                     \
+  M(InitStaticField, _)                                                        \
+  M(LoadStaticField, kNoGC)                                                    \
+  M(StoreStaticField, kNoGC)                                                   \
+  M(BooleanNegate, kNoGC)                                                      \
+  M(InstanceOf, _)                                                             \
+  M(CreateArray, _)                                                            \
+  M(AllocateObject, _)                                                         \
+  M(LoadField, kNoGC)                                                          \
+  M(LoadUntagged, kNoGC)                                                       \
+  M(LoadClassId, kNoGC)                                                        \
+  M(InstantiateType, _)                                                        \
+  M(InstantiateTypeArguments, _)                                               \
+  M(AllocateContext, _)                                                        \
+  M(AllocateUninitializedContext, _)                                           \
+  M(CloneContext, _)                                                           \
+  M(BinarySmiOp, kNoGC)                                                        \
+  M(CheckedSmiComparison, _)                                                   \
+  M(CheckedSmiOp, _)                                                           \
+  M(BinaryInt32Op, kNoGC)                                                      \
+  M(UnarySmiOp, kNoGC)                                                         \
+  M(UnaryDoubleOp, kNoGC)                                                      \
+  M(CheckStackOverflow, _)                                                     \
+  M(SmiToDouble, kNoGC)                                                        \
+  M(Int32ToDouble, kNoGC)                                                      \
+  M(Int64ToDouble, kNoGC)                                                      \
+  M(DoubleToInteger, _)                                                        \
+  M(DoubleToSmi, kNoGC)                                                        \
+  M(DoubleToDouble, kNoGC)                                                     \
+  M(DoubleToFloat, kNoGC)                                                      \
+  M(FloatToDouble, kNoGC)                                                      \
+  M(CheckClass, kNoGC)                                                         \
+  M(CheckClassId, kNoGC)                                                       \
+  M(CheckSmi, kNoGC)                                                           \
+  M(CheckNull, kNoGC)                                                          \
+  M(Constant, kNoGC)                                                           \
+  M(UnboxedConstant, kNoGC)                                                    \
+  M(CheckEitherNonSmi, kNoGC)                                                  \
+  M(BinaryDoubleOp, kNoGC)                                                     \
+  M(DoubleTestOp, kNoGC)                                                       \
+  M(MathUnary, kNoGC)                                                          \
+  M(MathMinMax, kNoGC)                                                         \
+  M(Box, _)                                                                    \
+  M(Unbox, kNoGC)                                                              \
+  M(BoxInt64, _)                                                               \
+  M(UnboxInt64, kNoGC)                                                         \
+  M(CaseInsensitiveCompareUC16, _)                                             \
+  M(BinaryInt64Op, kNoGC)                                                      \
+  M(ShiftInt64Op, kNoGC)                                                       \
+  M(SpeculativeShiftInt64Op, kNoGC)                                            \
+  M(UnaryInt64Op, kNoGC)                                                       \
+  M(CheckArrayBound, kNoGC)                                                    \
+  M(GenericCheckBound, kNoGC)                                                  \
+  M(Constraint, _)                                                             \
+  M(StringToCharCode, kNoGC)                                                   \
+  M(OneByteStringFromCharCode, kNoGC)                                          \
+  M(StringInterpolate, _)                                                      \
+  M(InvokeMathCFunction, _)                                                    \
+  M(TruncDivMod, kNoGC)                                                        \
+  /*We could be more precise about when these 2 instructions can trigger GC.*/ \
+  M(GuardFieldClass, _)                                                        \
+  M(GuardFieldLength, _)                                                       \
+  M(IfThenElse, kNoGC)                                                         \
+  M(MaterializeObject, _)                                                      \
+  M(TestSmi, kNoGC)                                                            \
+  M(TestCids, kNoGC)                                                           \
+  M(ExtractNthOutput, kNoGC)                                                   \
+  M(BinaryUint32Op, kNoGC)                                                     \
+  M(ShiftUint32Op, kNoGC)                                                      \
+  M(SpeculativeShiftUint32Op, kNoGC)                                           \
+  M(UnaryUint32Op, kNoGC)                                                      \
+  M(BoxUint32, _)                                                              \
+  M(UnboxUint32, kNoGC)                                                        \
+  M(BoxInt32, _)                                                               \
+  M(UnboxInt32, kNoGC)                                                         \
+  M(UnboxedIntConverter, _)                                                    \
+  M(Deoptimize, kNoGC)                                                         \
+  M(SimdOp, kNoGC)
 
 #define FOR_EACH_ABSTRACT_INSTRUCTION(M)                                       \
-  M(BlockEntry)                                                                \
-  M(BoxInteger)                                                                \
-  M(UnboxInteger)                                                              \
-  M(Comparison)                                                                \
-  M(UnaryIntegerOp)                                                            \
-  M(BinaryIntegerOp)
+  M(BlockEntry, _)                                                             \
+  M(BoxInteger, _)                                                             \
+  M(UnboxInteger, _)                                                           \
+  M(Comparison, _)                                                             \
+  M(UnaryIntegerOp, _)                                                         \
+  M(BinaryIntegerOp, _)                                                        \
+  M(ShiftIntegerOp, _)                                                         \
+  M(Allocation, _)
 
-#define FORWARD_DECLARATION(type) class type##Instr;
+#define FORWARD_DECLARATION(type, attrs) class type##Instr;
 FOR_EACH_INSTRUCTION(FORWARD_DECLARATION)
 FOR_EACH_ABSTRACT_INSTRUCTION(FORWARD_DECLARATION)
 #undef FORWARD_DECLARATION
@@ -730,9 +746,11 @@ class CallTargets : public Cids {
 
 class Instruction : public ZoneAllocated {
  public:
-#define DECLARE_TAG(type) k##type,
-  enum Tag { FOR_EACH_INSTRUCTION(DECLARE_TAG) };
+#define DECLARE_TAG(type, attrs) k##type,
+  enum Tag { FOR_EACH_INSTRUCTION(DECLARE_TAG) kNumInstructions };
 #undef DECLARE_TAG
+
+  static const intptr_t kInstructionAttrs[kNumInstructions];
 
   enum SpeculativeMode {
     // Types of inputs should be checked when unboxing for this instruction.
@@ -863,7 +881,7 @@ class Instruction : public ZoneAllocated {
 #define DECLARE_INSTRUCTION_TYPE_CHECK(Name, Type)                             \
   bool Is##Name() { return (As##Name() != NULL); }                             \
   virtual Type* As##Name() { return NULL; }
-#define INSTRUCTION_TYPE_CHECK(Name)                                           \
+#define INSTRUCTION_TYPE_CHECK(Name, Attrs)                                    \
   DECLARE_INSTRUCTION_TYPE_CHECK(Name, Name##Instr)
 
   DECLARE_INSTRUCTION_TYPE_CHECK(Definition, Definition)
@@ -872,6 +890,11 @@ class Instruction : public ZoneAllocated {
 
 #undef INSTRUCTION_TYPE_CHECK
 #undef DECLARE_INSTRUCTION_TYPE_CHECK
+
+  template <typename T>
+  T* Cast() {
+    return static_cast<T*>(this);
+  }
 
   // Returns structure describing location constraints required
   // to emit native code for this instruction.
@@ -949,6 +972,8 @@ class Instruction : public ZoneAllocated {
   // See StoreInstanceFieldInstr::HasUnknownSideEffects() for rationale.
   virtual bool HasUnknownSideEffects() const = 0;
 
+  virtual bool CanTriggerGC() const;
+
   // Get the block entry for this instruction.
   virtual BlockEntryInstr* GetBlock();
 
@@ -1000,6 +1025,18 @@ class Instruction : public ZoneAllocated {
   void ClearEnv() { env_ = NULL; }
 
   void Unsupported(FlowGraphCompiler* compiler);
+
+  static bool SlowPathSharingSupported(bool is_optimizing) {
+#if defined(TARGET_ARCH_X64) || defined(TARGET_ARCH_ARM) ||                    \
+    defined(TARGET_ARCH_ARM64)
+    return FLAG_enable_slow_path_sharing && FLAG_precompiled_mode &&
+           is_optimizing;
+#else
+    return false;
+#endif
+  }
+
+  virtual bool UseSharedSlowPathStub(bool is_optimizing) const { return false; }
 
  protected:
   // GetDeoptId and/or CopyDeoptIdFrom.
@@ -1641,7 +1678,8 @@ class CatchBlockEntryInstr : public BlockEntryInstr {
                        const LocalVariable& stacktrace_var,
                        bool needs_stacktrace,
                        intptr_t deopt_id,
-                       bool should_restore_closure_context = false)
+                       const LocalVariable* raw_exception_var,
+                       const LocalVariable* raw_stacktrace_var)
       : BlockEntryInstr(block_id, try_index, deopt_id),
         graph_entry_(graph_entry),
         predecessor_(NULL),
@@ -1649,8 +1687,9 @@ class CatchBlockEntryInstr : public BlockEntryInstr {
         catch_try_index_(catch_try_index),
         exception_var_(exception_var),
         stacktrace_var_(stacktrace_var),
+        raw_exception_var_(raw_exception_var),
+        raw_stacktrace_var_(raw_stacktrace_var),
         needs_stacktrace_(needs_stacktrace),
-        should_restore_closure_context_(should_restore_closure_context),
         handler_token_pos_(handler_token_pos),
         is_generated_(is_generated) {}
 
@@ -1668,6 +1707,11 @@ class CatchBlockEntryInstr : public BlockEntryInstr {
 
   const LocalVariable& exception_var() const { return exception_var_; }
   const LocalVariable& stacktrace_var() const { return stacktrace_var_; }
+
+  const LocalVariable* raw_exception_var() const { return raw_exception_var_; }
+  const LocalVariable* raw_stacktrace_var() const {
+    return raw_stacktrace_var_;
+  }
 
   bool needs_stacktrace() const { return needs_stacktrace_; }
 
@@ -1692,12 +1736,6 @@ class CatchBlockEntryInstr : public BlockEntryInstr {
     predecessor_ = predecessor;
   }
 
-  bool should_restore_closure_context() const {
-    ASSERT(exception_var_.is_captured() == stacktrace_var_.is_captured());
-    ASSERT(!exception_var_.is_captured() || should_restore_closure_context_);
-    return should_restore_closure_context_;
-  }
-
   GraphEntryInstr* graph_entry_;
   BlockEntryInstr* predecessor_;
   const Array& catch_handler_types_;
@@ -1705,8 +1743,9 @@ class CatchBlockEntryInstr : public BlockEntryInstr {
   GrowableArray<Definition*> initial_definitions_;
   const LocalVariable& exception_var_;
   const LocalVariable& stacktrace_var_;
+  const LocalVariable* raw_exception_var_;
+  const LocalVariable* raw_stacktrace_var_;
   const bool needs_stacktrace_;
-  const bool should_restore_closure_context_;
   TokenPosition handler_token_pos_;
   bool is_generated_;
 
@@ -1808,8 +1847,7 @@ class Definition : public Instruction {
 
   bool HasType() const { return (type_ != NULL); }
 
-  // Does this define a mint?
-  inline bool IsMintDefinition();
+  inline bool IsInt64Definition();
 
   bool IsInt32Definition() {
     return IsBinaryInt32Op() || IsBoxInt32() || IsUnboxInt32() ||
@@ -2998,12 +3036,23 @@ class AssertBooleanInstr : public TemplateDefinition<1, Throws, Pure> {
 // the type arguments of a generic function or an arguments descriptor.
 class SpecialParameterInstr : public TemplateDefinition<0, NoThrow> {
  public:
-  enum SpecialParameterKind { kContext, kTypeArgs, kArgDescriptor };
+  enum SpecialParameterKind {
+    kContext,
+    kTypeArgs,
+    kArgDescriptor,
+    kException,
+    kStackTrace
+  };
 
-  SpecialParameterInstr(SpecialParameterKind kind, intptr_t deopt_id)
-      : TemplateDefinition(deopt_id), kind_(kind) {}
+  SpecialParameterInstr(SpecialParameterKind kind,
+                        intptr_t deopt_id,
+                        BlockEntryInstr* block)
+      : TemplateDefinition(deopt_id), kind_(kind), block_(block) {}
 
   DECLARE_INSTRUCTION(SpecialParameter)
+
+  virtual BlockEntryInstr* GetBlock() { return block_; }
+
   virtual CompileType ComputeType() const;
 
   virtual bool ComputeCanDeoptimize() const { return false; }
@@ -3027,6 +3076,10 @@ class SpecialParameterInstr : public TemplateDefinition<0, NoThrow> {
         return "kTypeArgs";
       case kArgDescriptor:
         return "kArgDescriptor";
+      case kException:
+        return "kException";
+      case kStackTrace:
+        return "kStackTrace";
     }
     UNREACHABLE();
     return NULL;
@@ -3034,6 +3087,7 @@ class SpecialParameterInstr : public TemplateDefinition<0, NoThrow> {
 
  private:
   const SpecialParameterKind kind_;
+  BlockEntryInstr* block_;
   DISALLOW_COPY_AND_ASSIGN(SpecialParameterInstr);
 };
 
@@ -3402,7 +3456,7 @@ class StrictCompareInstr : public TemplateComparison<2, NoThrow, Pure> {
   PRINT_OPERANDS_TO_SUPPORT
 
  private:
-  // True if the comparison must check for double, Mint or Bigint and
+  // True if the comparison must check for double or Mint and
   // use value comparison instead.
   bool needs_number_check_;
 
@@ -3880,6 +3934,51 @@ class DropTempsInstr : public Definition {
   DISALLOW_COPY_AND_ASSIGN(DropTempsInstr);
 };
 
+// This instruction is used to reserve a space on the expression stack
+// that later would be filled with StoreLocal. Reserved space would be
+// filled with a null value initially.
+//
+// Note: One must not use Constant(#null) to reserve expression stack space
+// because it would lead to an incorrectly compiled unoptimized code. Graph
+// builder would set Constant(#null) as an input definition to the instruction
+// that consumes this value from the expression stack - not knowing that
+// this value represents a placeholder - which might lead issues if instruction
+// has specialization for constant inputs (see https://dartbug.com/33195).
+class MakeTempInstr : public TemplateDefinition<0, NoThrow, Pure> {
+ public:
+  explicit MakeTempInstr(Zone* zone)
+      : null_(new (zone) ConstantInstr(Object::ZoneHandle())) {
+    // Note: We put ConstantInstr inside MakeTemp to simplify code generation:
+    // having ConstantInstr allows us to use Location::Contant(null_) as an
+    // output location for this instruction.
+  }
+
+  DECLARE_INSTRUCTION(MakeTemp)
+
+  virtual CompileType ComputeType() const { return CompileType::Dynamic(); }
+
+  virtual bool ComputeCanDeoptimize() const { return false; }
+
+  virtual bool HasUnknownSideEffects() const {
+    UNREACHABLE();  // Eliminated by SSA construction.
+    return false;
+  }
+
+  virtual bool MayThrow() const {
+    UNREACHABLE();
+    return false;
+  }
+
+  virtual TokenPosition token_pos() const { return TokenPosition::kTempMove; }
+
+  PRINT_OPERANDS_TO_SUPPORT
+
+ private:
+  ConstantInstr* null_;
+
+  DISALLOW_COPY_AND_ASSIGN(MakeTempInstr);
+};
+
 class StoreLocalInstr : public TemplateDefinition<1, NoThrow> {
  public:
   StoreLocalInstr(const LocalVariable& local,
@@ -4057,6 +4156,14 @@ class StoreInstanceFieldInstr : public TemplateDefinition<2, NoThrow> {
            (emit_store_barrier_ == kEmitStoreBarrier);
   }
 
+  void set_emit_store_barrier(StoreBarrierType value) {
+    emit_store_barrier_ = value;
+  }
+
+  virtual bool CanTriggerGC() const {
+    return IsUnboxedStore() || IsPotentialUnboxedStore();
+  }
+
   virtual bool ComputeCanDeoptimize() const { return false; }
 
   // May require a deoptimization target for input conversions.
@@ -4088,7 +4195,7 @@ class StoreInstanceFieldInstr : public TemplateDefinition<2, NoThrow> {
 
   const Field& field_;
   intptr_t offset_in_bytes_;
-  const StoreBarrierType emit_store_barrier_;
+  StoreBarrierType emit_store_barrier_;
   const TokenPosition token_pos_;
   // Marks initializing stores. E.g. in the constructor.
   bool is_initialization_;
@@ -4548,7 +4655,46 @@ class InstanceOfInstr : public TemplateDefinition<3, Throws> {
   DISALLOW_COPY_AND_ASSIGN(InstanceOfInstr);
 };
 
-class AllocateObjectInstr : public TemplateDefinition<0, NoThrow> {
+// Subclasses of 'AllocationInstr' must maintain the invariant that if
+// 'WillAllocateNewOrRemembered' is true, then the result of the allocation must
+// either reside in new space or be in the store buffer.
+class AllocationInstr : public Definition {
+ public:
+  explicit AllocationInstr(intptr_t deopt_id = Thread::kNoDeoptId)
+      : Definition(deopt_id) {}
+
+  // TODO(sjindel): Update these conditions when the incremental write barrier
+  // is added.
+  virtual bool WillAllocateNewOrRemembered() const = 0;
+
+  DEFINE_INSTRUCTION_TYPE_CHECK(Allocation);
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(AllocationInstr);
+};
+
+template <intptr_t N, typename ThrowsTrait>
+class TemplateAllocation : public AllocationInstr {
+ public:
+  explicit TemplateAllocation(intptr_t deopt_id = Thread::kNoDeoptId)
+      : AllocationInstr(deopt_id), inputs_() {}
+
+  virtual intptr_t InputCount() const { return N; }
+  virtual Value* InputAt(intptr_t i) const { return inputs_[i]; }
+
+  virtual bool MayThrow() const { return ThrowsTrait::kCanThrow; }
+
+ protected:
+  EmbeddedArray<Value*, N> inputs_;
+
+ private:
+  friend class BranchInstr;
+  friend class IfThenElseInstr;
+
+  virtual void RawSetInputAt(intptr_t i, Value* value) { inputs_[i] = value; }
+};
+
+class AllocateObjectInstr : public TemplateAllocation<0, NoThrow> {
  public:
   AllocateObjectInstr(TokenPosition token_pos,
                       const Class& cls,
@@ -4585,6 +4731,10 @@ class AllocateObjectInstr : public TemplateDefinition<0, NoThrow> {
   virtual AliasIdentity Identity() const { return identity_; }
   virtual void SetIdentity(AliasIdentity identity) { identity_ = identity; }
 
+  virtual bool WillAllocateNewOrRemembered() const {
+    return Heap::IsAllocatableInNewSpace(cls().instance_size());
+  }
+
   PRINT_OPERANDS_TO_SUPPORT
 
  private:
@@ -4598,7 +4748,7 @@ class AllocateObjectInstr : public TemplateDefinition<0, NoThrow> {
 };
 
 class AllocateUninitializedContextInstr
-    : public TemplateDefinition<0, NoThrow> {
+    : public TemplateAllocation<0, NoThrow> {
  public:
   AllocateUninitializedContextInstr(TokenPosition token_pos,
                                     intptr_t num_context_variables)
@@ -4615,6 +4765,11 @@ class AllocateUninitializedContextInstr
   virtual bool ComputeCanDeoptimize() const { return false; }
 
   virtual bool HasUnknownSideEffects() const { return false; }
+
+  virtual bool WillAllocateNewOrRemembered() const {
+    return Heap::IsAllocatableInNewSpace(
+        Context::InstanceSize(num_context_variables_));
+  }
 
   virtual AliasIdentity Identity() const { return identity_; }
   virtual void SetIdentity(AliasIdentity identity) { identity_ = identity; }
@@ -4731,13 +4886,13 @@ class MaterializeObjectInstr : public Definition {
   DISALLOW_COPY_AND_ASSIGN(MaterializeObjectInstr);
 };
 
-class CreateArrayInstr : public TemplateDefinition<2, Throws> {
+class CreateArrayInstr : public TemplateAllocation<2, Throws> {
  public:
   CreateArrayInstr(TokenPosition token_pos,
                    Value* element_type,
                    Value* num_elements,
                    intptr_t deopt_id)
-      : TemplateDefinition(deopt_id),
+      : TemplateAllocation(deopt_id),
         token_pos_(token_pos),
         identity_(AliasIdentity::Unknown()) {
     SetInputAt(kElementTypePos, element_type);
@@ -4761,6 +4916,8 @@ class CreateArrayInstr : public TemplateDefinition<2, Throws> {
 
   virtual AliasIdentity Identity() const { return identity_; }
   virtual void SetIdentity(AliasIdentity identity) { identity_ = identity; }
+
+  virtual bool WillAllocateNewOrRemembered() const { return true; }
 
  private:
   const TokenPosition token_pos_;
@@ -4822,6 +4979,78 @@ class LoadClassIdInstr : public TemplateDefinition<1, NoThrow, Pure> {
   DISALLOW_COPY_AND_ASSIGN(LoadClassIdInstr);
 };
 
+#define NATIVE_FIELDS_LIST(V)                                                  \
+  V(Array, length, Smi, IMMUTABLE)                                             \
+  V(GrowableObjectArray, length, Smi, MUTABLE)                                 \
+  V(TypedData, length, Smi, IMMUTABLE)                                         \
+  V(String, length, Smi, IMMUTABLE)                                            \
+  V(LinkedHashMap, index, TypedDataUint32Array, MUTABLE)                       \
+  V(LinkedHashMap, data, Array, MUTABLE)                                       \
+  V(LinkedHashMap, hash_mask, Smi, MUTABLE)                                    \
+  V(LinkedHashMap, used_data, Smi, MUTABLE)                                    \
+  V(LinkedHashMap, deleted_keys, Smi, MUTABLE)                                 \
+  V(ArgumentsDescriptor, type_args_len, Smi, IMMUTABLE)
+
+class NativeFieldDesc : public ZoneAllocated {
+ public:
+  // clang-format off
+  enum Kind {
+#define DECLARE_KIND(ClassName, FieldName, cid, mutability)                    \
+  k##ClassName##_##FieldName,
+    NATIVE_FIELDS_LIST(DECLARE_KIND)
+#undef DECLARE_KIND
+    kTypeArguments,
+  };
+  // clang-format on
+
+#define DEFINE_GETTER(ClassName, FieldName, cid, mutability)                   \
+  static const NativeFieldDesc* ClassName##_##FieldName() {                    \
+    return Get(k##ClassName##_##FieldName);                                    \
+  }
+
+  NATIVE_FIELDS_LIST(DEFINE_GETTER)
+#undef DEFINE_GETTER
+
+  static const NativeFieldDesc* Get(Kind kind);
+  static const NativeFieldDesc* GetLengthFieldForArrayCid(intptr_t array_cid);
+  static const NativeFieldDesc* GetTypeArgumentsFieldFor(Zone* zone,
+                                                         const Class& cls);
+
+  const char* name() const;
+
+  Kind kind() const { return kind_; }
+
+  intptr_t offset_in_bytes() const { return offset_in_bytes_; }
+
+  bool is_immutable() const { return immutable_; }
+
+  intptr_t cid() const { return cid_; }
+
+  RawAbstractType* type() const;
+
+ private:
+  NativeFieldDesc(Kind kind,
+                  intptr_t offset_in_bytes,
+                  intptr_t cid,
+                  bool immutable)
+      : kind_(kind),
+        offset_in_bytes_(offset_in_bytes),
+        immutable_(immutable),
+        cid_(cid) {}
+
+  NativeFieldDesc(const NativeFieldDesc& other)
+      : NativeFieldDesc(other.kind_,
+                        other.offset_in_bytes_,
+                        other.immutable_,
+                        other.cid_) {}
+
+  const Kind kind_;
+  const intptr_t offset_in_bytes_;
+  const bool immutable_;
+
+  const intptr_t cid_;
+};
+
 class LoadFieldInstr : public TemplateDefinition<1, NoThrow> {
  public:
   LoadFieldInstr(Value* instance,
@@ -4832,12 +5061,28 @@ class LoadFieldInstr : public TemplateDefinition<1, NoThrow> {
         type_(type),
         result_cid_(kDynamicCid),
         immutable_(false),
-        recognized_kind_(MethodRecognizer::kUnknown),
-        field_(NULL),
+        native_field_(nullptr),
+        field_(nullptr),
         token_pos_(token_pos) {
     ASSERT(offset_in_bytes >= 0);
     // May be null if field is not an instance.
-    ASSERT(type.IsZoneHandle() || type.IsReadOnlyHandle());
+    ASSERT(type_.IsZoneHandle() || type_.IsReadOnlyHandle());
+    SetInputAt(0, instance);
+  }
+
+  LoadFieldInstr(Value* instance,
+                 const NativeFieldDesc* native_field,
+                 TokenPosition token_pos)
+      : offset_in_bytes_(native_field->offset_in_bytes()),
+        type_(AbstractType::ZoneHandle(native_field->type())),
+        result_cid_(native_field->cid()),
+        immutable_(native_field->is_immutable()),
+        native_field_(native_field),
+        field_(nullptr),
+        token_pos_(token_pos) {
+    ASSERT(offset_in_bytes_ >= 0);
+    // May be null if field is not an instance.
+    ASSERT(type_.IsZoneHandle() || type_.IsReadOnlyHandle());
     SetInputAt(0, instance);
   }
 
@@ -4850,7 +5095,7 @@ class LoadFieldInstr : public TemplateDefinition<1, NoThrow> {
         type_(type),
         result_cid_(kDynamicCid),
         immutable_(false),
-        recognized_kind_(MethodRecognizer::kUnknown),
+        native_field_(nullptr),
         field_(field),
         token_pos_(token_pos) {
     ASSERT(field->IsZoneHandle());
@@ -4858,7 +5103,7 @@ class LoadFieldInstr : public TemplateDefinition<1, NoThrow> {
     ASSERT(type.IsZoneHandle() || type.IsReadOnlyHandle());
     SetInputAt(0, instance);
 
-    if (parsed_function != NULL && field->guarded_cid() != kIllegalCid) {
+    if (parsed_function != nullptr && field->guarded_cid() != kIllegalCid) {
       if (!field->is_nullable() || (field->guarded_cid() == kNullCid)) {
         set_result_cid(field->guarded_cid());
       }
@@ -4883,11 +5128,7 @@ class LoadFieldInstr : public TemplateDefinition<1, NoThrow> {
 
   bool IsPotentialUnboxedLoad() const;
 
-  void set_recognized_kind(MethodRecognizer::Kind kind) {
-    recognized_kind_ = kind;
-  }
-
-  MethodRecognizer::Kind recognized_kind() const { return recognized_kind_; }
+  const NativeFieldDesc* native_field() const { return native_field_; }
 
   DECLARE_INSTRUCTION(LoadField)
   virtual CompileType ComputeType() const;
@@ -4907,8 +5148,6 @@ class LoadFieldInstr : public TemplateDefinition<1, NoThrow> {
 
   virtual Definition* Canonicalize(FlowGraph* flow_graph);
 
-  static MethodRecognizer::Kind RecognizedKindFromArrayCid(intptr_t cid);
-
   static bool IsFixedLengthArrayCid(intptr_t cid);
 
   virtual bool AllowsCSE() const { return immutable_; }
@@ -4924,7 +5163,7 @@ class LoadFieldInstr : public TemplateDefinition<1, NoThrow> {
   intptr_t result_cid_;
   bool immutable_;
 
-  MethodRecognizer::Kind recognized_kind_;
+  const NativeFieldDesc* native_field_;
   const Field* field_;
   const TokenPosition token_pos_;
 
@@ -5005,7 +5244,7 @@ class InstantiateTypeArgumentsInstr : public TemplateDefinition<2, Throws> {
   DISALLOW_COPY_AND_ASSIGN(InstantiateTypeArgumentsInstr);
 };
 
-class AllocateContextInstr : public TemplateDefinition<0, NoThrow> {
+class AllocateContextInstr : public TemplateAllocation<0, NoThrow> {
  public:
   AllocateContextInstr(TokenPosition token_pos, intptr_t num_context_variables)
       : token_pos_(token_pos), num_context_variables_(num_context_variables) {}
@@ -5019,6 +5258,11 @@ class AllocateContextInstr : public TemplateDefinition<0, NoThrow> {
   virtual bool ComputeCanDeoptimize() const { return false; }
 
   virtual bool HasUnknownSideEffects() const { return false; }
+
+  virtual bool WillAllocateNewOrRemembered() const {
+    return Heap::IsAllocatableInNewSpace(
+        Context::InstanceSize(num_context_variables_));
+  }
 
   PRINT_OPERANDS_TO_SUPPORT
 
@@ -5474,9 +5718,10 @@ class UnboxInt64Instr : public UnboxIntegerInstr {
   DISALLOW_COPY_AND_ASSIGN(UnboxInt64Instr);
 };
 
-bool Definition::IsMintDefinition() {
+bool Definition::IsInt64Definition() {
   return (Type()->ToCid() == kMintCid) || IsBinaryInt64Op() ||
-         IsUnaryInt64Op() || IsShiftInt64Op() || IsBoxInt64() || IsUnboxInt64();
+         IsUnaryInt64Op() || IsShiftInt64Op() || IsSpeculativeShiftInt64Op() ||
+         IsBoxInt64() || IsUnboxInt64();
 }
 
 class MathUnaryInstr : public TemplateDefinition<1, NoThrow, Pure> {
@@ -5947,14 +6192,16 @@ class BinaryIntegerOpInstr : public TemplateDefinition<2, NoThrow, Pure> {
     SetInputAt(1, right);
   }
 
-  static BinaryIntegerOpInstr* Make(Representation representation,
-                                    Token::Kind op_kind,
-                                    Value* left,
-                                    Value* right,
-                                    intptr_t deopt_id,
-                                    bool can_overflow,
-                                    bool is_truncating,
-                                    Range* range);
+  static BinaryIntegerOpInstr* Make(
+      Representation representation,
+      Token::Kind op_kind,
+      Value* left,
+      Value* right,
+      intptr_t deopt_id,
+      bool can_overflow,
+      bool is_truncating,
+      Range* range,
+      SpeculativeMode speculative_mode = kGuardInputs);
 
   Token::Kind op_kind() const { return op_kind_; }
   Value* left() const { return inputs_[0]; }
@@ -6000,6 +6247,8 @@ class BinaryIntegerOpInstr : public TemplateDefinition<2, NoThrow, Pure> {
 
   bool can_overflow_;
   bool is_truncating_;
+
+  DISALLOW_COPY_AND_ASSIGN(BinaryIntegerOpInstr);
 };
 
 class BinarySmiOpInstr : public BinaryIntegerOpInstr {
@@ -6109,33 +6358,6 @@ class BinaryUint32OpInstr : public BinaryIntegerOpInstr {
   DISALLOW_COPY_AND_ASSIGN(BinaryUint32OpInstr);
 };
 
-class ShiftUint32OpInstr : public BinaryIntegerOpInstr {
- public:
-  ShiftUint32OpInstr(Token::Kind op_kind,
-                     Value* left,
-                     Value* right,
-                     intptr_t deopt_id)
-      : BinaryIntegerOpInstr(op_kind, left, right, deopt_id) {
-    ASSERT((op_kind == Token::kSHR) || (op_kind == Token::kSHL));
-  }
-
-  virtual bool ComputeCanDeoptimize() const { return true; }
-
-  virtual Representation representation() const { return kUnboxedUint32; }
-
-  virtual Representation RequiredInputRepresentation(intptr_t idx) const {
-    ASSERT((idx == 0) || (idx == 1));
-    return (idx == 0) ? kUnboxedUint32 : kTagged;
-  }
-
-  virtual CompileType ComputeType() const;
-
-  DECLARE_INSTRUCTION(ShiftUint32Op)
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ShiftUint32OpInstr);
-};
-
 class BinaryInt64OpInstr : public BinaryIntegerOpInstr {
  public:
   BinaryInt64OpInstr(Token::Kind op_kind,
@@ -6145,28 +6367,17 @@ class BinaryInt64OpInstr : public BinaryIntegerOpInstr {
                      SpeculativeMode speculative_mode = kGuardInputs)
       : BinaryIntegerOpInstr(op_kind, left, right, deopt_id),
         speculative_mode_(speculative_mode) {
-    if (FLAG_limit_ints_to_64_bits) {
-      mark_truncating();
-    }
+    mark_truncating();
   }
 
   virtual bool ComputeCanDeoptimize() const {
-    switch (op_kind()) {
-      case Token::kADD:
-      case Token::kSUB:
-        return can_overflow();
-      case Token::kMUL:
-// Note that ARM64 does not support operations with unboxed mints,
-// so it is not handled here.
-#if defined(TARGET_ARCH_X64)
-        return can_overflow();  // Deopt if overflow.
-#else
-        // IA32, ARM
-        return true;  // Deopt if inputs are not int32.
-#endif
-      default:
-        return false;
+    ASSERT(!can_overflow());
+#if defined(TARGET_ARCH_IA32) || defined(TARGET_ARCH_ARM)
+    if (op_kind() == Token::kMUL) {
+      return true;  // Deopt if inputs are not int32.
     }
+#endif
+    return false;
   }
 
   virtual Representation representation() const { return kUnboxedInt64; }
@@ -6193,25 +6404,80 @@ class BinaryInt64OpInstr : public BinaryIntegerOpInstr {
   DISALLOW_COPY_AND_ASSIGN(BinaryInt64OpInstr);
 };
 
-class ShiftInt64OpInstr : public BinaryIntegerOpInstr {
+// Base class for integer shift operations.
+class ShiftIntegerOpInstr : public BinaryIntegerOpInstr {
+ public:
+  ShiftIntegerOpInstr(Token::Kind op_kind,
+                      Value* left,
+                      Value* right,
+                      intptr_t deopt_id)
+      : BinaryIntegerOpInstr(op_kind, left, right, deopt_id),
+        shift_range_(NULL) {
+    ASSERT((op_kind == Token::kSHR) || (op_kind == Token::kSHL));
+    mark_truncating();
+  }
+
+  Range* shift_range() const { return shift_range_; }
+
+  virtual void InferRange(RangeAnalysis* analysis, Range* range);
+
+  DEFINE_INSTRUCTION_TYPE_CHECK(ShiftIntegerOp)
+
+ protected:
+  static const intptr_t kShiftCountLimit = 63;
+
+  // Returns true if the shift amount is guaranteed to be in
+  // [0..max] range.
+  bool IsShiftCountInRange(int64_t max = kShiftCountLimit) const;
+
+ private:
+  Range* shift_range_;
+
+  DISALLOW_COPY_AND_ASSIGN(ShiftIntegerOpInstr);
+};
+
+// Non-speculative int64 shift. Takes 2 unboxed int64.
+// Throws if right operand is negative.
+class ShiftInt64OpInstr : public ShiftIntegerOpInstr {
  public:
   ShiftInt64OpInstr(Token::Kind op_kind,
                     Value* left,
                     Value* right,
                     intptr_t deopt_id)
-      : BinaryIntegerOpInstr(op_kind, left, right, deopt_id),
-        shift_range_(NULL) {
-    ASSERT((op_kind == Token::kSHR) || (op_kind == Token::kSHL));
-    if (FLAG_limit_ints_to_64_bits) {
-      mark_truncating();
-    }
+      : ShiftIntegerOpInstr(op_kind, left, right, deopt_id) {}
+
+  virtual SpeculativeMode speculative_mode() const { return kNotSpeculative; }
+  virtual bool ComputeCanDeoptimize() const { return false; }
+  virtual bool MayThrow() const { return true; }
+
+  virtual Representation representation() const { return kUnboxedInt64; }
+
+  virtual Representation RequiredInputRepresentation(intptr_t idx) const {
+    ASSERT((idx == 0) || (idx == 1));
+    return kUnboxedInt64;
   }
 
-  Range* shift_range() const { return shift_range_; }
+  virtual CompileType ComputeType() const;
+
+  DECLARE_INSTRUCTION(ShiftInt64Op)
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ShiftInt64OpInstr);
+};
+
+// Speculative int64 shift. Takes unboxed int64 and smi.
+// Deoptimizes if right operand is negative or greater than kShiftCountLimit.
+class SpeculativeShiftInt64OpInstr : public ShiftIntegerOpInstr {
+ public:
+  SpeculativeShiftInt64OpInstr(Token::Kind op_kind,
+                               Value* left,
+                               Value* right,
+                               intptr_t deopt_id)
+      : ShiftIntegerOpInstr(op_kind, left, right, deopt_id) {}
 
   virtual bool ComputeCanDeoptimize() const {
-    return (!IsShiftCountInRange()) ||
-           (can_overflow() && (op_kind() == Token::kSHL));
+    ASSERT(!can_overflow());
+    return !IsShiftCountInRange();
   }
 
   virtual Representation representation() const { return kUnboxedInt64; }
@@ -6221,21 +6487,72 @@ class ShiftInt64OpInstr : public BinaryIntegerOpInstr {
     return (idx == 0) ? kUnboxedInt64 : kTagged;
   }
 
-  virtual void InferRange(RangeAnalysis* analysis, Range* range);
   virtual CompileType ComputeType() const;
 
-  DECLARE_INSTRUCTION(ShiftInt64Op)
+  DECLARE_INSTRUCTION(SpeculativeShiftInt64Op)
 
  private:
-  static const intptr_t kMintShiftCountLimit = 63;
+  DISALLOW_COPY_AND_ASSIGN(SpeculativeShiftInt64OpInstr);
+};
 
-  // Returns true if the shift amount is guranteed to be in
-  // [0..kMintShiftCountLimit] range.
-  bool IsShiftCountInRange() const;
+// Non-speculative uint32 shift. Takes unboxed uint32 and unboxed int64.
+// Throws if right operand is negative.
+class ShiftUint32OpInstr : public ShiftIntegerOpInstr {
+ public:
+  ShiftUint32OpInstr(Token::Kind op_kind,
+                     Value* left,
+                     Value* right,
+                     intptr_t deopt_id)
+      : ShiftIntegerOpInstr(op_kind, left, right, deopt_id) {}
 
-  Range* shift_range_;
+  virtual SpeculativeMode speculative_mode() const { return kNotSpeculative; }
+  virtual bool ComputeCanDeoptimize() const { return false; }
+  virtual bool MayThrow() const { return true; }
 
-  DISALLOW_COPY_AND_ASSIGN(ShiftInt64OpInstr);
+  virtual Representation representation() const { return kUnboxedUint32; }
+
+  virtual Representation RequiredInputRepresentation(intptr_t idx) const {
+    ASSERT((idx == 0) || (idx == 1));
+    return (idx == 0) ? kUnboxedUint32 : kUnboxedInt64;
+  }
+
+  virtual CompileType ComputeType() const;
+
+  DECLARE_INSTRUCTION(ShiftUint32Op)
+
+ private:
+  static const intptr_t kUint32ShiftCountLimit = 31;
+
+  DISALLOW_COPY_AND_ASSIGN(ShiftUint32OpInstr);
+};
+
+// Speculative uint32 shift. Takes unboxed uint32 and smi.
+// Deoptimizes if right operand is negative.
+class SpeculativeShiftUint32OpInstr : public ShiftIntegerOpInstr {
+ public:
+  SpeculativeShiftUint32OpInstr(Token::Kind op_kind,
+                                Value* left,
+                                Value* right,
+                                intptr_t deopt_id)
+      : ShiftIntegerOpInstr(op_kind, left, right, deopt_id) {}
+
+  virtual bool ComputeCanDeoptimize() const { return !IsShiftCountInRange(); }
+
+  virtual Representation representation() const { return kUnboxedUint32; }
+
+  virtual Representation RequiredInputRepresentation(intptr_t idx) const {
+    ASSERT((idx == 0) || (idx == 1));
+    return (idx == 0) ? kUnboxedUint32 : kTagged;
+  }
+
+  DECLARE_INSTRUCTION(SpeculativeShiftUint32Op)
+
+  virtual CompileType ComputeType() const;
+
+ private:
+  static const intptr_t kUint32ShiftCountLimit = 31;
+
+  DISALLOW_COPY_AND_ASSIGN(SpeculativeShiftUint32OpInstr);
 };
 
 // Handles only NEGATE.
@@ -6323,6 +6640,10 @@ class CheckStackOverflowInstr : public TemplateInstruction<0, NoThrow> {
   virtual Instruction* Canonicalize(FlowGraph* flow_graph);
 
   virtual bool HasUnknownSideEffects() const { return false; }
+
+  virtual bool UseSharedSlowPathStub(bool is_optimizing) const {
+    return SlowPathSharingSupported(is_optimizing);
+  }
 
   PRINT_OPERANDS_TO_SUPPORT
 
@@ -6845,6 +7166,10 @@ class CheckNullInstr : public TemplateInstruction<1, Throws, NoCSE> {
   Value* value() const { return inputs_[0]; }
   virtual TokenPosition token_pos() const { return token_pos_; }
   const String& function_name() const { return function_name_; }
+
+  bool UseSharedSlowPathStub(bool is_optimizing) const {
+    return SlowPathSharingSupported(is_optimizing);
+  }
 
   DECLARE_INSTRUCTION(CheckNull)
 
@@ -7499,7 +7824,7 @@ class FlowGraphVisitor : public ValueObject {
 
 // Visit functions for instruction classes, with an empty default
 // implementation.
-#define DECLARE_VISIT_INSTRUCTION(ShortName)                                   \
+#define DECLARE_VISIT_INSTRUCTION(ShortName, Attrs)                            \
   virtual void Visit##ShortName(ShortName##Instr* instr) {}
 
   FOR_EACH_INSTRUCTION(DECLARE_VISIT_INSTRUCTION)

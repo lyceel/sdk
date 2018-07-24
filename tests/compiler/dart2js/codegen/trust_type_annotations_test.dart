@@ -6,7 +6,7 @@ import 'package:expect/expect.dart';
 import "package:async_helper/async_helper.dart";
 import 'package:compiler/src/commandline_options.dart';
 import 'package:compiler/src/elements/entities.dart';
-import '../compiler_helper.dart';
+import 'package:compiler/src/inferrer/typemasks/masks.dart';
 import '../memory_compiler.dart';
 
 const String TEST = """
@@ -51,7 +51,7 @@ main () {
 
 void main() {
   runTest() async {
-    var options = [Flags.trustTypeAnnotations];
+    var options = [Flags.noPreviewDart2, Flags.trustTypeAnnotations];
     var result = await runCompiler(
         memorySourceFiles: {'main.dart': TEST}, options: options);
     var compiler = result.compiler;

@@ -150,8 +150,10 @@ class ObjectPointerVisitor;
   V(CompleterSyncConstructor, "Completer.sync")                                \
   V(_AsyncAwaitCompleter, "_AsyncAwaitCompleter")                              \
   V(_AsyncAwaitCompleterConstructor, "_AsyncAwaitCompleter.")                  \
+  V(_AsyncAwaitCompleterStart, "_AsyncAwaitCompleter.start")                   \
   V(_AsyncAwaitStart, "start")                                                 \
   V(CompleterFuture, "future")                                                 \
+  V(CompleterGetFuture, "get:future")                                          \
   V(StreamIterator, "StreamIterator")                                          \
   V(StreamIteratorConstructor, "StreamIterator.")                              \
   V(Native, "native")                                                          \
@@ -168,9 +170,11 @@ class ObjectPointerVisitor;
   V(_MixinAppType, "_MixinAppType")                                            \
   V(TypeArguments, "TypeArguments")                                            \
   V(Patch, "patch")                                                            \
+  V(Pragma, "pragma")                                                          \
   V(PatchClass, "PatchClass")                                                  \
   V(Function, "Function")                                                      \
   V(_Closure, "_Closure")                                                      \
+  V(_ClosureCall, "_Closure.call")                                             \
   V(FunctionResult, "function result")                                         \
   V(FactoryResult, "factory result")                                           \
   V(ClosureData, "ClosureData")                                                \
@@ -209,7 +213,6 @@ class ObjectPointerVisitor;
   V(Number, "num")                                                             \
   V(_Smi, "_Smi")                                                              \
   V(_Mint, "_Mint")                                                            \
-  V(_Bigint, "_Bigint")                                                        \
   V(_Double, "_Double")                                                        \
   V(Bool, "bool")                                                              \
   V(_List, "_List")                                                            \
@@ -364,6 +367,7 @@ class ObjectPointerVisitor;
   V(GetterPrefix, "get:")                                                      \
   V(SetterPrefix, "set:")                                                      \
   V(InitPrefix, "init:")                                                       \
+  V(DynamicPrefix, "dyn:")                                                     \
   V(Index, "index")                                                            \
   V(DartScheme, "dart:")                                                       \
   V(DartSchemePrivate, "dart:_")                                               \
@@ -384,7 +388,6 @@ class ObjectPointerVisitor;
   V(ExternalName, "ExternalName")                                              \
   V(_Random, "_Random")                                                        \
   V(_state, "_state")                                                          \
-  V(_A, "_A")                                                                  \
   V(_stackTrace, "_stackTrace")                                                \
   V(_SpecialTypeMirror, "_SpecialTypeMirror")                                  \
   V(_LocalClassMirror, "_LocalClassMirror")                                    \
@@ -442,6 +445,7 @@ class ObjectPointerVisitor;
   V(DartLibraryMirrors, "dart.library.mirrors")                                \
   V(_name, "_name")                                                            \
   V(name, "name")                                                              \
+  V(options, "options")                                                        \
   V(_classRangeCheck, "_classRangeCheck")                                      \
   V(_classRangeCheckNegative, "_classRangeCheckNegative")                      \
   V(_classRangeAssert, "_classRangeAssert")                                    \
@@ -452,7 +456,9 @@ class ObjectPointerVisitor;
   V(DartDeveloperCausalAsyncStacks, "dart.developer.causal_async_stacks")      \
   V(_AsyncStarListenHelper, "_asyncStarListenHelper")                          \
   V(GrowRegExpStack, "_growRegExpStack")                                       \
-  V(DebugProcedureName, ":Eval")
+  V(DebugProcedureName, ":Eval")                                               \
+  V(DebugClassName, "#DebugClass")                                             \
+  V(vm_entry_point, "vm.entry_point")
 
 // Contains a list of frequently used strings in a canonicalized form. This
 // list is kept in the vm_isolate in order to share the copy across isolates

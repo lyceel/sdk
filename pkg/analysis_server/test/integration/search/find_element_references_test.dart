@@ -13,9 +13,7 @@ import '../support/integration_tests.dart';
 main() {
   defineReflectiveSuite(() {
     defineReflectiveTests(FindElementReferencesTest);
-    // TODO(scheglov): Restore similar test coverage when the front-end API
-    // allows it.  See https://github.com/dart-lang/sdk/issues/32258.
-    // defineReflectiveTests(FindElementReferencesTest_UseCFE);
+    defineReflectiveTests(FindElementReferencesTest_UseCFE);
   });
 }
 
@@ -81,6 +79,5 @@ class FindElementReferencesTest_UseCFE extends FindElementReferencesTest {
 
   @override
   @failingTest
-  // TODO(devoncarew): 'NoSuchMethodError: The getter 'source' was called on null'
-  Future test_findReferences() => new Future.error('failing test');
+  Future test_findReferences() => fail('Test fails with CFE');
 }

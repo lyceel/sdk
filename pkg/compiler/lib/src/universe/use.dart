@@ -22,10 +22,8 @@ import '../elements/types.dart';
 import '../elements/entities.dart';
 import '../js_model/closure.dart';
 import '../util/util.dart' show equalElements, Hashing;
-import '../world.dart' show World;
 import 'call_structure.dart' show CallStructure;
 import 'selector.dart' show Selector;
-import 'world_builder.dart' show ReceiverConstraint;
 
 enum DynamicUseKind {
   INVOKE,
@@ -34,7 +32,7 @@ enum DynamicUseKind {
 }
 
 /// The use of a dynamic property. [selector] defined the name and kind of the
-/// property and [mask] defines the known constraint for the object on which
+/// property and [receiverConstraint] defines the known constraint for the object on which
 /// the property is accessed.
 class DynamicUse {
   final Selector selector;
@@ -64,12 +62,7 @@ class DynamicUse {
     return sb.toString();
   }
 
-  bool appliesUnnamed(MemberEntity element, World world) {
-    return selector.appliesUnnamed(element) &&
-        (mask == null || mask.canHit(element, selector, world));
-  }
-
-  ReceiverConstraint get mask => null;
+  Object get receiverConstraint => null;
 
   DynamicUseKind get kind {
     if (selector.isGetter) {
@@ -83,18 +76,18 @@ class DynamicUse {
 
   List<DartType> get typeArguments => const <DartType>[];
 
-  int get hashCode =>
-      Hashing.listHash(typeArguments, Hashing.objectsHash(selector, mask));
+  int get hashCode => Hashing.listHash(
+      typeArguments, Hashing.objectsHash(selector, receiverConstraint));
 
   bool operator ==(other) {
     if (identical(this, other)) return true;
     if (other is! DynamicUse) return false;
     return selector == other.selector &&
-        mask == other.mask &&
+        receiverConstraint == other.receiverConstraint &&
         equalElements(typeArguments, other.typeArguments);
   }
 
-  String toString() => '$selector,$mask';
+  String toString() => '$selector,$receiverConstraint';
 }
 
 class GenericDynamicUse extends DynamicUse {
@@ -118,10 +111,11 @@ class GenericDynamicUse extends DynamicUse {
 /// This is used in the codegen phase where receivers are constrained to a
 /// type mask or similar.
 class ConstrainedDynamicUse extends DynamicUse {
-  final ReceiverConstraint mask;
+  final Object receiverConstraint;
   final List<DartType> _typeArguments;
 
-  ConstrainedDynamicUse(Selector selector, this.mask, this._typeArguments)
+  ConstrainedDynamicUse(
+      Selector selector, this.receiverConstraint, this._typeArguments)
       : super(selector) {
     assert(
         selector.callStructure.typeArgumentCount ==
@@ -147,7 +141,6 @@ enum StaticUseKind {
   CONST_CONSTRUCTOR_INVOKE,
   REDIRECTION,
   DIRECT_INVOKE,
-  DIRECT_USE,
   INLINING,
   INVOKE,
   GET,
@@ -523,16 +516,17 @@ class StaticUse {
     return new StaticUse.internal(element, StaticUseKind.INVOKE);
   }
 
-  /// Direct use of [element] as done with `--analyze-all` and `--analyze-main`.
-  factory StaticUse.directUse(MemberEntity element) {
-    return new StaticUse.internal(element, StaticUseKind.DIRECT_USE);
+  /// Inlining of [element].
+  factory StaticUse.constructorInlining(
+      ConstructorEntity element, InterfaceType instanceType) {
+    return new StaticUse.internal(element, StaticUseKind.INLINING,
+        type: instanceType);
   }
 
   /// Inlining of [element].
-  factory StaticUse.inlining(
-      FunctionEntity element, InterfaceType instanceType) {
-    return new StaticUse.internal(element, StaticUseKind.INLINING,
-        type: instanceType);
+  factory StaticUse.methodInlining(
+      FunctionEntity element, List<DartType> typeArguments) {
+    return new GenericStaticUse.methodInlining(element, typeArguments);
   }
 
   bool operator ==(other) {
@@ -546,7 +540,7 @@ class StaticUse {
   }
 
   String toString() =>
-      'StaticUse($element,$kind,$type,' '$typeArguments,$callStructure)';
+      'StaticUse($element,$kind,$type,$typeArguments,$callStructure)';
 }
 
 class GenericStaticUse extends StaticUse {
@@ -565,6 +559,10 @@ class GenericStaticUse extends StaticUse {
             "${callStructure?.typeArgumentCount ?? 0} but "
             "${typeArguments?.length ?? 0} were passed."));
   }
+
+  GenericStaticUse.methodInlining(FunctionEntity entity, this.typeArguments)
+      : super.internal(entity, StaticUseKind.INLINING,
+            typeArgumentsHash: Hashing.listHash(typeArguments));
 }
 
 enum TypeUseKind {
@@ -574,10 +572,11 @@ enum TypeUseKind {
   CATCH_TYPE,
   TYPE_LITERAL,
   INSTANTIATION,
-  MIRROR_INSTANTIATION,
   NATIVE_INSTANTIATION,
   IMPLICIT_CAST,
   PARAMETER_CHECK,
+  RTI_VALUE,
+  TYPE_ARGUMENT,
 }
 
 /// Use of a [DartType].
@@ -613,9 +612,6 @@ class TypeUse {
       case TypeUseKind.INSTANTIATION:
         sb.write('inst:');
         break;
-      case TypeUseKind.MIRROR_INSTANTIATION:
-        sb.write('mirror:');
-        break;
       case TypeUseKind.NATIVE_INSTANTIATION:
         sb.write('native:');
         break;
@@ -624,6 +620,12 @@ class TypeUse {
         break;
       case TypeUseKind.PARAMETER_CHECK:
         sb.write('param:');
+        break;
+      case TypeUseKind.RTI_VALUE:
+        sb.write('rti:');
+        break;
+      case TypeUseKind.TYPE_ARGUMENT:
+        sb.write('typeArg:');
         break;
     }
     sb.write(type);
@@ -678,14 +680,22 @@ class TypeUse {
     return new TypeUse.internal(type, TypeUseKind.INSTANTIATION);
   }
 
-  /// [type] used in an instantiation through mirrors.
-  factory TypeUse.mirrorInstantiation(InterfaceType type) {
-    return new TypeUse.internal(type, TypeUseKind.MIRROR_INSTANTIATION);
-  }
-
   /// [type] used in a native instantiation.
   factory TypeUse.nativeInstantiation(InterfaceType type) {
     return new TypeUse.internal(type, TypeUseKind.NATIVE_INSTANTIATION);
+  }
+
+  /// [type] used as a direct RTI value.
+  factory TypeUse.constTypeLiteral(DartType type) {
+    return new TypeUse.internal(type, TypeUseKind.RTI_VALUE);
+  }
+
+  /// [type] used directly as a type argument.
+  ///
+  /// The happens during optimization where a type variable can be replaced by
+  /// an invariable type argument derived from a constant receiver.
+  factory TypeUse.typeArgument(DartType type) {
+    return new TypeUse.internal(type, TypeUseKind.TYPE_ARGUMENT);
   }
 
   bool operator ==(other) {

@@ -11,9 +11,7 @@ import '../support/integration_tests.dart';
 main() {
   defineReflectiveSuite(() {
     defineReflectiveTests(FindMemberDeclarationsTest);
-    // TODO(scheglov): Restore similar test coverage when the front-end API
-    // allows it.  See https://github.com/dart-lang/sdk/issues/32258.
-    // defineReflectiveTests(FindMemberDeclarationsTest_UseCFE);
+    defineReflectiveTests(FindMemberDeclarationsTest_UseCFE);
   });
 }
 

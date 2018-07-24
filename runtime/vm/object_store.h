@@ -46,19 +46,21 @@ class ObjectPointerVisitor;
   RW(Type, smi_type)                                                           \
   RW(Class, mint_class)                                                        \
   RW(Type, mint_type)                                                          \
-  RW(Class, bigint_class)                                                      \
   RW(Class, double_class)                                                      \
   RW(Type, double_type)                                                        \
   RW(Type, float32x4_type)                                                     \
   RW(Type, int32x4_type)                                                       \
   RW(Type, float64x2_type)                                                     \
   RW(Type, string_type)                                                        \
-  RW(TypeArguments, type_argument_string)                                      \
   RW(TypeArguments, type_argument_int)                                         \
+  RW(TypeArguments, type_argument_double)                                      \
+  RW(TypeArguments, type_argument_string)                                      \
+  RW(TypeArguments, type_argument_string_dynamic)                              \
+  RW(TypeArguments, type_argument_string_string)                               \
   RW(Class, compiletime_error_class)                                           \
+  RW(Class, pragma_class)                                                      \
   RW(Class, future_class)                                                      \
   RW(Class, completer_class)                                                   \
-  RW(Class, stream_iterator_class)                                             \
   RW(Class, symbol_class)                                                      \
   RW(Class, one_byte_string_class)                                             \
   RW(Class, two_byte_string_class)                                             \
@@ -109,6 +111,7 @@ class ObjectPointerVisitor;
   RW(Function, lookup_port_handler)                                            \
   RW(TypedData, empty_uint32_array)                                            \
   RW(Function, handle_message_function)                                        \
+  RW(Function, growable_list_factory)                                          \
   RW(Function, simple_instance_of_function)                                    \
   RW(Function, simple_instance_of_true_function)                               \
   RW(Function, simple_instance_of_false_function)                              \

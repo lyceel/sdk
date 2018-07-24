@@ -169,7 +169,7 @@ abstract class _LinkedHashMapMixin<K, V> implements _HashBase {
 
   void clear() {
     if (!isEmpty) {
-      _init(_data.length, _hashMask, null, 0);
+      _init(_HashBase._INITIAL_INDEX_SIZE, _hashMask, null, 0);
     }
   }
 
@@ -461,10 +461,6 @@ class _CompactLinkedHashSet<E> extends _HashFieldBase
   static Set<R> _newEmpty<R>() => new _CompactLinkedHashSet<R>();
 
   Set<R> cast<R>() => Set.castFrom<E, R>(this, newSet: _newEmpty);
-
-  @Deprecated("Use cast instead.")
-  Set<R> retype<R>() => cast<R>();
-
   int get length => _usedData - _deletedKeys;
 
   E get first {
@@ -497,7 +493,7 @@ class _CompactLinkedHashSet<E> extends _HashFieldBase
 
   void clear() {
     if (!isEmpty) {
-      _init(_index.length, _hashMask, null, 0);
+      _init(_HashBase._INITIAL_INDEX_SIZE, _hashMask, null, 0);
     }
   }
 
@@ -622,9 +618,6 @@ class _CompactLinkedIdentityHashSet<E> extends _CompactLinkedHashSet<E>
   static Set<R> _newEmpty<R>() => new _CompactLinkedIdentityHashSet<R>();
 
   Set<R> cast<R>() => Set.castFrom<E, R>(this, newSet: _newEmpty);
-
-  @Deprecated("Use cast instead.")
-  Set<R> retype<R>() => cast<R>();
 }
 
 class _CompactLinkedCustomHashSet<E> extends _CompactLinkedHashSet<E> {
@@ -643,10 +636,6 @@ class _CompactLinkedCustomHashSet<E> extends _CompactLinkedHashSet<E> {
       : _validKey = (validKey != null) ? validKey : new _TypeTest<E>().test;
 
   Set<R> cast<R>() => Set.castFrom<E, R>(this);
-
-  @Deprecated("Use cast instead.")
-  Set<R> retype<R>() => cast<R>();
-
   Set<E> toSet() =>
       new _CompactLinkedCustomHashSet<E>(_equality, _hasher, _validKey)
         ..addAll(this);

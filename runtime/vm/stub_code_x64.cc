@@ -12,12 +12,13 @@
 #include "vm/compiler/assembler/disassembler.h"
 #include "vm/compiler/backend/flow_graph_compiler.h"
 #include "vm/compiler/jit/compiler.h"
+#include "vm/constants_x64.h"
 #include "vm/dart_entry.h"
-#include "vm/heap.h"
+#include "vm/heap/heap.h"
+#include "vm/heap/scavenger.h"
 #include "vm/instructions.h"
 #include "vm/object_store.h"
 #include "vm/resolver.h"
-#include "vm/scavenger.h"
 #include "vm/stack_frame.h"
 #include "vm/tags.h"
 #include "vm/type_testing_stubs.h"
@@ -97,7 +98,92 @@ void StubCode::GenerateCallToRuntimeStub(Assembler* assembler) {
   __ movq(Address(THR, Thread::top_exit_frame_info_offset()), Immediate(0));
 
   __ LeaveStubFrame();
+
+  // The following return can jump to a lazy-deopt stub, which assumes RAX
+  // contains a return value and will save it in a GC-visible way.  We therefore
+  // have to ensure RAX does not contain any garbage value left from the C
+  // function we called (which has return type "void").
+  // (See GenerateDeoptimizationSequence::saved_result_slot_from_fp.)
+  __ xorq(RAX, RAX);
   __ ret();
+}
+
+void StubCode::GenerateSharedStub(Assembler* assembler,
+                                  bool save_fpu_registers,
+                                  const RuntimeEntry* target,
+                                  intptr_t self_code_stub_offset_from_thread,
+                                  bool allow_return) {
+  // We want the saved registers to appear like part of the caller's frame, so
+  // we push them before calling EnterStubFrame.
+  __ PushRegisters(kDartAvailableCpuRegs,
+                   save_fpu_registers ? kAllFpuRegistersList : 0);
+
+  const intptr_t kSavedCpuRegisterSlots =
+      Utils::CountOneBitsWord(kDartAvailableCpuRegs);
+
+  const intptr_t kSavedFpuRegisterSlots =
+      save_fpu_registers ? kNumberOfFpuRegisters * kFpuRegisterSize / kWordSize
+                         : 0;
+
+  const intptr_t kAllSavedRegistersSlots =
+      kSavedCpuRegisterSlots + kSavedFpuRegisterSlots;
+
+  // Copy down the return address so the stack layout is correct.
+  __ pushq(Address(RSP, kAllSavedRegistersSlots * kWordSize));
+
+  __ movq(CODE_REG, Address(THR, self_code_stub_offset_from_thread));
+
+  __ EnterStubFrame();
+
+  __ movq(CODE_REG, Address(THR, Thread::call_to_runtime_stub_offset()));
+  __ movq(RBX, Address(THR, Thread::OffsetFromThread(target)));
+  __ movq(R10, Immediate(/*argument_count=*/0));
+  __ call(Address(THR, Thread::call_to_runtime_entry_point_offset()));
+
+  if (!allow_return) {
+    __ Breakpoint();
+    return;
+  }
+  __ LeaveStubFrame();
+
+  // Drop "official" return address -- we can just use the one stored above the
+  // saved registers.
+  __ Drop(1);
+
+  __ PopRegisters(kDartAvailableCpuRegs,
+                  save_fpu_registers ? kAllFpuRegistersList : 0);
+
+  __ ret();
+}
+
+void StubCode::GenerateNullErrorSharedWithoutFPURegsStub(Assembler* assembler) {
+  GenerateSharedStub(assembler, /*save_fpu_registers=*/false,
+                     &kNullErrorRuntimeEntry,
+                     Thread::null_error_shared_without_fpu_regs_stub_offset(),
+                     /*allow_return=*/false);
+}
+
+void StubCode::GenerateNullErrorSharedWithFPURegsStub(Assembler* assembler) {
+  GenerateSharedStub(assembler, /*save_fpu_registers=*/true,
+                     &kNullErrorRuntimeEntry,
+                     Thread::null_error_shared_with_fpu_regs_stub_offset(),
+                     /*allow_return=*/false);
+}
+
+void StubCode::GenerateStackOverflowSharedWithoutFPURegsStub(
+    Assembler* assembler) {
+  GenerateSharedStub(
+      assembler, /*save_fpu_registers=*/false, &kStackOverflowRuntimeEntry,
+      Thread::stack_overflow_shared_without_fpu_regs_stub_offset(),
+      /*allow_return=*/true);
+}
+
+void StubCode::GenerateStackOverflowSharedWithFPURegsStub(
+    Assembler* assembler) {
+  GenerateSharedStub(assembler, /*save_fpu_registers=*/true,
+                     &kStackOverflowRuntimeEntry,
+                     Thread::stack_overflow_shared_with_fpu_regs_stub_offset(),
+                     /*allow_return=*/true);
 }
 
 // Input parameters:
@@ -791,8 +877,8 @@ void StubCode::GenerateInvokeDartCodeStub(Assembler* assembler) {
   __ movq(RAX, Address(THR, Thread::top_exit_frame_info_offset()));
   __ pushq(RAX);
 
-  // The constant kExitLinkSlotFromEntryFp must be kept in sync with the
-  // code below.
+// The constant kExitLinkSlotFromEntryFp must be kept in sync with the
+// code below.
 #if defined(DEBUG)
   {
     Label ok;
@@ -929,9 +1015,10 @@ void StubCode::GenerateInvokeDartCodeFromBytecodeStub(Assembler* assembler) {
   __ movq(Address(THR, Thread::top_resource_offset()), Immediate(0));
   __ movq(RAX, Address(THR, Thread::top_exit_frame_info_offset()));
   __ pushq(RAX);
+  __ movq(Address(THR, Thread::top_exit_frame_info_offset()), Immediate(0));
 
-  // The constant kExitLinkSlotFromEntryFp must be kept in sync with the
-  // code below.
+// The constant kExitLinkSlotFromEntryFp must be kept in sync with the
+// code below.
 #if defined(DEBUG)
   {
     Label ok;
@@ -942,8 +1029,6 @@ void StubCode::GenerateInvokeDartCodeFromBytecodeStub(Assembler* assembler) {
     __ Bind(&ok);
   }
 #endif
-
-  __ movq(Address(THR, Thread::top_exit_frame_info_offset()), Immediate(0));
 
   // Load arguments descriptor array into R10, which is passed to Dart code.
   __ movq(R10, kArgDescReg);
@@ -964,7 +1049,9 @@ void StubCode::GenerateInvokeDartCodeFromBytecodeStub(Assembler* assembler) {
   __ SmiUntag(RBX);
 
   // Compute address of first argument into RDX.
-  ASSERT(kArg0Reg == RDX);
+  if (kArg0Reg != RDX) {  // Different registers on WIN64.
+    __ movq(RDX, kArg0Reg);
+  }
 
   // Set up arguments for the Dart call.
   Label push_arguments;
@@ -1009,7 +1096,7 @@ void StubCode::GenerateInvokeDartCodeFromBytecodeStub(Assembler* assembler) {
   __ ret();
 #else
   __ Stop("Not using interpreter");
-#endif
+#endif  // defined(DART_USE_INTERPRETER)
 }
 
 // Called for inline allocation of contexts.
@@ -1142,22 +1229,13 @@ void StubCode::GenerateAllocateContextStub(Assembler* assembler) {
 // Input parameters:
 //   RDX: Address being stored
 void StubCode::GenerateUpdateStoreBufferStub(Assembler* assembler) {
-  // Save registers being destroyed.
-  __ pushq(RAX);
-  __ pushq(RCX);
-
   Label add_to_buffer;
   // Check whether this object has already been remembered. Skip adding to the
   // store buffer if the object is in the store buffer already.
-  // Spilled: RAX, RCX
   // RDX: Address being stored
-  Label reload;
-  __ Bind(&reload);
-  __ movl(RAX, FieldAddress(RDX, Object::tags_offset()));
-  __ testl(RAX, Immediate(1 << RawObject::kRememberedBit));
+  __ movl(TMP, FieldAddress(RDX, Object::tags_offset()));
+  __ testl(TMP, Immediate(1 << RawObject::kRememberedBit));
   __ j(EQUAL, &add_to_buffer, Assembler::kNearJump);
-  __ popq(RCX);
-  __ popq(RAX);
   __ ret();
 
   // Update the tags that this object has been remembered.
@@ -1166,11 +1244,14 @@ void StubCode::GenerateUpdateStoreBufferStub(Assembler* assembler) {
   // RDX: Address being stored
   // RAX: Current tag value
   __ Bind(&add_to_buffer);
-  __ movl(RCX, RAX);
-  __ orl(RCX, Immediate(1 << RawObject::kRememberedBit));
-  // Compare the tag word with RAX, update to RCX if unchanged.
-  __ LockCmpxchgl(FieldAddress(RDX, Object::tags_offset()), RCX);
-  __ j(NOT_EQUAL, &reload);
+  // lock+orl is an atomic read-modify-write.
+  __ lock();
+  __ orl(FieldAddress(RDX, Object::tags_offset()),
+         Immediate(1 << RawObject::kRememberedBit));
+
+  // Save registers being destroyed.
+  __ pushq(RAX);
+  __ pushq(RCX);
 
   // Load the StoreBuffer block out of the thread. Then load top_ out of the
   // StoreBufferBlock and add the address to the pointers_.
@@ -1182,23 +1263,26 @@ void StubCode::GenerateUpdateStoreBufferStub(Assembler* assembler) {
   // Increment top_ and check for overflow.
   // RCX: top_
   // RAX: StoreBufferBlock
-  Label L;
+  Label overflow;
   __ incq(RCX);
   __ movl(Address(RAX, StoreBufferBlock::top_offset()), RCX);
   __ cmpl(RCX, Immediate(StoreBufferBlock::kSize));
   // Restore values.
   __ popq(RCX);
   __ popq(RAX);
-  __ j(EQUAL, &L, Assembler::kNearJump);
+  __ j(EQUAL, &overflow, Assembler::kNearJump);
   __ ret();
 
   // Handle overflow: Call the runtime leaf function.
-  __ Bind(&L);
+  __ Bind(&overflow);
   // Setup frame, push callee-saved registers.
+  __ pushq(CODE_REG);
+  __ movq(CODE_REG, Address(THR, Thread::update_store_buffer_code_offset()));
   __ EnterCallRuntimeFrame(0);
   __ movq(CallingConventions::kArg1Reg, THR);
   __ CallRuntime(kStoreBufferBlockProcessRuntimeEntry, 1);
   __ LeaveCallRuntimeFrame();
+  __ popq(CODE_REG);
   __ ret();
 }
 
@@ -1788,17 +1872,14 @@ void StubCode::GenerateTwoArgsUnoptimizedStaticCallStub(Assembler* assembler) {
 }
 
 // Stub for compiling a function and jumping to the compiled code.
-// RBX: IC-Data (for methods).
 // R10: Arguments descriptor.
 // RAX: Function.
 void StubCode::GenerateLazyCompileStub(Assembler* assembler) {
   __ EnterStubFrame();
   __ pushq(R10);  // Preserve arguments descriptor array.
-  __ pushq(RBX);  // Preserve IC data object.
   __ pushq(RAX);  // Pass function.
   __ CallRuntime(kCompileFunctionRuntimeEntry, 1);
   __ popq(RAX);  // Restore function.
-  __ popq(RBX);  // Restore IC data array.
   __ popq(R10);  // Restore arguments descriptor array.
   __ LeaveStubFrame();
 
@@ -1810,38 +1891,77 @@ void StubCode::GenerateLazyCompileStub(Assembler* assembler) {
 }
 
 // Stub for interpreting a function call.
-// RBX: IC-Data (for methods).
 // R10: Arguments descriptor.
 // RAX: Function.
 void StubCode::GenerateInterpretCallStub(Assembler* assembler) {
 #if defined(DART_USE_INTERPRETER)
   __ EnterStubFrame();
-  __ movq(RDI, FieldAddress(R10, ArgumentsDescriptor::count_offset()));
-  __ pushq(Immediate(0));  // Setup space on stack for result.
-  __ pushq(RAX);           // Function.
-  __ pushq(RBX);           // ICData/MegamorphicCache.
-  __ pushq(R10);           // Arguments descriptor array.
 
-  // Adjust arguments count.
+#if defined(DEBUG)
+  {
+    Label ok;
+    // Check that we are always entering from Dart code.
+    __ movq(R8, Immediate(VMTag::kDartTagId));
+    __ cmpq(R8, Assembler::VMTagAddress());
+    __ j(EQUAL, &ok, Assembler::kNearJump);
+    __ Stop("Not coming from Dart code.");
+    __ Bind(&ok);
+  }
+#endif
+
+  // Adjust arguments count for type arguments vector.
+  __ movq(R11, FieldAddress(R10, ArgumentsDescriptor::count_offset()));
+  __ SmiUntag(R11);
   __ cmpq(FieldAddress(R10, ArgumentsDescriptor::type_args_len_offset()),
           Immediate(0));
-  __ movq(R10, RDI);
   Label args_count_ok;
   __ j(EQUAL, &args_count_ok, Assembler::kNearJump);
-  __ addq(R10, Immediate(Smi::RawValue(1)));  // Include the type arguments.
+  __ incq(R11);
   __ Bind(&args_count_ok);
 
-  // R10: Smi-tagged arguments array length.
-  PushArrayOfArguments(assembler);
-  const intptr_t kNumArgs = 4;
-  __ CallRuntime(kInterpretCallRuntimeEntry, kNumArgs);
-  __ Drop(kNumArgs);
-  __ popq(RAX);  // Return value.
+  // Compute argv.
+  __ leaq(R12, Address(RBP, R11, TIMES_8, kParamEndSlotFromFp * kWordSize));
+
+  // Indicate decreasing memory addresses of arguments with negative argc.
+  __ negq(R11);
+
+  // Reserve shadow space for args and align frame before entering C++ world.
+  __ subq(RSP, Immediate(5 * kWordSize));
+  if (OS::ActivationFrameAlignment() > 1) {
+    __ andq(RSP, Immediate(~(OS::ActivationFrameAlignment() - 1)));
+  }
+
+  __ movq(CallingConventions::kArg1Reg, RAX);  // Function.
+  __ movq(CallingConventions::kArg2Reg, R10);  // Arguments descriptor.
+  __ movq(CallingConventions::kArg3Reg, R11);  // Negative argc.
+  __ movq(CallingConventions::kArg4Reg, R12);  // Argv.
+
+#if defined(_WIN64)
+  __ movq(Address(RSP, 0 * kWordSize), THR);  // Thread.
+#else
+  __ movq(CallingConventions::kArg5Reg, THR);  // Thread.
+#endif
+  // Save exit frame information to enable stack walking as we are about
+  // to transition to Dart VM C++ code.
+  __ movq(Address(THR, Thread::top_exit_frame_info_offset()), RBP);
+
+  // Mark that the thread is executing VM code.
+  __ movq(RAX, Address(THR, Thread::interpret_call_entry_point_offset()));
+  __ movq(Assembler::VMTagAddress(), RAX);
+
+  __ call(RAX);
+
+  // Mark that the thread is executing Dart code.
+  __ movq(Assembler::VMTagAddress(), Immediate(VMTag::kDartTagId));
+
+  // Reset exit frame information in Isolate structure.
+  __ movq(Address(THR, Thread::top_exit_frame_info_offset()), Immediate(0));
+
   __ LeaveStubFrame();
   __ ret();
 #else
   __ Stop("Not using interpreter");
-#endif
+#endif  // defined(DART_USE_INTERPRETER)
 }
 
 // RBX: Contains an ICData.
@@ -2121,12 +2241,56 @@ void TypeTestingStubGenerator::BuildOptimizedTypeArgumentValueCheck(
       kFunctionTypeArgumentsReg, kOwnTypeArgumentValue, check_failed);
 }
 
+static void InvokeTypeCheckFromTypeTestStub(Assembler* assembler,
+                                            TypeCheckMode mode) {
+  const Register kInstanceReg = RAX;
+  const Register kInstantiatorTypeArgumentsReg = RDX;
+  const Register kFunctionTypeArgumentsReg = RCX;
+  const Register kDstTypeReg = RBX;
+  const Register kSubtypeTestCacheReg = R9;
+
+  __ PushObject(Object::null_object());  // Make room for result.
+  __ pushq(kInstanceReg);
+  __ pushq(kDstTypeReg);
+  __ pushq(kInstantiatorTypeArgumentsReg);
+  __ pushq(kFunctionTypeArgumentsReg);
+  __ PushObject(Object::null_object());
+  __ pushq(kSubtypeTestCacheReg);
+  __ PushObject(Smi::ZoneHandle(Smi::New(mode)));
+  __ CallRuntime(kTypeCheckRuntimeEntry, 7);
+  __ Drop(1);
+  __ popq(kSubtypeTestCacheReg);
+  __ Drop(1);
+  __ popq(kFunctionTypeArgumentsReg);
+  __ popq(kInstantiatorTypeArgumentsReg);
+  __ popq(kDstTypeReg);
+  __ popq(kInstanceReg);
+  __ Drop(1);  // Discard return value.
+}
+
+void StubCode::GenerateLazySpecializeTypeTestStub(Assembler* assembler) {
+  const Register kInstanceReg = RAX;
+
+  Label done;
+
+  // Fast case for 'null'.
+  __ CompareObject(kInstanceReg, Object::null_object());
+  __ BranchIf(EQUAL, &done);
+
+  __ movq(CODE_REG,
+          Address(THR, Thread::lazy_specialize_type_test_stub_offset()));
+  __ EnterStubFrame();
+  InvokeTypeCheckFromTypeTestStub(assembler, kTypeCheckFromLazySpecializeStub);
+  __ LeaveStubFrame();
+
+  __ Bind(&done);
+  __ Ret();
+}
+
 void StubCode::GenerateSlowTypeTestStub(Assembler* assembler) {
   Label done, call_runtime;
 
   const Register kInstanceReg = RAX;
-  const Register kInstantiatorTypeArgumentsReg = RDX;
-  const Register kFunctionTypeArgumentsReg = RCX;
   const Register kDstTypeReg = RBX;
   const Register kSubtypeTestCacheReg = R9;
 
@@ -2191,21 +2355,8 @@ void StubCode::GenerateSlowTypeTestStub(Assembler* assembler) {
   __ CompareObject(kDstTypeReg, Type::Handle(Type::ObjectType()));
   __ BranchIf(EQUAL, &done);
 
-  __ PushObject(Object::null_object());  // Make room for result.
-  __ pushq(kInstanceReg);
-  __ pushq(kDstTypeReg);
-  __ pushq(kInstantiatorTypeArgumentsReg);
-  __ pushq(kFunctionTypeArgumentsReg);
-  __ PushObject(Object::null_object());
-  __ pushq(kSubtypeTestCacheReg);
-  __ CallRuntime(kTypeCheckRuntimeEntry, 6);
-  __ popq(kSubtypeTestCacheReg);
-  __ Drop(1);
-  __ popq(kFunctionTypeArgumentsReg);
-  __ popq(kInstantiatorTypeArgumentsReg);
-  __ popq(kDstTypeReg);
-  __ popq(kInstanceReg);
-  __ Drop(1);  // Discard return value.
+  InvokeTypeCheckFromTypeTestStub(assembler, kTypeCheckFromSlowStub);
+
   __ Bind(&done);
   __ LeaveStubFrame();
   __ Ret();
@@ -2251,15 +2402,18 @@ void StubCode::GenerateRunExceptionHandlerStub(Assembler* assembler) {
   __ movq(CallingConventions::kArg1Reg,
           Address(THR, Thread::resume_pc_offset()));
 
+  ASSERT(Thread::CanLoadFromThread(Object::null_object()));
+  __ movq(TMP, Address(THR, Thread::OffsetFromThread(Object::null_object())));
+
   // Load the exception from the current thread.
   Address exception_addr(THR, Thread::active_exception_offset());
   __ movq(kExceptionObjectReg, exception_addr);
-  __ movq(exception_addr, Immediate(0));
+  __ movq(exception_addr, TMP);
 
   // Load the stacktrace from the current thread.
   Address stacktrace_addr(THR, Thread::active_stacktrace_offset());
   __ movq(kStackTraceObjectReg, stacktrace_addr);
-  __ movq(stacktrace_addr, Immediate(0));
+  __ movq(stacktrace_addr, TMP);
 
   __ jmp(CallingConventions::kArg1Reg);  // Jump to continuation point.
 }
@@ -2305,12 +2459,11 @@ void StubCode::GenerateOptimizeFunctionStub(Assembler* assembler) {
 // checks for boxed numbers.
 // Left and right are pushed on stack.
 // Return ZF set.
-// Note: A Mint cannot contain a value that would fit in Smi, a Bigint
-// cannot contain a value that fits in Mint or Smi.
+// Note: A Mint cannot contain a value that would fit in Smi.
 static void GenerateIdenticalWithNumberCheckStub(Assembler* assembler,
                                                  const Register left,
                                                  const Register right) {
-  Label reference_compare, done, check_mint, check_bigint;
+  Label reference_compare, done, check_mint;
   // If any of the arguments is Smi do reference compare.
   __ testq(left, Immediate(kSmiTagMask));
   __ j(ZERO, &reference_compare);
@@ -2330,27 +2483,12 @@ static void GenerateIdenticalWithNumberCheckStub(Assembler* assembler,
 
   __ Bind(&check_mint);
   __ CompareClassId(left, kMintCid);
-  __ j(NOT_EQUAL, &check_bigint, Assembler::kNearJump);
+  __ j(NOT_EQUAL, &reference_compare, Assembler::kNearJump);
   __ CompareClassId(right, kMintCid);
   __ j(NOT_EQUAL, &done, Assembler::kFarJump);
   __ movq(left, FieldAddress(left, Mint::value_offset()));
   __ cmpq(left, FieldAddress(right, Mint::value_offset()));
   __ jmp(&done, Assembler::kFarJump);
-
-  __ Bind(&check_bigint);
-  __ CompareClassId(left, kBigintCid);
-  __ j(NOT_EQUAL, &reference_compare, Assembler::kFarJump);
-  __ CompareClassId(right, kBigintCid);
-  __ j(NOT_EQUAL, &done, Assembler::kFarJump);
-  __ EnterStubFrame();
-  __ ReserveAlignedFrameSpace(0);
-  __ movq(CallingConventions::kArg1Reg, left);
-  __ movq(CallingConventions::kArg2Reg, right);
-  __ CallRuntime(kBigintCompareRuntimeEntry, 2);
-  // Result in RAX, 0 means equal.
-  __ LeaveStubFrame();
-  __ cmpq(RAX, Immediate(0));
-  __ jmp(&done);
 
   __ Bind(&reference_compare);
   __ cmpq(left, right);

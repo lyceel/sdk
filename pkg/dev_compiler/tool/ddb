@@ -18,6 +18,10 @@ import 'dart:io';
 import 'package:args/args.dart' show ArgParser;
 import 'package:path/path.dart' as path;
 
+// TODO(vsm): Remove this once we stop ignoring.  It's off here, but
+// configurable for manual testing.
+const ignoreWhitelistedErrors = false;
+
 void main(List<String> args) {
   // Parse flags.
   var parser = new ArgParser()
@@ -55,7 +59,11 @@ void main(List<String> args) {
   ProcessResult runDdc(String command, List<String> args) {
     if (debug) {
       // Use unbuilt script.  This only works from a source checkout.
-      args.insertAll(0, ['-c', path.join(ddcPath, 'bin', '${command}.dart')]);
+      args.insertAll(0, [
+        '--preview-dart-2',
+        '--enable-asserts',
+        path.join(ddcPath, 'bin', '${command}.dart')
+      ]);
       command = dartBinary;
     } else {
       // Use built snapshot.
@@ -82,11 +90,28 @@ void main(List<String> args) {
       mod = 'amd';
       break;
   }
-  var sdkJsPath = path.join(dartSdk, 'lib', 'dev_compiler', mod);
 
+  String sdkJsPath;
+  String requirePath;
+  String ddcSdk;
+  if (debug) {
+    var sdkRoot = path.dirname(path.dirname(ddcPath));
+    var buildDir = path.join(sdkRoot, Platform.isMacOS ? 'xcodebuild' : 'out');
+    var genDir = path.join(buildDir, 'ReleaseX64', 'gen', 'utils', 'dartdevc');
+    sdkJsPath = path.join(buildDir, 'ReleaseX64', 'gen', 'utils', 'dartdevc',
+        kernel ? 'kernel' : 'js', mod);
+    requirePath = path.join(sdkRoot, 'third_party', 'requirejs');
+    ddcSdk = path.join(buildDir, 'ReleaseX64', 'gen', 'utils', 'dartdevc',
+        kernel ? path.join('kernel', 'ddc_sdk.dill') : 'ddc_sdk.sum');
+  } else {
+    var suffix = kernel ? path.join('kernel', mod) : mod;
+    sdkJsPath = path.join(dartSdk, 'lib', 'dev_compiler', suffix);
+    requirePath = sdkJsPath;
+    ddcSdk = path.join(
+        dartSdk, 'lib', '_internal', kernel ? 'ddc_sdk.dill' : 'ddc_sdk.sum');
+  }
   ProcessResult result;
   if (kernel) {
-    var ddcSdk = path.join(dartSdk, 'lib', '_internal', 'ddc_sdk.dill');
     result = runDdc('dartdevk', [
       '--modules=$mod',
       '--dart-sdk-summary=$ddcSdk',
@@ -97,6 +122,7 @@ void main(List<String> args) {
   } else {
     result = runDdc('dartdevc', [
       '--modules=$mod',
+      '--dart-sdk-summary=$ddcSdk',
       '--library-root=$libRoot',
       '-o',
       '$libRoot/$basename.js',
@@ -126,7 +152,7 @@ void main(List<String> args) {
     }
 
     var html = """
-<script src='$sdkJsPath/require.js'></script>
+<script src='$requirePath/require.js'></script>
 <script>
   require.config({
     baseUrl: '$libRoot',
@@ -139,7 +165,7 @@ void main(List<String> args) {
         function(sdk, app) {
     'use strict';
     sdk._debugger.registerDevtoolsFormatter();
-    sdk.dart.ignoreWhitelistedErrors(false);
+    sdk.dart.ignoreWhitelistedErrors($ignoreWhitelistedErrors);
     sdk._isolate_helper.startRootIsolate(() => {}, []);
     app.$basename.main();
   });
@@ -162,7 +188,7 @@ void main(List<String> args) {
     }
     let sdk = require(\"dart_sdk\");
     let main = require(\"./$basename\").$basename.main;
-    sdk.dart.ignoreWhitelistedErrors(false);
+    sdk.dart.ignoreWhitelistedErrors($ignoreWhitelistedErrors);
     try {
       sdk._isolate_helper.startRootIsolate(main, []);
     } catch(e) {
@@ -186,7 +212,7 @@ void main(List<String> args) {
     import { dart, _isolate_helper } from '$sdkJsPath/dart_sdk.js';
     import { $basename } from '$basename.js';
     let main = $basename.main;
-    dart.ignoreWhitelistedErrors(false);
+    dart.ignoreWhitelistedErrors($ignoreWhitelistedErrors);
     try {
       _isolate_helper.startRootIsolate(() => {}, []);
       main();

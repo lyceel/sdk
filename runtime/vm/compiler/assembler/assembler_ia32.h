@@ -644,6 +644,8 @@ class Assembler : public ValueObject {
   void Call(const StubEntry& stub_entry, bool movable_target = false);
   void CallToRuntime();
 
+  void CallNullErrorShared(bool save_fpu_registers) { UNREACHABLE(); }
+
   void Jmp(const StubEntry& stub_entry);
   void J(Condition condition, const StubEntry& stub_entry);
 
@@ -670,13 +672,15 @@ class Assembler : public ValueObject {
                                            intptr_t cid,
                                            intptr_t index_scale,
                                            Register array,
-                                           intptr_t index);
+                                           intptr_t index,
+                                           intptr_t extra_disp = 0);
 
   static Address ElementAddressForRegIndex(bool is_external,
                                            intptr_t cid,
                                            intptr_t index_scale,
                                            Register array,
-                                           Register index);
+                                           Register index,
+                                           intptr_t extra_disp = 0);
 
   static Address VMTagAddress() {
     return Address(THR, Thread::vm_tag_offset());

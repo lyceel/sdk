@@ -235,7 +235,7 @@ class BoolConstantExpression extends ConstantExpression {
 
 /// Integer literal constant.
 class IntConstantExpression extends ConstantExpression {
-  final int intValue;
+  final BigInt intValue;
 
   IntConstantExpression(this.intValue);
 
@@ -1144,6 +1144,15 @@ class BinaryConstantExpression extends ConstantExpression {
           });
           isValid = false;
         }
+        if (isValid &&
+            (operator.kind == BinaryOperatorKind.IDIV ||
+                operator.kind == BinaryOperatorKind.MOD)) {
+          if (rightValue.isZero) {
+            environment.reportError(right, MessageKind.INVALID_CONSTANT_DIV,
+                {'left': left, 'right': right, 'operator': operator});
+            isValid = false;
+          }
+        }
         break;
       case BinaryOperatorKind.SHL:
       case BinaryOperatorKind.SHR:
@@ -1167,6 +1176,16 @@ class BinaryConstantExpression extends ConstantExpression {
             'operator': operator
           });
           isValid = false;
+        }
+        if (isValid &&
+            (operator.kind == BinaryOperatorKind.SHL ||
+                operator.kind == BinaryOperatorKind.SHR)) {
+          IntConstantValue shift = rightValue;
+          if (shift.intValue < BigInt.zero) {
+            environment.reportError(right, MessageKind.INVALID_CONSTANT_SHIFT,
+                {'left': left, 'right': right, 'operator': operator});
+            isValid = false;
+          }
         }
         break;
       case BinaryOperatorKind.LOGICAL_AND:
@@ -1229,6 +1248,8 @@ class BinaryConstantExpression extends ConstantExpression {
           if (value != null) {
             return value;
           }
+          environment
+              .reportError(this, MessageKind.NOT_A_COMPILE_TIME_CONSTANT, {});
       }
     }
     return new NonConstantValue();
@@ -1533,7 +1554,8 @@ class StringLengthConstantExpression extends ConstantExpression {
       return new NonConstantValue();
     } else {
       StringConstantValue stringValue = value;
-      return constantSystem.createInt(stringValue.stringValue.length);
+      return constantSystem
+          .createInt(new BigInt.from(stringValue.stringValue.length));
     }
   }
 
@@ -1907,9 +1929,9 @@ class IntFromEnvironmentConstantExpression
       StringConstantValue nameStringConstantValue = nameConstantValue;
       String text =
           environment.readFromEnvironment(nameStringConstantValue.stringValue);
-      int value;
+      BigInt value;
       if (text != null) {
-        value = int.parse(text, onError: (_) => null);
+        value = BigInt.tryParse(text);
       }
       if (value == null) {
         return defaultConstantValue;

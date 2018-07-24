@@ -25,12 +25,12 @@ void main() {
       return elementEnvironment.lookupLibrary(Uri.parse(name));
     }
 
-    var outputUnitForEntity =
-        compiler.backend.outputUnitData.outputUnitForEntity;
+    var outputUnitForMember =
+        compiler.backend.outputUnitData.outputUnitForMember;
 
     dynamic lib1 = lookupLibrary("memory:lib1.dart");
     var foo1 = elementEnvironment.lookupLibraryMember(lib1, "finalVar");
-    var ou_lib1 = outputUnitForEntity(foo1);
+    var ou_lib1 = outputUnitForMember(foo1);
 
     String mainOutput = collector.getOutput("", OutputType.js);
     String lib1Output =
@@ -51,7 +51,7 @@ void main() {
 }
 
 // Make sure that deferred constants are not inlined into the main hunk.
-const Map MEMORY_SOURCE_FILES = const {
+const Map<String, String> MEMORY_SOURCE_FILES = const {
   "main.dart": """
 import "dart:async";
 

@@ -22,6 +22,18 @@ class ParseError {
   String toString() => '$filename:$byteIndex: $message at $path';
 }
 
+class InvalidKernelVersionError {
+  final String message;
+
+  InvalidKernelVersionError(this.message);
+}
+
+class CanonicalNameError {
+  final String message;
+
+  CanonicalNameError(this.message);
+}
+
 class _ComponentIndex {
   static const numberOfFixedFields = 9;
 
@@ -48,7 +60,7 @@ class BinaryBuilder {
   int _byteOffset = 0;
   final List<String> _stringTable = <String>[];
   final List<Uri> _sourceUriTable = <Uri>[];
-  List<Constant> _constantTable;
+  Map<int, Constant> _constantTable = <int, Constant>{};
   List<CanonicalName> _linkTable;
   int _transformerFlags = 0;
   Library _currentLibrary;
@@ -175,9 +187,9 @@ class BinaryBuilder {
 
   void readConstantTable() {
     final int length = readUInt();
-    _constantTable = new List<Constant>(length);
+    final int startOffset = byteOffset;
     for (int i = 0; i < length; i++) {
-      _constantTable[i] = readConstantTableEntry();
+      _constantTable[byteOffset - startOffset] = readConstantTableEntry();
     }
   }
 
@@ -252,8 +264,8 @@ class BinaryBuilder {
   }
 
   Constant readConstantReference() {
-    final int index = readUInt();
-    Constant constant = _constantTable[index];
+    final int offset = readUInt();
+    Constant constant = _constantTable[offset];
     assert(constant != null);
     return constant;
   }
@@ -390,7 +402,7 @@ class BinaryBuilder {
   /// computed ahead of time.
   ///
   /// The input bytes may contain multiple files concatenated.
-  void readComponent(Component component) {
+  void readComponent(Component component, {bool checkCanonicalNames: false}) {
     List<int> componentFileSizes = _indexComponents();
     if (componentFileSizes.length > 1) {
       _disableLazyReading = true;
@@ -398,6 +410,26 @@ class BinaryBuilder {
     int componentFileIndex = 0;
     while (_byteOffset < _bytes.length) {
       _readOneComponent(component, componentFileSizes[componentFileIndex]);
+      ++componentFileIndex;
+    }
+
+    if (checkCanonicalNames) {
+      _checkCanonicalNameChildren(component.root);
+    }
+  }
+
+  /// Deserializes the source and stores it in [component].
+  ///
+  /// The input bytes may contain multiple files concatenated.
+  void readComponentSource(Component component) {
+    List<int> componentFileSizes = _indexComponents();
+    if (componentFileSizes.length > 1) {
+      _disableLazyReading = true;
+    }
+    int componentFileIndex = 0;
+    while (_byteOffset < _bytes.length) {
+      _readOneComponentSource(
+          component, componentFileSizes[componentFileIndex]);
       ++componentFileIndex;
     }
   }
@@ -410,7 +442,8 @@ class BinaryBuilder {
   ///
   /// This should *only* be used when there is a reason to not allow
   /// concatenated files.
-  void readSingleFileComponent(Component component) {
+  void readSingleFileComponent(Component component,
+      {bool checkCanonicalNames: false}) {
     List<int> componentFileSizes = _indexComponents();
     if (componentFileSizes.isEmpty) throw "Invalid component data.";
     _readOneComponent(component, componentFileSizes[0]);
@@ -423,6 +456,48 @@ class BinaryBuilder {
         }
       }
       throw 'Unrecognized bytes following component data';
+    }
+
+    if (checkCanonicalNames) {
+      _checkCanonicalNameChildren(component.root);
+    }
+  }
+
+  void _checkCanonicalNameChildren(CanonicalName parent) {
+    for (CanonicalName child in parent.children) {
+      if (child.name != '@methods' &&
+          child.name != '@typedefs' &&
+          child.name != '@fields' &&
+          child.name != '@getters' &&
+          child.name != '@setters' &&
+          child.name != '@factories' &&
+          child.name != '@constructors') {
+        bool checkReferenceNode = true;
+        if (child.reference == null) {
+          // OK for "if private: URI of library" part of "Qualified name"...
+          Iterable<CanonicalName> children = child.children;
+          if (parent.parent != null &&
+              children.isNotEmpty &&
+              children.first.name.startsWith("_")) {
+            // OK then.
+            checkReferenceNode = false;
+          } else {
+            throw new CanonicalNameError(
+                "Null reference (${child.name}) ($child).");
+          }
+        }
+        if (checkReferenceNode) {
+          if (child.reference.canonicalName != child) {
+            throw new CanonicalNameError(
+                "Canonical name and reference doesn't agree.");
+          }
+          if (child.reference.node == null) {
+            throw new CanonicalNameError(
+                "Reference is null (${child.name}) ($child).");
+          }
+        }
+      }
+      _checkCanonicalNameChildren(child);
     }
   }
 
@@ -468,7 +543,7 @@ class BinaryBuilder {
     return result;
   }
 
-  void _readOneComponent(Component component, int componentFileSize) {
+  void _readOneComponentSource(Component component, int componentFileSize) {
     _componentStartOffset = _byteOffset;
 
     final int magic = readUint32();
@@ -480,6 +555,32 @@ class BinaryBuilder {
     final int formatVersion = readUint32();
     if (formatVersion != Tag.BinaryFormatVersion) {
       throw fail('Invalid kernel binary format version '
+          '(found ${formatVersion}, expected ${Tag.BinaryFormatVersion})');
+    }
+
+    // Read component index from the end of this ComponentFiles serialized data.
+    _ComponentIndex index = _readComponentIndex(componentFileSize);
+
+    _byteOffset = index.binaryOffsetForSourceTable;
+    Map<Uri, Source> uriToSource = readUriToSource();
+    component.uriToSource.addAll(uriToSource);
+
+    _byteOffset = _componentStartOffset + componentFileSize;
+  }
+
+  void _readOneComponent(Component component, int componentFileSize) {
+    _componentStartOffset = _byteOffset;
+
+    final int magic = readUint32();
+    if (magic != Tag.ComponentFile) {
+      throw fail('This is not a binary dart file. '
+          'Magic number was: ${magic.toRadixString(16)}');
+    }
+
+    final int formatVersion = readUint32();
+    if (formatVersion != Tag.BinaryFormatVersion) {
+      throw new InvalidKernelVersionError(
+          'Invalid kernel binary format version '
           '(found ${formatVersion}, expected ${Tag.BinaryFormatVersion})');
     }
 
@@ -803,13 +904,12 @@ class BinaryBuilder {
     }
 
     var fileUri = readUriReference();
+    node.startFileOffset = readOffset();
     node.fileOffset = readOffset();
     node.fileEndOffset = readOffset();
     int flags = readByte();
-    node.isAbstract = flags & 0x1 != 0;
-    node.isEnum = flags & 0x2 != 0;
-    node.isSyntheticMixinImplementation = flags & 0x4 != 0;
-    int levelIndex = (flags >> 3) & 0x3;
+    node.flags = flags & ~Class.LevelMask;
+    int levelIndex = flags & Class.LevelMask;
     var level = ClassLevel.values[levelIndex + 1];
     if (level.index >= node.level.index) {
       node.level = level;
@@ -914,6 +1014,7 @@ class BinaryBuilder {
       node = new Constructor(null, reference: reference);
     }
     var fileUri = readUriReference();
+    var startFileOffset = readOffset();
     var fileOffset = readOffset();
     var fileEndOffset = readOffset();
     var flags = readByte();
@@ -935,6 +1036,7 @@ class BinaryBuilder {
     var transformerFlags = getAndResetTransformerFlags();
     assert(((_) => true)(debugPath.removeLast()));
     if (shouldWriteData) {
+      node.startFileOffset = startFileOffset;
       node.fileOffset = fileOffset;
       node.fileEndOffset = fileEndOffset;
       node.flags = flags;
@@ -958,6 +1060,7 @@ class BinaryBuilder {
       node = new Procedure(null, null, null, reference: reference);
     }
     var fileUri = readUriReference();
+    var startFileOffset = readOffset();
     var fileOffset = readOffset();
     var fileEndOffset = readOffset();
     int kindIndex = readByte();
@@ -982,6 +1085,7 @@ class BinaryBuilder {
     var transformerFlags = getAndResetTransformerFlags();
     assert(((_) => true)(debugPath.removeLast()));
     if (shouldWriteData) {
+      node.startFileOffset = startFileOffset;
       node.fileOffset = fileOffset;
       node.fileEndOffset = fileEndOffset;
       node.kind = kind;
@@ -1062,13 +1166,17 @@ class BinaryBuilder {
         return new FieldInitializer.byReference(reference, value)
           ..isSynthetic = isSynthetic;
       case Tag.SuperInitializer:
+        int offset = readOffset();
         var reference = readMemberReference();
         var arguments = readArguments();
         return new SuperInitializer.byReference(reference, arguments)
-          ..isSynthetic = isSynthetic;
+          ..isSynthetic = isSynthetic
+          ..fileOffset = offset;
       case Tag.RedirectingInitializer:
+        int offset = readOffset();
         return new RedirectingInitializer.byReference(
-            readMemberReference(), readArguments());
+            readMemberReference(), readArguments())
+          ..fileOffset = offset;
       case Tag.LocalInitializer:
         return new LocalInitializer(readAndPushVariableDeclaration());
       case Tag.AssertInitializer:
@@ -1835,6 +1943,7 @@ class BinaryBuilder {
         var annotation = annotations[i];
         annotation.parent = node;
       }
+      node.annotations = annotations;
     }
     return node;
   }

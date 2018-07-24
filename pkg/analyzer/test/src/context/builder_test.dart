@@ -629,24 +629,8 @@ b:${pathContext.toUri(packageB)}
     expect(sdk, isNotNull);
   }
 
-  void test_findSdk_noPackageMap_html_spec() {
-    DartSdk sdk = builder.findSdk(
-        null,
-        new AnalysisOptionsImpl()
-          ..previewDart2 = false
-          ..strongMode = false);
-    expect(sdk, isNotNull);
-    Source htmlSource = sdk.mapDartUri('dart:html');
-    expect(
-        htmlSource.fullName,
-        resourceProvider
-            .convertPath('/sdk/lib/html/dartium/html_dartium.dart'));
-    expect(htmlSource.exists(), isTrue);
-  }
-
   void test_findSdk_noPackageMap_html_strong() {
-    DartSdk sdk =
-        builder.findSdk(null, new AnalysisOptionsImpl()..strongMode = true);
+    DartSdk sdk = builder.findSdk(null, new AnalysisOptionsImpl());
     expect(sdk, isNotNull);
     Source htmlSource = sdk.mapDartUri('dart:html');
     expect(
@@ -692,35 +676,6 @@ linter:
     AnalysisOptionsImpl expected = new AnalysisOptionsImpl();
     expected.lint = true;
     expected.lintRules = <Linter>[_mockLintRule];
-    String packagesFilePath =
-        resourceProvider.convertPath('/some/directory/path/.packages');
-    createFile(packagesFilePath, 'flutter:/pkg/flutter/lib/');
-    String optionsFilePath = resourceProvider
-        .convertPath('/pkg/flutter/lib/analysis_options_user.yaml');
-    createFile(optionsFilePath, '''
-linter:
-  rules:
-    - mock_lint_rule
-''');
-    String projPath = resourceProvider.convertPath('/some/directory/path');
-    AnalysisOptions options = builder.getAnalysisOptions(projPath);
-    _expectEqualOptions(options, expected);
-  }
-
-  void test_getAnalysisOptions_default_flutter_disabled() {
-    _defineMockLintRules();
-    ArgParser argParser = new ArgParser();
-    defineAnalysisArguments(argParser);
-    ArgResults argResults =
-        argParser.parse(['--no-$packageDefaultAnalysisOptions']);
-
-    builderOptions = createContextBuilderOptions(argResults);
-    expect(builderOptions.packageDefaultAnalysisOptions, isFalse);
-    builder = new ContextBuilder(resourceProvider, sdkManager, contentCache,
-        options: builderOptions);
-
-    AnalysisOptionsImpl expected = new AnalysisOptionsImpl();
-
     String packagesFilePath =
         resourceProvider.convertPath('/some/directory/path/.packages');
     createFile(packagesFilePath, 'flutter:/pkg/flutter/lib/');
@@ -788,7 +743,6 @@ analyzer:
     defineAnalysisArguments(argParser);
     ArgResults argResults = argParser.parse([]);
     builderOptions = createContextBuilderOptions(argResults);
-    expect(builderOptions.packageDefaultAnalysisOptions, isTrue);
     builder = new ContextBuilder(resourceProvider, sdkManager, contentCache,
         options: builderOptions);
     AnalysisOptionsImpl expected = new AnalysisOptionsImpl();
@@ -891,7 +845,7 @@ linter:
     - empty_constructor_bodies
 ''');
 
-    ContextRoot root = new ContextRoot(path, []);
+    ContextRoot root = new ContextRoot(path, [], pathContext: pathContext);
     builder.getAnalysisOptions(path, contextRoot: root);
     expect(root.optionsFilePath, equals(filePath));
   }

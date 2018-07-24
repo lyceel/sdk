@@ -36,18 +36,6 @@ class IsolateData {
               AppSnapshot* app_snapshot);
   ~IsolateData();
 
-  Dart_Handle builtin_lib() const {
-    ASSERT(builtin_lib_ != NULL);
-    ASSERT(!Dart_IsError(builtin_lib_));
-    return builtin_lib_;
-  }
-  void set_builtin_lib(Dart_Handle lib) {
-    ASSERT(builtin_lib_ == NULL);
-    ASSERT(lib != NULL);
-    ASSERT(!Dart_IsError(lib));
-    builtin_lib_ = Dart_NewPersistentHandle(lib);
-  }
-
   char* script_url;
   char* package_root;
   char* packages_file;
@@ -69,6 +57,18 @@ class IsolateData {
     packages_file = strdup(packages_file_);
   }
 
+  const char* resolved_packages_config() const {
+    return resolved_packages_config_;
+  }
+
+  void set_resolved_packages_config(const char* packages_config) {
+    if (resolved_packages_config_ != NULL) {
+      free(resolved_packages_config_);
+      resolved_packages_config_ = NULL;
+    }
+    resolved_packages_config_ = strdup(packages_config);
+  }
+
   // While loading a loader is associated with the isolate.
   bool HasLoader() const { return loader_ != NULL; }
   Loader* loader() const {
@@ -87,10 +87,10 @@ class IsolateData {
   void OnIsolateShutdown();
 
  private:
-  Dart_Handle builtin_lib_;
   Loader* loader_;
   AppSnapshot* app_snapshot_;
   MallocGrowableArray<char*>* dependencies_;
+  char* resolved_packages_config_;
   uint8_t* kernel_buffer_;
   intptr_t kernel_buffer_size_;
   bool owns_kernel_buffer_;

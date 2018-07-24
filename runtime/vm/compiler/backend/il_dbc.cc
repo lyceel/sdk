@@ -42,6 +42,7 @@ DECLARE_FLAG(int, optimization_counter_threshold);
   M(ExtractNthOutput)                                                          \
   M(BinaryUint32Op)                                                            \
   M(ShiftUint32Op)                                                             \
+  M(SpeculativeShiftUint32Op)                                                  \
   M(UnaryUint32Op)                                                             \
   M(UnboxedIntConverter)
 
@@ -59,6 +60,7 @@ DECLARE_FLAG(int, optimization_counter_threshold);
   M(Int64ToDouble)                                                             \
   M(BinaryInt64Op)                                                             \
   M(ShiftInt64Op)                                                              \
+  M(SpeculativeShiftInt64Op)                                                   \
   M(UnaryInt64Op)                                                              \
   M(CheckedSmiOp)                                                              \
   M(CheckedSmiComparison)                                                      \
@@ -328,19 +330,17 @@ EMIT_NATIVE_CODE(PushArgument, 1) {
 
 EMIT_NATIVE_CODE(LoadLocal, 0) {
   ASSERT(!compiler->is_optimizing());
-  ASSERT(local().index() != 0);
-  __ Push((local().index() > 0) ? (-local().index()) : (-local().index() - 1));
+  const intptr_t slot_index = FrameSlotForVariable(&local());
+  __ Push(LocalVarIndex(0, slot_index));
 }
 
 EMIT_NATIVE_CODE(StoreLocal, 0) {
   ASSERT(!compiler->is_optimizing());
-  ASSERT(local().index() != 0);
+  const intptr_t slot_index = FrameSlotForVariable(&local());
   if (HasTemp()) {
-    __ StoreLocal((local().index() > 0) ? (-local().index())
-                                        : (-local().index() - 1));
+    __ StoreLocal(LocalVarIndex(0, slot_index));
   } else {
-    __ PopLocal((local().index() > 0) ? (-local().index())
-                                      : (-local().index() - 1));
+    __ PopLocal(LocalVarIndex(0, slot_index));
   }
 }
 
@@ -1184,69 +1184,19 @@ EMIT_NATIVE_CODE(CatchBlockEntry, 0) {
   if (HasParallelMove()) {
     compiler->parallel_move_resolver()->EmitNativeCode(parallel_move());
   }
-
-  Register context_reg = kNoRegister;
-
-  // Auxiliary variables introduced by the try catch can be captured if we are
-  // inside a function with yield/resume points. In this case we first need
-  // to restore the context to match the context at entry into the closure.
-  if (should_restore_closure_context()) {
-    const ParsedFunction& parsed_function = compiler->parsed_function();
-
-    ASSERT(parsed_function.function().IsClosureFunction());
-    LocalScope* scope = parsed_function.node_sequence()->scope();
-
-    LocalVariable* closure_parameter = scope->VariableAt(0);
-    ASSERT(!closure_parameter->is_captured());
-
-    const LocalVariable& current_context_var =
-        *parsed_function.current_context_var();
-
-    context_reg = compiler->is_optimizing()
-                      ? compiler->CatchEntryRegForVariable(current_context_var)
-                      : LocalVarIndex(0, current_context_var.index());
-
-    Register closure_reg;
-    if (closure_parameter->index() > 0) {
-      __ Move(context_reg, LocalVarIndex(0, closure_parameter->index()));
-      closure_reg = context_reg;
-    } else {
-      closure_reg = LocalVarIndex(0, closure_parameter->index());
-    }
-
-    __ LoadField(context_reg, closure_reg,
-                 Closure::context_offset() / kWordSize);
-  }
-
-  if (exception_var().is_captured()) {
-    ASSERT(stacktrace_var().is_captured());
-    ASSERT(context_reg != kNoRegister);
-    // This will be SP[1] register so we are free to use it as a temporary.
-    const Register temp = compiler->StackSize();
-    __ MoveSpecial(temp, Simulator::kExceptionSpecialIndex);
-    __ StoreField(context_reg,
-                  Context::variable_offset(exception_var().index()) / kWordSize,
-                  temp);
-    __ MoveSpecial(temp, Simulator::kStackTraceSpecialIndex);
-    __ StoreField(
-        context_reg,
-        Context::variable_offset(stacktrace_var().index()) / kWordSize, temp);
-  } else {
-    if (compiler->is_optimizing()) {
-      const intptr_t exception_reg =
-          compiler->CatchEntryRegForVariable(exception_var());
-      const intptr_t stacktrace_reg =
-          compiler->CatchEntryRegForVariable(stacktrace_var());
-      __ MoveSpecial(exception_reg, Simulator::kExceptionSpecialIndex);
-      __ MoveSpecial(stacktrace_reg, Simulator::kStackTraceSpecialIndex);
-    } else {
-      __ MoveSpecial(LocalVarIndex(0, exception_var().index()),
-                     Simulator::kExceptionSpecialIndex);
-      __ MoveSpecial(LocalVarIndex(0, stacktrace_var().index()),
-                     Simulator::kStackTraceSpecialIndex);
-    }
-  }
   __ SetFrame(compiler->StackSize());
+
+  if (!compiler->is_optimizing()) {
+    if (raw_exception_var_ != nullptr) {
+      __ MoveSpecial(LocalVarIndex(0, FrameSlotForVariable(raw_exception_var_)),
+                     Simulator::kExceptionSpecialIndex);
+    }
+    if (raw_stacktrace_var_ != nullptr) {
+      __ MoveSpecial(
+          LocalVarIndex(0, FrameSlotForVariable(raw_stacktrace_var_)),
+          Simulator::kStackTraceSpecialIndex);
+    }
+  }
 }
 
 EMIT_NATIVE_CODE(Throw, 0, Location::NoLocation(), LocationSummary::kCall) {
@@ -1327,6 +1277,10 @@ CompileType BinaryUint32OpInstr::ComputeType() const {
 }
 
 CompileType ShiftUint32OpInstr::ComputeType() const {
+  return CompileType::Int();
+}
+
+CompileType SpeculativeShiftUint32OpInstr::ComputeType() const {
   return CompileType::Int();
 }
 

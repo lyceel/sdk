@@ -4,7 +4,7 @@
 
 library fasta.compiler_context;
 
-import 'dart:async' show Zone, runZoned;
+import 'dart:async' show Future, Zone, runZoned;
 
 import 'package:kernel/ast.dart' show Source;
 
@@ -47,7 +47,9 @@ class CompilerContext {
   /// programs.
   final Map<Uri, Source> uriToSource = <Uri, Source>{};
 
-  final List errors = <Object>[];
+  final List<Object> errors = <Object>[];
+
+  final List<Uri> dependencies = <Uri>[];
 
   FileSystem get fileSystem => options.fileSystem;
 
@@ -87,8 +89,18 @@ class CompilerContext {
     errors.add(severity);
   }
 
+  static void recordDependency(Uri uri) {
+    if (uri.scheme != "file") {
+      throw new ArgumentError("Expected a file-URI, but got: '$uri'.");
+    }
+    CompilerContext context = Zone.current[compilerContextKey];
+    if (context != null) {
+      context.dependencies.add(uri);
+    }
+  }
+
   static CompilerContext get current {
-    var context = Zone.current[compilerContextKey];
+    CompilerContext context = Zone.current[compilerContextKey];
     if (context == null) {
       // Note: we throw directly and don't use internalProblem, because
       // internalProblem depends on having a compiler context available.
@@ -99,27 +111,31 @@ class CompilerContext {
     return context;
   }
 
+  static bool get isActive => Zone.current[compilerContextKey] != null;
+
   /// Perform [action] in a [Zone] where [this] will be available as
   /// `CompilerContext.current`.
-  T runInContext<T>(T action(CompilerContext c)) {
-    try {
-      return runZoned(() => action(this),
-          zoneValues: {compilerContextKey: this});
-    } finally {
-      clear();
-    }
+  Future<T> runInContext<T>(Future<T> action(CompilerContext c)) {
+    return runZoned(
+        () => new Future<T>.sync(() => action(this)).whenComplete(clear),
+        zoneValues: {compilerContextKey: this});
   }
 
   /// Perform [action] in a [Zone] where [options] will be available as
   /// `CompilerContext.current.options`.
-  static T runWithOptions<T>(
-      ProcessedOptions options, T action(CompilerContext c)) {
-    return new CompilerContext(options).runInContext(action);
+  static Future<T> runWithOptions<T>(
+      ProcessedOptions options, Future<T> action(CompilerContext c)) {
+    return new CompilerContext(options)
+        .runInContext<T>((CompilerContext c) async {
+      await options.validateOptions();
+      return action(c);
+    });
   }
 
-  static T runWithDefaultOptions<T>(T action(CompilerContext c)) {
-    var options = new ProcessedOptions(new CompilerOptions());
-    return new CompilerContext(options).runInContext(action);
+  static Future<T> runWithDefaultOptions<T>(
+      Future<T> action(CompilerContext c)) {
+    return new CompilerContext(new ProcessedOptions(new CompilerOptions()))
+        .runInContext<T>(action);
   }
 
   static bool get enableColors {
@@ -129,5 +145,6 @@ class CompilerContext {
   void clear() {
     StringToken.canonicalizer.clear();
     errors.clear();
+    dependencies.clear();
   }
 }

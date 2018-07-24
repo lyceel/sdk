@@ -11,7 +11,6 @@ import 'package:analyzer/src/dart/scanner/scanner.dart';
 import 'package:analyzer/src/generated/parser.dart' as analyzer;
 import 'package:analyzer/src/generated/utilities_dart.dart';
 import 'package:analyzer/src/string_source.dart';
-import 'package:front_end/src/fasta/kernel/kernel_builder.dart';
 import 'package:front_end/src/fasta/scanner/error_token.dart' show ErrorToken;
 import 'package:front_end/src/fasta/scanner/string_scanner.dart';
 import 'package:test/test.dart';
@@ -40,25 +39,9 @@ main() {
  */
 typedef analyzer.Token ParseFunction(analyzer.Token token);
 
-/**
- * Proxy implementation of [Builder] used by Fasta parser tests.
- *
- * All undeclared identifiers are presumed to resolve via an instance of this
- * class.
- */
-class BuilderProxy implements Builder {
-  noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
-}
-
 @reflectiveTest
 class ClassMemberParserTest_Fasta extends FastaParserTestCase
     with ClassMemberParserTestMixin {
-  @failingTest
-  @override
-  void test_parseAwaitExpression_inSync() {
-    super.test_parseAwaitExpression_inSync();
-  }
-
   @override
   void test_parseClassMember_method_generic_comment_noReturnType() {
     // Ignored: Fasta does not support the generic comment syntax.
@@ -114,28 +97,17 @@ class ComplexParserTest_Fasta extends FastaParserTestCase
 class ErrorParserTest_Fasta extends FastaParserTestCase
     with ErrorParserTestMixin {
   @override
-  @failingTest
   void test_expectedListOrMapLiteral() {
-    // TODO(brianwilkerson) Does not recover.
-    //   type 'IntegerLiteralImpl' is not a subtype of type 'TypedLiteral' in type cast where
-    //   IntegerLiteralImpl is from package:analyzer/src/dart/ast/ast.dart
-    //   TypedLiteral is from package:analyzer/dart/ast/ast.dart
-    //
-    //   dart:core                                                          Object._as
-    //   test/generated/parser_fasta_test.dart 2480:48                      FastaParserTestCase.parseListOrMapLiteral
-    super.test_expectedListOrMapLiteral();
+    // The fasta parser returns an 'IntegerLiteralImpl' when parsing '1'.
+    // This test is not expected to ever pass.
+    //super.test_expectedListOrMapLiteral();
   }
 
   @override
-  @failingTest
   void test_expectedStringLiteral() {
-    // TODO(brianwilkerson) Does not recover.
-    //   type 'IntegerLiteralImpl' is not a subtype of type 'StringLiteral' of 'literal' where
-    //   IntegerLiteralImpl is from package:analyzer/src/dart/ast/ast.dart
-    //   StringLiteral is from package:analyzer/dart/ast/ast.dart
-    //
-    //   test/generated/parser_test.dart 2652:29                            FastaParserTestCase&ErrorParserTestMixin.test_expectedStringLiteral
-    super.test_expectedStringLiteral();
+    // The fasta parser returns an 'IntegerLiteralImpl' when parsing '1'.
+    // This test is not expected to ever pass.
+    //super.test_expectedStringLiteral();
   }
 
   void test_getterNativeWithBody() {
@@ -154,315 +126,6 @@ class ErrorParserTest_Fasta extends FastaParserTestCase
   }
 
   @override
-  @failingTest
-  void test_invalidCodePoint() {
-    // TODO(brianwilkerson) Does not recover.
-    //   Internal problem: Compiler cannot run without a compiler context.
-    //   Tip: Are calls to the compiler wrapped in CompilerContext.runInContext?
-    //   package:front_end/src/fasta/compiler_context.dart 81:7             CompilerContext.current
-    //   package:front_end/src/fasta/command_line_reporting.dart 112:30     shouldThrowOn
-    //   package:front_end/src/fasta/deprecated_problems.dart 41:7          deprecated_inputError
-    //   package:front_end/src/fasta/quote.dart 181:5                       unescapeCodeUnits.error
-    //   package:front_end/src/fasta/quote.dart 251:40                      unescapeCodeUnits
-    //   package:front_end/src/fasta/quote.dart 147:13                      unescape
-    //   package:front_end/src/fasta/quote.dart 135:10                      unescapeString
-    //   package:analyzer/src/fasta/ast_builder.dart 159:22                 AstBuilder.endLiteralString
-    //   test/generated/parser_fasta_listener.dart 896:14                   ForwardingTestListener.endLiteralString
-    //   package:front_end/src/fasta/parser/parser.dart 3497:14             Parser.parseSingleLiteralString
-    //   package:front_end/src/fasta/parser/parser.dart 3434:13             Parser.parseLiteralString
-    //   package:front_end/src/fasta/parser/parser.dart 3133:14             Parser.parsePrimary
-    //   package:front_end/src/fasta/parser/parser.dart 3097:14             Parser.parseUnaryExpression
-    //   package:front_end/src/fasta/parser/parser.dart 2968:13             Parser.parsePrecedenceExpression
-    //   package:front_end/src/fasta/parser/parser.dart 2942:11             Parser.parseExpression
-    //   test/generated/parser_fasta_test.dart 3196:39                      ParserProxy._run
-    super.test_invalidCodePoint();
-  }
-
-  @override
-  @failingTest
-  void test_invalidCommentReference__new_nonIdentifier() {
-    // TODO(brianwilkerson) Parsing comment references not yet supported.
-    super.test_invalidCommentReference__new_nonIdentifier();
-  }
-
-  @override
-  @failingTest
-  void test_invalidCommentReference__new_tooMuch() {
-    // TODO(brianwilkerson) Parsing comment references not yet supported.
-    super.test_invalidCommentReference__new_tooMuch();
-  }
-
-  @override
-  @failingTest
-  void test_invalidCommentReference__nonNew_nonIdentifier() {
-    // TODO(brianwilkerson) Parsing comment references not yet supported.
-    super.test_invalidCommentReference__nonNew_nonIdentifier();
-  }
-
-  @override
-  @failingTest
-  void test_invalidCommentReference__nonNew_tooMuch() {
-    // TODO(brianwilkerson) Parsing comment references not yet supported.
-    super.test_invalidCommentReference__nonNew_tooMuch();
-  }
-
-  @override
-  @failingTest
-  void test_invalidHexEscape_invalidDigit() {
-    // TODO(brianwilkerson) Does not recover.
-    //   Internal problem: Compiler cannot run without a compiler context.
-    //   Tip: Are calls to the compiler wrapped in CompilerContext.runInContext?
-    //   package:front_end/src/fasta/compiler_context.dart 81:7             CompilerContext.current
-    //   package:front_end/src/fasta/command_line_reporting.dart 112:30     shouldThrowOn
-    //   package:front_end/src/fasta/deprecated_problems.dart 41:7          deprecated_inputError
-    //   package:front_end/src/fasta/quote.dart 181:5                       unescapeCodeUnits.error
-    //   package:front_end/src/fasta/quote.dart 221:47                      unescapeCodeUnits
-    //   package:front_end/src/fasta/quote.dart 147:13                      unescape
-    //   package:front_end/src/fasta/quote.dart 135:10                      unescapeString
-    //   package:analyzer/src/fasta/ast_builder.dart 159:22                 AstBuilder.endLiteralString
-    //   test/generated/parser_fasta_listener.dart 896:14                   ForwardingTestListener.endLiteralString
-    //   package:front_end/src/fasta/parser/parser.dart 3497:14             Parser.parseSingleLiteralString
-    //   package:front_end/src/fasta/parser/parser.dart 3434:13             Parser.parseLiteralString
-    //   package:front_end/src/fasta/parser/parser.dart 3133:14             Parser.parsePrimary
-    //   package:front_end/src/fasta/parser/parser.dart 3097:14             Parser.parseUnaryExpression
-    //   package:front_end/src/fasta/parser/parser.dart 2968:13             Parser.parsePrecedenceExpression
-    //   package:front_end/src/fasta/parser/parser.dart 2942:11             Parser.parseExpression
-    //   test/generated/parser_fasta_test.dart 3196:39                      ParserProxy._run
-    super.test_invalidHexEscape_invalidDigit();
-  }
-
-  @override
-  @failingTest
-  void test_invalidHexEscape_tooFewDigits() {
-    // TODO(brianwilkerson) Does not recover.
-    //   Internal problem: Compiler cannot run without a compiler context.
-    //   Tip: Are calls to the compiler wrapped in CompilerContext.runInContext?
-    //   package:front_end/src/fasta/compiler_context.dart 81:7             CompilerContext.current
-    //   package:front_end/src/fasta/command_line_reporting.dart 112:30     shouldThrowOn
-    //   package:front_end/src/fasta/deprecated_problems.dart 41:7          deprecated_inputError
-    //   package:front_end/src/fasta/quote.dart 181:5                       unescapeCodeUnits.error
-    //   package:front_end/src/fasta/quote.dart 217:52                      unescapeCodeUnits
-    //   package:front_end/src/fasta/quote.dart 147:13                      unescape
-    //   package:front_end/src/fasta/quote.dart 135:10                      unescapeString
-    //   package:analyzer/src/fasta/ast_builder.dart 159:22                 AstBuilder.endLiteralString
-    //   test/generated/parser_fasta_listener.dart 896:14                   ForwardingTestListener.endLiteralString
-    //   package:front_end/src/fasta/parser/parser.dart 3497:14             Parser.parseSingleLiteralString
-    //   package:front_end/src/fasta/parser/parser.dart 3434:13             Parser.parseLiteralString
-    //   package:front_end/src/fasta/parser/parser.dart 3133:14             Parser.parsePrimary
-    //   package:front_end/src/fasta/parser/parser.dart 3097:14             Parser.parseUnaryExpression
-    //   package:front_end/src/fasta/parser/parser.dart 2968:13             Parser.parsePrecedenceExpression
-    //   package:front_end/src/fasta/parser/parser.dart 2942:11             Parser.parseExpression
-    //   test/generated/parser_fasta_test.dart 3196:39                      ParserProxy._run
-    super.test_invalidHexEscape_tooFewDigits();
-  }
-
-  @override
-  @failingTest
-  void test_invalidOperatorAfterSuper_primaryExpression() {
-    // TODO(brianwilkerson) Does not recover.
-    //   Expected: true
-    //   Actual: <false>
-    //
-    //   package:test                                                       expect
-    //   test/generated/parser_fasta_test.dart 3197:5                       ParserProxy._run
-    super.test_invalidOperatorAfterSuper_primaryExpression();
-  }
-
-  @override
-  @failingTest
-  void test_invalidStarAfterAsync() {
-    // TODO(brianwilkerson) Does not recover.
-    //   Expected: an object with length of <1>
-    //   Actual: <Instance of 'Stack'>
-    //   Which: has length of <0>
-    //
-    //   package:test                                                       expect
-    //   test/generated/parser_fasta_test.dart 3290:7                       ParserProxy._run
-    super.test_invalidStarAfterAsync();
-  }
-
-  @override
-  @failingTest
-  void test_invalidSync() {
-    // TODO(brianwilkerson) Does not recover.
-    //   Expected: an object with length of <1>
-    //   Actual: <Instance of 'Stack'>
-    //   Which: has length of <0>
-    //
-    //   package:test                                                       expect
-    //   test/generated/parser_fasta_test.dart 3290:7                       ParserProxy._run
-    super.test_invalidSync();
-  }
-
-  @override
-  @failingTest
-  void test_invalidUnicodeEscape_incomplete_noDigits() {
-    // TODO(brianwilkerson) Does not recover.
-    //   Internal problem: Compiler cannot run without a compiler context.
-    //   Tip: Are calls to the compiler wrapped in CompilerContext.runInContext?
-    //   package:front_end/src/fasta/compiler_context.dart 81:7             CompilerContext.current
-    //   package:front_end/src/fasta/command_line_reporting.dart 112:30     shouldThrowOn
-    //   package:front_end/src/fasta/deprecated_problems.dart 41:7          deprecated_inputError
-    //   package:front_end/src/fasta/quote.dart 181:5                       unescapeCodeUnits.error
-    //   package:front_end/src/fasta/quote.dart 232:54                      unescapeCodeUnits
-    //   package:front_end/src/fasta/quote.dart 147:13                      unescape
-    //   package:front_end/src/fasta/quote.dart 135:10                      unescapeString
-    //   package:analyzer/src/fasta/ast_builder.dart 159:22                 AstBuilder.endLiteralString
-    //   test/generated/parser_fasta_listener.dart 896:14                   ForwardingTestListener.endLiteralString
-    //   package:front_end/src/fasta/parser/parser.dart 3497:14             Parser.parseSingleLiteralString
-    //   package:front_end/src/fasta/parser/parser.dart 3434:13             Parser.parseLiteralString
-    //   package:front_end/src/fasta/parser/parser.dart 3133:14             Parser.parsePrimary
-    //   package:front_end/src/fasta/parser/parser.dart 3097:14             Parser.parseUnaryExpression
-    //   package:front_end/src/fasta/parser/parser.dart 2968:13             Parser.parsePrecedenceExpression
-    //   package:front_end/src/fasta/parser/parser.dart 2942:11             Parser.parseExpression
-    //   package:front_end/src/fasta/parser/parser.dart 2862:13             Parser.parseExpressionStatement
-    //   package:front_end/src/fasta/parser/parser.dart 2790:14             Parser.parseStatementX
-    //   package:front_end/src/fasta/parser/parser.dart 2722:20             Parser.parseStatement
-    //   test/generated/parser_fasta_test.dart 3287:39                      ParserProxy._run
-    super.test_invalidUnicodeEscape_incomplete_noDigits();
-  }
-
-  @override
-  @failingTest
-  void test_invalidUnicodeEscape_incomplete_someDigits() {
-    // TODO(brianwilkerson) Does not recover.
-    //   Internal problem: Compiler cannot run without a compiler context.
-    //   Tip: Are calls to the compiler wrapped in CompilerContext.runInContext?
-    //   package:front_end/src/fasta/compiler_context.dart 81:7             CompilerContext.current
-    //   package:front_end/src/fasta/command_line_reporting.dart 112:30     shouldThrowOn
-    //   package:front_end/src/fasta/deprecated_problems.dart 41:7          deprecated_inputError
-    //   package:front_end/src/fasta/quote.dart 181:5                       unescapeCodeUnits.error
-    //   package:front_end/src/fasta/quote.dart 232:54                      unescapeCodeUnits
-    //   package:front_end/src/fasta/quote.dart 147:13                      unescape
-    //   package:front_end/src/fasta/quote.dart 135:10                      unescapeString
-    //   package:analyzer/src/fasta/ast_builder.dart 159:22                 AstBuilder.endLiteralString
-    //   test/generated/parser_fasta_listener.dart 896:14                   ForwardingTestListener.endLiteralString
-    //   package:front_end/src/fasta/parser/parser.dart 3497:14             Parser.parseSingleLiteralString
-    //   package:front_end/src/fasta/parser/parser.dart 3434:13             Parser.parseLiteralString
-    //   package:front_end/src/fasta/parser/parser.dart 3133:14             Parser.parsePrimary
-    //   package:front_end/src/fasta/parser/parser.dart 3097:14             Parser.parseUnaryExpression
-    //   package:front_end/src/fasta/parser/parser.dart 2968:13             Parser.parsePrecedenceExpression
-    //   package:front_end/src/fasta/parser/parser.dart 2942:11             Parser.parseExpression
-    //   package:front_end/src/fasta/parser/parser.dart 2862:13             Parser.parseExpressionStatement
-    //   package:front_end/src/fasta/parser/parser.dart 2790:14             Parser.parseStatementX
-    //   package:front_end/src/fasta/parser/parser.dart 2722:20             Parser.parseStatement
-    //   test/generated/parser_fasta_test.dart 3287:39                      ParserProxy._run
-    super.test_invalidUnicodeEscape_incomplete_someDigits();
-  }
-
-  @override
-  @failingTest
-  void test_invalidUnicodeEscape_invalidDigit() {
-    // TODO(brianwilkerson) Does not recover.
-    //   Internal problem: Compiler cannot run without a compiler context.
-    //   Tip: Are calls to the compiler wrapped in CompilerContext.runInContext?
-    //   package:front_end/src/fasta/compiler_context.dart 81:7             CompilerContext.current
-    //   package:front_end/src/fasta/command_line_reporting.dart 112:30     shouldThrowOn
-    //   package:front_end/src/fasta/deprecated_problems.dart 41:7          deprecated_inputError
-    //   package:front_end/src/fasta/quote.dart 181:5                       unescapeCodeUnits.error
-    //   package:front_end/src/fasta/quote.dart 240:54                      unescapeCodeUnits
-    //   package:front_end/src/fasta/quote.dart 147:13                      unescape
-    //   package:front_end/src/fasta/quote.dart 135:10                      unescapeString
-    //   package:analyzer/src/fasta/ast_builder.dart 159:22                 AstBuilder.endLiteralString
-    //   test/generated/parser_fasta_listener.dart 896:14                   ForwardingTestListener.endLiteralString
-    //   package:front_end/src/fasta/parser/parser.dart 3497:14             Parser.parseSingleLiteralString
-    //   package:front_end/src/fasta/parser/parser.dart 3434:13             Parser.parseLiteralString
-    //   package:front_end/src/fasta/parser/parser.dart 3133:14             Parser.parsePrimary
-    //   package:front_end/src/fasta/parser/parser.dart 3097:14             Parser.parseUnaryExpression
-    //   package:front_end/src/fasta/parser/parser.dart 2968:13             Parser.parsePrecedenceExpression
-    //   package:front_end/src/fasta/parser/parser.dart 2942:11             Parser.parseExpression
-    //   package:front_end/src/fasta/parser/parser.dart 2862:13             Parser.parseExpressionStatement
-    //   package:front_end/src/fasta/parser/parser.dart 2790:14             Parser.parseStatementX
-    //   package:front_end/src/fasta/parser/parser.dart 2722:20             Parser.parseStatement
-    //   test/generated/parser_fasta_test.dart 3287:39                      ParserProxy._run
-    super.test_invalidUnicodeEscape_invalidDigit();
-  }
-
-  @override
-  @failingTest
-  void test_invalidUnicodeEscape_tooFewDigits_fixed() {
-    // TODO(brianwilkerson) Does not recover.
-    //   Internal problem: Compiler cannot run without a compiler context.
-    //   Tip: Are calls to the compiler wrapped in CompilerContext.runInContext?
-    //   package:front_end/src/fasta/compiler_context.dart 81:7             CompilerContext.current
-    //   package:front_end/src/fasta/command_line_reporting.dart 112:30     shouldThrowOn
-    //   package:front_end/src/fasta/deprecated_problems.dart 41:7          deprecated_inputError
-    //   package:front_end/src/fasta/quote.dart 181:5                       unescapeCodeUnits.error
-    //   package:front_end/src/fasta/quote.dart 240:54                      unescapeCodeUnits
-    //   package:front_end/src/fasta/quote.dart 147:13                      unescape
-    //   package:front_end/src/fasta/quote.dart 135:10                      unescapeString
-    //   package:analyzer/src/fasta/ast_builder.dart 159:22                 AstBuilder.endLiteralString
-    //   test/generated/parser_fasta_listener.dart 896:14                   ForwardingTestListener.endLiteralString
-    //   package:front_end/src/fasta/parser/parser.dart 3497:14             Parser.parseSingleLiteralString
-    //   package:front_end/src/fasta/parser/parser.dart 3434:13             Parser.parseLiteralString
-    //   package:front_end/src/fasta/parser/parser.dart 3133:14             Parser.parsePrimary
-    //   package:front_end/src/fasta/parser/parser.dart 3097:14             Parser.parseUnaryExpression
-    //   package:front_end/src/fasta/parser/parser.dart 2968:13             Parser.parsePrecedenceExpression
-    //   package:front_end/src/fasta/parser/parser.dart 2942:11             Parser.parseExpression
-    //   package:front_end/src/fasta/parser/parser.dart 2862:13             Parser.parseExpressionStatement
-    //   package:front_end/src/fasta/parser/parser.dart 2790:14             Parser.parseStatementX
-    //   package:front_end/src/fasta/parser/parser.dart 2722:20             Parser.parseStatement
-    //   test/generated/parser_fasta_test.dart 3287:39                      ParserProxy._run
-    super.test_invalidUnicodeEscape_tooFewDigits_fixed();
-  }
-
-  @override
-  @failingTest
-  void test_invalidUnicodeEscape_tooFewDigits_variable() {
-    // TODO(brianwilkerson) Does not recover.
-    //   Internal problem: Compiler cannot run without a compiler context.
-    //   Tip: Are calls to the compiler wrapped in CompilerContext.runInContext?
-    //   package:front_end/src/fasta/compiler_context.dart 81:7             CompilerContext.current
-    //   package:front_end/src/fasta/command_line_reporting.dart 112:30     shouldThrowOn
-    //   package:front_end/src/fasta/deprecated_problems.dart 41:7          deprecated_inputError
-    //   package:front_end/src/fasta/quote.dart 181:5                       unescapeCodeUnits.error
-    //   package:front_end/src/fasta/quote.dart 235:49                      unescapeCodeUnits
-    //   package:front_end/src/fasta/quote.dart 147:13                      unescape
-    //   package:front_end/src/fasta/quote.dart 135:10                      unescapeString
-    //   package:analyzer/src/fasta/ast_builder.dart 159:22                 AstBuilder.endLiteralString
-    //   test/generated/parser_fasta_listener.dart 896:14                   ForwardingTestListener.endLiteralString
-    //   package:front_end/src/fasta/parser/parser.dart 3497:14             Parser.parseSingleLiteralString
-    //   package:front_end/src/fasta/parser/parser.dart 3434:13             Parser.parseLiteralString
-    //   package:front_end/src/fasta/parser/parser.dart 3133:14             Parser.parsePrimary
-    //   package:front_end/src/fasta/parser/parser.dart 3097:14             Parser.parseUnaryExpression
-    //   package:front_end/src/fasta/parser/parser.dart 2968:13             Parser.parsePrecedenceExpression
-    //   package:front_end/src/fasta/parser/parser.dart 2942:11             Parser.parseExpression
-    //   package:front_end/src/fasta/parser/parser.dart 2862:13             Parser.parseExpressionStatement
-    //   package:front_end/src/fasta/parser/parser.dart 2790:14             Parser.parseStatementX
-    //   package:front_end/src/fasta/parser/parser.dart 2722:20             Parser.parseStatement
-    //   test/generated/parser_fasta_test.dart 3287:39                      ParserProxy._run
-    super.test_invalidUnicodeEscape_tooFewDigits_variable();
-  }
-
-  @override
-  @failingTest
-  void test_invalidUnicodeEscape_tooManyDigits_variable() {
-    // TODO(brianwilkerson) Does not recover.
-    //   Internal problem: Compiler cannot run without a compiler context.
-    //   Tip: Are calls to the compiler wrapped in CompilerContext.runInContext?
-    //   package:front_end/src/fasta/compiler_context.dart 81:7             CompilerContext.current
-    //   package:front_end/src/fasta/command_line_reporting.dart 112:30     shouldThrowOn
-    //   package:front_end/src/fasta/deprecated_problems.dart 41:7          deprecated_inputError
-    //   package:front_end/src/fasta/quote.dart 181:5                       unescapeCodeUnits.error
-    //   package:front_end/src/fasta/quote.dart 251:40                      unescapeCodeUnits
-    //   package:front_end/src/fasta/quote.dart 147:13                      unescape
-    //   package:front_end/src/fasta/quote.dart 135:10                      unescapeString
-    //   package:analyzer/src/fasta/ast_builder.dart 159:22                 AstBuilder.endLiteralString
-    //   test/generated/parser_fasta_listener.dart 896:14                   ForwardingTestListener.endLiteralString
-    //   package:front_end/src/fasta/parser/parser.dart 3497:14             Parser.parseSingleLiteralString
-    //   package:front_end/src/fasta/parser/parser.dart 3434:13             Parser.parseLiteralString
-    //   package:front_end/src/fasta/parser/parser.dart 3133:14             Parser.parsePrimary
-    //   package:front_end/src/fasta/parser/parser.dart 3097:14             Parser.parseUnaryExpression
-    //   package:front_end/src/fasta/parser/parser.dart 2968:13             Parser.parsePrecedenceExpression
-    //   package:front_end/src/fasta/parser/parser.dart 2942:11             Parser.parseExpression
-    //   package:front_end/src/fasta/parser/parser.dart 2862:13             Parser.parseExpressionStatement
-    //   package:front_end/src/fasta/parser/parser.dart 2790:14             Parser.parseStatementX
-    //   package:front_end/src/fasta/parser/parser.dart 2722:20             Parser.parseStatement
-    //   test/generated/parser_fasta_test.dart 3287:39                      ParserProxy._run
-    super.test_invalidUnicodeEscape_tooManyDigits_variable();
-  }
-
-  @override
   void test_method_invalidTypeParameterComments() {
     // Ignored: Fasta does not support the generic comment syntax.
   }
@@ -471,22 +134,6 @@ class ErrorParserTest_Fasta extends FastaParserTestCase
   void test_method_invalidTypeParameterExtendsComment() {
     // Fasta no longer supports type comment based syntax
     // super.test_method_invalidTypeParameterExtendsComment();
-  }
-
-  @override
-  @failingTest
-  void test_missingFunctionParameters_topLevel_void_block() {
-    // TODO(brianwilkerson) Wrong errors:
-    // Expected 1 errors of type ParserErrorCode.MISSING_FUNCTION_PARAMETERS, found 0
-    super.test_missingFunctionParameters_topLevel_void_block();
-  }
-
-  @override
-  @failingTest
-  void test_missingFunctionParameters_topLevel_void_expression() {
-    // TODO(brianwilkerson) Wrong errors:
-    // Expected 1 errors of type ParserErrorCode.MISSING_FUNCTION_PARAMETERS, found 0
-    super.test_missingFunctionParameters_topLevel_void_expression();
   }
 }
 
@@ -606,7 +253,7 @@ class ExpressionParserTest_Fasta extends FastaParserTestCase
   @override
   @failingTest
   void test_parseUnaryExpression_decrement_super() {
-    // TODO(brianwilkerson) Does not recover.
+    // TODO(danrubel) Reports a different error and different token stream.
     // Expected: TokenType:<MINUS>
     //   Actual: TokenType:<MINUS_MINUS>
     super.test_parseUnaryExpression_decrement_super();
@@ -615,7 +262,7 @@ class ExpressionParserTest_Fasta extends FastaParserTestCase
   @override
   @failingTest
   void test_parseUnaryExpression_decrement_super_withComment() {
-    // TODO(brianwilkerson) Does not recover.
+    // TODO(danrubel) Reports a different error and different token stream.
     // Expected: TokenType:<MINUS>
     //   Actual: TokenType:<MINUS_MINUS>
     super.test_parseUnaryExpression_decrement_super_withComment();
@@ -1139,24 +786,21 @@ class ParserProxy extends analyzer.ParserAdapter {
       {bool allowNativeClause: false,
       bool enableGenericMethodComments: false,
       int expectedEndOffset}) {
-    var member = new BuilderProxy();
-    var scope = new ScopeProxy();
     TestSource source = new TestSource();
     var errorListener = new GatheringErrorListener(checkRanges: true);
     var errorReporter = new ErrorReporter(errorListener, source);
-    return new ParserProxy._(
-        firstToken, errorReporter, null, member, scope, errorListener,
+    return new ParserProxy._(firstToken, errorReporter, null, errorListener,
         allowNativeClause: allowNativeClause,
         enableGenericMethodComments: enableGenericMethodComments,
         expectedEndOffset: expectedEndOffset);
   }
 
   ParserProxy._(analyzer.Token firstToken, ErrorReporter errorReporter,
-      Uri fileUri, Builder member, Scope scope, this._errorListener,
+      Uri fileUri, this._errorListener,
       {bool allowNativeClause: false,
       bool enableGenericMethodComments: false,
       this.expectedEndOffset})
-      : super(firstToken, errorReporter, fileUri, member, scope,
+      : super(firstToken, errorReporter, fileUri,
             allowNativeClause: allowNativeClause,
             enableGenericMethodComments: enableGenericMethodComments) {
     _eventListener = new ForwardingTestListener(astBuilder);
@@ -1317,20 +961,6 @@ class RecoveryParserTest_Fasta extends FastaParserTestCase
   }
 
   @override
-  @failingTest
-  void test_incompleteTypeArguments_field() {
-    // TODO(brianwilkerson) reportUnrecoverableErrorWithToken
-    super.test_incompleteTypeArguments_field();
-  }
-
-  @override
-  @failingTest
-  void test_missingIdentifier_afterAnnotation() {
-    // TODO(brianwilkerson) reportUnrecoverableErrorWithToken
-    super.test_missingIdentifier_afterAnnotation();
-  }
-
-  @override
   void test_relationalExpression_missing_LHS_RHS() {
     parseExpression("is", codes: [
       ParserErrorCode.EXPECTED_TYPE_NAME,
@@ -1348,56 +978,9 @@ class RecoveryParserTest_Fasta extends FastaParserTestCase
   }
 }
 
-/**
- * Proxy implementation of [Scope] used by Fasta parser tests.
- *
- * Any name lookup request is satisfied by creating an instance of
- * [BuilderProxy].
- */
-class ScopeProxy implements Scope {
-  final _locals = <String, Builder>{};
-
-  @override
-  Scope createNestedScope(String debugName, {bool isModifiable: true}) {
-    return new Scope.nested(this, debugName, isModifiable: isModifiable);
-  }
-
-  @override
-  declare(String name, Builder builder, Uri fileUri) {
-    _locals[name] = builder;
-    return null;
-  }
-
-  @override
-  Builder lookup(String name, int charOffset, Uri fileUri,
-          {bool isInstanceScope: true}) =>
-      _locals.putIfAbsent(name, () => new BuilderProxy());
-
-  noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
-}
-
 @reflectiveTest
 class SimpleParserTest_Fasta extends FastaParserTestCase
-    with SimpleParserTestMixin {
-  @override
-  @failingTest
-  void test_parseInstanceCreation_noKeyword_noPrefix() {
-    super.test_parseInstanceCreation_noKeyword_noPrefix();
-  }
-
-  @override
-  @failingTest
-  void test_parseInstanceCreation_noKeyword_prefix() {
-    super.test_parseInstanceCreation_noKeyword_prefix();
-  }
-
-  @override
-  @failingTest
-  void test_parseTypeParameterList_single() {
-    // TODO(brianwilkerson) Does not use all tokens.
-    super.test_parseTypeParameterList_single();
-  }
-}
+    with SimpleParserTestMixin {}
 
 /**
  * Tests of the fasta parser based on [StatementParserTestMixin].
@@ -1477,7 +1060,7 @@ class A native 'something' {
         ParserErrorCode.NATIVE_CLAUSE_SHOULD_BE_ANNOTATION,
       ]);
     }
-    expect(member, new isInstanceOf<ClassDeclaration>());
+    expect(member, new TypeMatcher<ClassDeclaration>());
     ClassDeclaration declaration = member;
     expect(declaration.nativeClause, isNotNull);
     expect(declaration.nativeClause.nativeKeyword, isNotNull);

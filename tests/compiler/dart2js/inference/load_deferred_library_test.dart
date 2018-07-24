@@ -8,10 +8,10 @@ import 'package:compiler/src/common_elements.dart';
 import 'package:compiler/src/common/names.dart';
 import 'package:compiler/src/compiler.dart';
 import 'package:compiler/src/elements/entities.dart';
+import 'package:compiler/src/inferrer/typemasks/masks.dart';
 import 'package:compiler/src/js_model/js_strategy.dart';
 import 'package:compiler/src/kernel/element_map.dart';
 import 'package:compiler/src/types/abstract_value_domain.dart';
-import 'package:compiler/src/types/types.dart';
 import 'package:compiler/src/world.dart';
 import 'package:expect/expect.dart';
 import 'package:kernel/ast.dart' as ir;
@@ -30,9 +30,9 @@ callLoadLibrary() => expect.loadLibrary();
 main() async {
   asyncTest(() async {
     print('--test Dart 1 ----------------------------------------------------');
-    await runTest([], trust: false);
+    await runTest([Flags.noPreviewDart2], trust: false);
     print('--test Dart 1 --trust-type-annotations ---------------------------');
-    await runTest([Flags.trustTypeAnnotations]);
+    await runTest([Flags.noPreviewDart2, Flags.trustTypeAnnotations]);
     print('--test Dart 2 ----------------------------------------------------');
     await runTest([Flags.strongMode], trust: false);
     print('--test Dart 2 --omit-implicit-checks -----------------------------');
@@ -45,7 +45,7 @@ runTest(List<String> options, {bool trust: true}) async {
       memorySourceFiles: {'main.dart': source}, options: options);
   Expect.isTrue(result.isSuccess);
   Compiler compiler = result.compiler;
-  ClosedWorld closedWorld = compiler.backendClosedWorldForTesting;
+  JClosedWorld closedWorld = compiler.backendClosedWorldForTesting;
   AbstractValueDomain abstractValueDomain = closedWorld.abstractValueDomain;
   ElementEnvironment elementEnvironment = closedWorld.elementEnvironment;
   LibraryEntity helperLibrary =
@@ -60,7 +60,7 @@ runTest(List<String> options, {bool trust: true}) async {
   MemberDefinition definition =
       backendStrategy.elementMap.getMemberDefinition(loadDeferredLibrary);
   ir.Procedure procedure = definition.node;
-  typeMask = compiler.globalInference.results
+  typeMask = compiler.globalInference.resultsForTesting
       .resultOfParameter(localsMap
           .getLocalVariable(procedure.function.positionalParameters.first))
       .type;

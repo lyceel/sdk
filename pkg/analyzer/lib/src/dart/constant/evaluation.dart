@@ -74,9 +74,6 @@ class ConstantEvaluationEngine {
    */
   final ConstantEvaluationValidator validator;
 
-  /** Whether we are running in strong mode. */
-  final bool strongMode;
-
   /**
    * Initialize a newly created [ConstantEvaluationEngine].  The [typeProvider]
    * is used to access known types.  [_declaredVariables] is the set of
@@ -87,8 +84,6 @@ class ConstantEvaluationEngine {
   ConstantEvaluationEngine(TypeProvider typeProvider, this._declaredVariables,
       {ConstantEvaluationValidator validator, TypeSystem typeSystem})
       : typeProvider = typeProvider,
-        strongMode =
-            typeProvider.objectType.element.context.analysisOptions.strongMode,
         validator =
             validator ?? new ConstantEvaluationValidator_ForProduction(),
         typeSystem = typeSystem ?? new TypeSystemImpl(typeProvider);
@@ -417,6 +412,11 @@ class ConstantEvaluationEngine {
       ConstantVisitor constantVisitor,
       ErrorReporter errorReporter,
       {ConstructorInvocation invocation}) {
+    if (!constructor.isConst) {
+      errorReporter.reportErrorForNode(
+          CompileTimeErrorCode.CONST_WITH_NON_CONST, node);
+      return null;
+    }
     if (!getConstructorImpl(constructor).isCycleFree) {
       // It's not safe to evaluate this constructor, so bail out.
       // TODO(paulberry): ensure that a reasonable error message is produced
@@ -527,21 +527,6 @@ class ConstantEvaluationEngine {
       return new DartObjectImpl.validWithUnknownValue(definingClass);
     }
 
-    // In strong mode, we allow constants to have type arguments.
-    //
-    // They will be added to the lexical environment when evaluating
-    // subexpressions.
-    Map<String, DartObjectImpl> typeArgumentMap;
-    if (strongMode) {
-      // Instantiate the constructor with the in-scope type arguments.
-      definingClass = constantVisitor.evaluateType(definingClass);
-      constructor = ConstructorMember.from(constructorBase, definingClass);
-
-      typeArgumentMap = new HashMap<String, DartObjectImpl>.fromIterables(
-          definingClass.typeParameters.map((t) => t.name),
-          definingClass.typeArguments.map(constantVisitor.typeConstant));
-    }
-
     var fieldMap = new HashMap<String, DartObjectImpl>();
 
     // The errors reported while computing values for field initializers, or
@@ -571,8 +556,6 @@ class ConstantEvaluationEngine {
       }
     }
 
-    var fieldInitVisitor = new ConstantVisitor(this, externalErrorReporter,
-        lexicalEnvironment: typeArgumentMap);
     // Start with final fields that are initialized at their declaration site.
     List<FieldElement> fields = constructor.enclosingElement.fields;
     for (int i = 0; i < fields.length; i++) {
@@ -582,12 +565,8 @@ class ConstantEvaluationEngine {
           field is ConstFieldElementImpl) {
         validator.beforeGetFieldEvaluationResult(field);
 
-        DartObjectImpl fieldValue;
-        if (strongMode) {
-          fieldValue = field.constantInitializer?.accept(fieldInitVisitor);
-        } else {
-          fieldValue = field.evaluationResult?.value;
-        }
+        DartObjectImpl fieldValue = field.evaluationResult?.value;
+
         // It is possible that the evaluation result is null.
         // This happens for example when we have duplicate fields.
         // class Test {final x = 1; final x = 2; const Test();}
@@ -638,23 +617,13 @@ class ConstantEvaluationEngine {
         // The parameter is an optional positional parameter for which no value
         // was provided, so use the default value.
         validator.beforeGetParameterDefault(baseParameter);
-        if (strongMode && baseParameter is ConstVariableElement) {
-          var defaultValue =
-              (baseParameter as ConstVariableElement).constantInitializer;
-          if (defaultValue == null) {
-            argumentValue = typeProvider.nullObject;
-          } else {
-            argumentValue = defaultValue.accept(fieldInitVisitor);
-          }
-        } else {
-          EvaluationResultImpl evaluationResult =
-              baseParameter.evaluationResult;
-          if (evaluationResult == null) {
-            // No default was provided, so the default value is null.
-            argumentValue = typeProvider.nullObject;
-          } else if (evaluationResult.value != null) {
-            argumentValue = evaluationResult.value;
-          }
+
+        EvaluationResultImpl evaluationResult = baseParameter.evaluationResult;
+        if (evaluationResult == null) {
+          // No default was provided, so the default value is null.
+          argumentValue = typeProvider.nullObject;
+        } else if (evaluationResult.value != null) {
+          argumentValue = evaluationResult.value;
         }
       }
       if (argumentValue != null) {
@@ -1202,16 +1171,7 @@ class ConstantVisitor extends UnifyingAstVisitor<DartObjectImpl> {
    */
   DartType evaluateType(DartType type) {
     if (type is TypeParameterType) {
-      // Constants may only refer to type parameters in strong mode.
-      if (!evaluationEngine.strongMode) {
-        return null;
-      }
-
-      String name = type.name;
-      if (_lexicalEnvironment != null) {
-        return _lexicalEnvironment[name]?.toTypeValue() ?? type;
-      }
-      return type;
+      return null;
     }
     if (type is ParameterizedType) {
       List<DartType> typeArguments;
@@ -1409,14 +1369,11 @@ class ConstantVisitor extends UnifyingAstVisitor<DartObjectImpl> {
     if (errorOccurred) {
       return null;
     }
-    DartType elementType = _typeProvider.dynamicType;
-    NodeList<TypeAnnotation> typeArgs = node.typeArguments?.arguments;
-    if (typeArgs?.length == 1) {
-      DartType type = visitTypeAnnotation(typeArgs[0])?.toTypeValue();
-      if (type != null) {
-        elementType = type;
-      }
-    }
+    var nodeType = node.staticType;
+    DartType elementType =
+        nodeType is InterfaceType && nodeType.typeArguments.isNotEmpty
+            ? nodeType.typeArguments[0]
+            : _typeProvider.dynamicType;
     InterfaceType listType = _typeProvider.listType.instantiate([elementType]);
     return new DartObjectImpl(listType, new ListState(elements));
   }
@@ -1445,17 +1402,12 @@ class ConstantVisitor extends UnifyingAstVisitor<DartObjectImpl> {
     }
     DartType keyType = _typeProvider.dynamicType;
     DartType valueType = _typeProvider.dynamicType;
-    NodeList<TypeAnnotation> typeArgs = node.typeArguments?.arguments;
-    if (typeArgs?.length == 2) {
-      DartType keyTypeCandidate =
-          visitTypeAnnotation(typeArgs[0])?.toTypeValue();
-      if (keyTypeCandidate != null) {
-        keyType = keyTypeCandidate;
-      }
-      DartType valueTypeCandidate =
-          visitTypeAnnotation(typeArgs[1])?.toTypeValue();
-      if (valueTypeCandidate != null) {
-        valueType = valueTypeCandidate;
+    var nodeType = node.staticType;
+    if (nodeType is InterfaceType) {
+      var typeArguments = nodeType.typeArguments;
+      if (typeArguments.length >= 2) {
+        keyType = typeArguments[0];
+        valueType = typeArguments[1];
       }
     }
     InterfaceType mapType =
@@ -1648,9 +1600,8 @@ class ConstantVisitor extends UnifyingAstVisitor<DartObjectImpl> {
         return new DartObjectImpl(functionType, new FunctionState(function));
       }
     } else if (variableElement is TypeDefiningElement) {
-      // Constants may only refer to type parameters in strong mode.
-      if (evaluationEngine.strongMode ||
-          variableElement is! TypeParameterElement) {
+      // Constants may not refer to type parameters.
+      if (variableElement is! TypeParameterElement) {
         return new DartObjectImpl(
             _typeProvider.typeType, new TypeState(variableElement.type));
       }

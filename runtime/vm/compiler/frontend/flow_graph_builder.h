@@ -302,10 +302,7 @@ class EffectGraphVisitor : public AstNodeVisitor {
                              TokenPosition token_pos);
   LoadLocalInstr* BuildLoadThisVar(LocalScope* scope, TokenPosition token_pos);
   LoadFieldInstr* BuildNativeGetter(NativeBodyNode* node,
-                                    MethodRecognizer::Kind kind,
-                                    intptr_t offset,
-                                    const Type& type,
-                                    intptr_t class_id);
+                                    const NativeFieldDesc* native_field);
   // Assumes setter parameter is named 'value'. Returns null constant.
   ConstantInstr* DoNativeSetterStoreValue(NativeBodyNode* node,
                                           intptr_t offset,
@@ -492,6 +489,8 @@ class ValueGraphVisitor : public EffectGraphVisitor {
   Value* value_;
 
  private:
+  friend class EffectGraphVisitor;
+
   // Helper to set the output state to return a Value.
   virtual void ReturnValue(Value* value) { value_ = value; }
 
@@ -539,6 +538,8 @@ class TestGraphVisitor : public ValueGraphVisitor {
   TokenPosition condition_token_pos() const { return condition_token_pos_; }
 
  private:
+  friend class EffectGraphVisitor;
+
   // Construct and concatenate a Branch instruction to this graph fragment.
   // Closes the fragment and sets the output parameters.
   virtual void ReturnValue(Value* value);

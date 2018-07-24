@@ -10,10 +10,10 @@
 #include "vm/allocation.h"
 #include "vm/compiler/assembler/assembler.h"
 #include "vm/exceptions.h"
+#include "vm/heap/verifier.h"
 #include "vm/log.h"
 #include "vm/native_arguments.h"
 #include "vm/runtime_entry.h"
-#include "vm/verifier.h"
 
 #include "include/dart_api.h"
 
@@ -129,7 +129,7 @@ class NativeEntry : public AllStatic {
                                                uword pc);
   static const uint8_t* ResolveSymbol(uword pc);
 
-#if defined(TARGET_ARCH_DBC)
+#if defined(TARGET_ARCH_DBC) || defined(DART_USE_INTERPRETER)
   static uword BootstrapNativeCallWrapperEntry();
   static void BootstrapNativeCallWrapper(Dart_NativeArguments args,
                                          Dart_NativeFunction func);

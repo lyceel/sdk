@@ -1303,7 +1303,11 @@ abstract class AnalysisOptions {
 
   /**
    * Return `true` if strong mode analysis should be used.
+   *
+   * This field is deprecated, and is hard-coded to always return true.
    */
+  @Deprecated(
+      'This field is deprecated and is hard-coded to always return true.')
   bool get strongMode;
 
   /**
@@ -1383,7 +1387,7 @@ class AnalysisOptionsImpl implements AnalysisOptions {
    * A flag indicating whether declaration casts are allowed in [strongMode]
    * (they are always allowed in Dart 1.0 mode).
    *
-   * This option is experimental and subject to change.
+   * This option is deprecated and will be removed in a future release.
    */
   bool declarationCasts = true;
 
@@ -1439,8 +1443,6 @@ class AnalysisOptionsImpl implements AnalysisOptions {
 
   @override
   bool preserveComments = true;
-
-  bool _strongMode = true;
 
   /**
    * A flag indicating whether strong-mode inference hints should be
@@ -1513,7 +1515,6 @@ class AnalysisOptionsImpl implements AnalysisOptions {
     lint = options.lint;
     lintRules = options.lintRules;
     preserveComments = options.preserveComments;
-    strongMode = options.strongMode;
     useFastaParser = options.useFastaParser;
     previewDart2 = options.previewDart2;
     if (options is AnalysisOptionsImpl) {
@@ -1653,9 +1654,9 @@ class AnalysisOptionsImpl implements AnalysisOptions {
       buffer.addBool(enableSuperMixins);
       buffer.addBool(implicitCasts);
       buffer.addBool(implicitDynamic);
-      buffer.addBool(strongMode);
       buffer.addBool(strongModeHints);
       buffer.addBool(useFastaParser);
+      buffer.addBool(previewDart2);
 
       // Append error processors.
       buffer.addInt(errorProcessors.length);
@@ -1683,11 +1684,11 @@ class AnalysisOptionsImpl implements AnalysisOptions {
   }
 
   @override
-  bool get strongMode => _strongMode || previewDart2;
+  bool get strongMode => true;
 
-  void set strongMode(bool value) {
-    _strongMode = value;
-  }
+  @Deprecated(
+      "The strongMode field is deprecated, and shouldn't be assigned to")
+  set strongMode(bool value) {}
 
   @override
   void resetToDefaults() {
@@ -1710,7 +1711,6 @@ class AnalysisOptionsImpl implements AnalysisOptions {
     nonnullableTypes = NONNULLABLE_TYPES;
     patchPaths = {};
     preserveComments = true;
-    strongMode = false;
     strongModeHints = false;
     trackCacheDependencies = true;
     useFastaParser = false;
@@ -1720,7 +1720,6 @@ class AnalysisOptionsImpl implements AnalysisOptions {
   void setCrossContextOptionsFrom(AnalysisOptions options) {
     enableLazyAssignmentOperators = options.enableLazyAssignmentOperators;
     enableSuperMixins = options.enableSuperMixins;
-    strongMode = options.strongMode;
     if (options is AnalysisOptionsImpl) {
       strongModeHints = options.strongModeHints;
     }
@@ -2661,14 +2660,12 @@ class ResolutionEraser extends GeneralizingAstVisitor<Object> {
   @override
   Object visitAssignmentExpression(AssignmentExpression node) {
     node.staticElement = null;
-    node.propagatedElement = null;
     return super.visitAssignmentExpression(node);
   }
 
   @override
   Object visitBinaryExpression(BinaryExpression node) {
     node.staticElement = null;
-    node.propagatedElement = null;
     return super.visitBinaryExpression(node);
   }
 
@@ -2717,7 +2714,6 @@ class ResolutionEraser extends GeneralizingAstVisitor<Object> {
   @override
   Object visitExpression(Expression node) {
     node.staticType = null;
-    node.propagatedType = null;
     return super.visitExpression(node);
   }
 
@@ -2732,14 +2728,12 @@ class ResolutionEraser extends GeneralizingAstVisitor<Object> {
   @override
   Object visitFunctionExpressionInvocation(FunctionExpressionInvocation node) {
     node.staticElement = null;
-    node.propagatedElement = null;
     return super.visitFunctionExpressionInvocation(node);
   }
 
   @override
   Object visitIndexExpression(IndexExpression node) {
     node.staticElement = null;
-    node.propagatedElement = null;
     return super.visitIndexExpression(node);
   }
 
@@ -2752,14 +2746,12 @@ class ResolutionEraser extends GeneralizingAstVisitor<Object> {
   @override
   Object visitPostfixExpression(PostfixExpression node) {
     node.staticElement = null;
-    node.propagatedElement = null;
     return super.visitPostfixExpression(node);
   }
 
   @override
   Object visitPrefixExpression(PrefixExpression node) {
     node.staticElement = null;
-    node.propagatedElement = null;
     return super.visitPrefixExpression(node);
   }
 
@@ -2775,7 +2767,6 @@ class ResolutionEraser extends GeneralizingAstVisitor<Object> {
     if (eraseDeclarations || !node.inDeclarationContext()) {
       node.staticElement = null;
     }
-    node.propagatedElement = null;
     return super.visitSimpleIdentifier(node);
   }
 

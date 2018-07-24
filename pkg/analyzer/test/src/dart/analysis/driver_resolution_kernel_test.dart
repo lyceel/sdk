@@ -8,9 +8,7 @@ import 'driver_resolution_test.dart';
 
 main() {
   defineReflectiveSuite(() {
-    // TODO(scheglov): Restore similar test coverage when the front-end API
-    // allows it.  See https://github.com/dart-lang/sdk/issues/32258.
-    // defineReflectiveTests(AnalysisDriverResolutionTest_Kernel);
+    defineReflectiveTests(AnalysisDriverResolutionTest_Kernel);
   });
 }
 
@@ -25,9 +23,58 @@ class AnalysisDriverResolutionTest_Kernel extends AnalysisDriverResolutionTest {
 
   @override
   @failingTest
-  @FastaProblem('https://github.com/dart-lang/sdk/issues/31605')
-  test_constructor_redirected_generic() async {
-    await super.test_constructor_redirected_generic();
+  @FastaProblem('https://github.com/dart-lang/sdk/issues/33795')
+  test_annotation_onDirective_partOf() async {
+    await super.test_annotation_onDirective_partOf();
+  }
+
+  @override
+  @assertFailingTest
+  test_closure_generic() {
+    // Assertion error: 'element != null': is not true.
+    return super.test_closure_generic();
+  }
+
+  @override
+  @failingTest
+  @FastaProblem('https://github.com/dart-lang/sdk/issues/33858')
+  test_invalid_fieldInitializer_this() async {
+    await super.test_invalid_fieldInitializer_this();
+  }
+
+  @override
+  @failingTest
+  @potentialAnalyzerProblem
+  test_unresolved_assignment_left_indexed1_simple() async {
+    await super.test_unresolved_assignment_left_indexed1_simple();
+  }
+
+  @override
+  @failingTest
+  @potentialAnalyzerProblem
+  test_unresolved_assignment_left_indexed2_simple() async {
+    await super.test_unresolved_assignment_left_indexed2_simple();
+  }
+
+  @override
+  @failingTest
+  @potentialAnalyzerProblem
+  test_unresolved_assignment_left_indexed3_simple() async {
+    await super.test_unresolved_assignment_left_indexed3_simple();
+  }
+
+  @override
+  @failingTest
+  @potentialAnalyzerProblem
+  test_unresolved_assignment_left_indexed4_simple() async {
+    await super.test_unresolved_assignment_left_indexed4_simple();
+  }
+
+  @override
+  @failingTest
+  @potentialAnalyzerProblem
+  test_unresolved_methodInvocation_target_unresolved() async {
+    await super.test_unresolved_methodInvocation_target_unresolved();
   }
 }
 

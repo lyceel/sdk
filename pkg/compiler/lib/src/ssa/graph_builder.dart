@@ -16,16 +16,17 @@ import '../io/source_information.dart';
 import '../js_backend/backend.dart';
 import '../js_backend/backend_usage.dart';
 import '../js_backend/constant_handler_javascript.dart';
+import '../js_backend/interceptor_data.dart';
+import '../js_backend/inferred_data.dart';
+import '../js_backend/js_interop_analysis.dart';
 import '../js_backend/namer.dart';
 import '../js_backend/native_data.dart';
-import '../js_backend/js_interop_analysis.dart';
-import '../js_backend/interceptor_data.dart';
 import '../js_backend/runtime_types.dart';
 import '../js_emitter/code_emitter_task.dart';
 import '../options.dart';
 import '../types/abstract_value_domain.dart';
 import '../types/types.dart';
-import '../world.dart' show ClosedWorld;
+import '../world.dart' show JClosedWorld;
 import 'jump_handler.dart';
 import 'locals_handler.dart';
 import 'nodes.dart';
@@ -53,7 +54,7 @@ abstract class GraphBuilder {
 
   CodegenRegistry get registry;
 
-  ClosedWorld get closedWorld;
+  JClosedWorld get closedWorld;
 
   AbstractValueDomain get abstractValueDomain =>
       closedWorld.abstractValueDomain;
@@ -66,8 +67,7 @@ abstract class GraphBuilder {
 
   CodeEmitterTask get emitter => backend.emitter;
 
-  GlobalTypeInferenceResults get globalInferenceResults =>
-      compiler.globalInference.results;
+  GlobalTypeInferenceResults get globalInferenceResults;
 
   ClosureDataLookup get closureDataLookup =>
       compiler.backendStrategy.closureDataLookup;
@@ -91,6 +91,8 @@ abstract class GraphBuilder {
   FunctionInlineCache get inlineCache => backend.inlineCache;
 
   JsInteropAnalysis get jsInteropAnalysis => backend.jsInteropAnalysis;
+
+  InferredData get inferredData => globalInferenceResults.inferredData;
 
   DeferredLoadTask get deferredLoadTask => compiler.deferredLoadTask;
 
@@ -130,7 +132,7 @@ abstract class GraphBuilder {
   /// Pushes a boolean checking [expression] against null.
   pushCheckNull(HInstruction expression) {
     push(new HIdentity(expression, graph.addConstantNull(closedWorld), null,
-        closedWorld.abstractValueDomain.boolType));
+        abstractValueDomain.boolType));
   }
 
   void dup() {
@@ -214,7 +216,7 @@ abstract class GraphBuilder {
     current.add(instruction);
   }
 
-  HParameterValue addParameter(Entity parameter, TypeMask type) {
+  HParameterValue addParameter(Entity parameter, AbstractValue type) {
     HParameterValue result = new HParameterValue(parameter, type);
     if (lastAddedParameter == null) {
       graph.entry.addBefore(graph.entry.first, result);

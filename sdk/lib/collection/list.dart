@@ -191,11 +191,7 @@ abstract class ListMixin<E> implements List<E> {
 
   Iterable<E> where(bool test(E element)) => new WhereIterable<E>(this, test);
 
-  // TODO(leafp): Restore this functionality once generic methods are enabled
-  // in the VM and dart2js.
-  // https://github.com/dart-lang/sdk/issues/32463
-  Iterable<T> whereType<T>() =>
-      throw new UnimplementedError("whereType is not yet supported");
+  Iterable<T> whereType<T>() => new WhereTypeIterable<T>(this);
 
   Iterable<T> map<T>(T f(E element)) => new MappedListIterable<E, T>(this, f);
 
@@ -330,10 +326,6 @@ abstract class ListMixin<E> implements List<E> {
   }
 
   List<R> cast<R>() => List.castFrom<E, R>(this);
-
-  @Deprecated("Use cast instead.")
-  List<R> retype<R>() => cast<R>();
-
   E removeLast() {
     if (length == 0) {
       throw IterableElementError.noElement();

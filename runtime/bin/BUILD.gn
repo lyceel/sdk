@@ -8,6 +8,7 @@ import("../../sdk/lib/io/io_sources.gni")
 import("../../sdk/lib/cli/cli_sources.gni")
 import("../../utils/generate_entry_points_json.gni")
 import("../runtime_args.gni")
+import("../vm/heap/heap_sources.gni")
 import("../vm/compiler/compiler_sources.gni")
 import("../vm/vm_sources.gni")
 import("builtin_impl_sources.gni")
@@ -272,7 +273,6 @@ template("build_libdart_builtin") {
       ":generate_web_sql_cc_file",
     ]
     if (is_fuchsia) {
-      deps += [ "//zircon/public/lib/launchpad" ]
       public_deps = [
         "//zircon/public/lib/fdio",
       ]
@@ -348,9 +348,6 @@ template("build_gen_snapshot") {
              ":generate_cli_cc_file",
              ":generate_cli_patch_cc_file",
            ] + extra_deps
-    if (is_fuchsia) {
-      deps += [ "//zircon/public/lib/launchpad" ]
-    }
 
     sources = [
       # Include generated source files.
@@ -596,10 +593,7 @@ template("dart_io") {
     deps += [ "//third_party/boringssl" ]
 
     if (is_fuchsia) {
-      deps += [
-        "//garnet/public/lib/netstack/c",
-        "//zircon/public/lib/launchpad",
-      ]
+      deps += [ "//garnet/public/lib/netstack/c" ]
       public_deps = [
         "//zircon/public/lib/fdio",
       ]
@@ -688,162 +682,191 @@ gen_snapshot_action("generate_snapshot_bin") {
 template("bin_to_assembly") {
   assert(defined(invoker.deps), "Must define deps")
   assert(defined(invoker.input), "Must define input binary file")
-  assert(defined(invoker.output), "Must define output assembly file")
   assert(defined(invoker.symbol), "Must define symbol name")
   assert(defined(invoker.executable), "Must define boolean executable")
 
   action(target_name) {
     deps = invoker.deps
     script = "../tools/bin_to_assembly.py"
+    output = invoker.input + ".S"
     args = [
       "--input",
       rebase_path(invoker.input),
       "--output",
-      rebase_path(invoker.output),
+      rebase_path(output),
       "--symbol_name",
       invoker.symbol,
       "--target_os",
       current_os,
     ]
+    if (defined(invoker.size_symbol)) {
+      args += [
+        "--size_symbol_name",
+        invoker.size_symbol,
+        "--target_arch",
+        current_cpu,
+      ]
+    }
     if (invoker.executable) {
       args += [ "--executable" ]
     }
     inputs = [
-      script,
       invoker.input,
     ]
     outputs = [
-      invoker.output,
+      output,
     ]
   }
 }
 
-bin_to_assembly("vm_snapshot_data_assembly") {
+# Generates an object file defining a given symbol with the bytes from a
+# binary file. Places the symbol in the read-only data section.
+template("bin_to_coff") {
+  assert(defined(invoker.deps), "Must define deps")
+  assert(defined(invoker.input), "Must define input binary file")
+  assert(defined(invoker.symbol), "Must define symbol name")
+  assert(defined(invoker.executable), "Must define executable")
+
+  action(target_name) {
+    deps = invoker.deps
+    script = "../tools/bin_to_coff.py"
+    output = invoker.input + ".o"
+    args = [
+      "--input",
+      rebase_path(invoker.input),
+      "--output",
+      rebase_path(output),
+      "--symbol_name",
+      invoker.symbol,
+    ]
+
+    if (defined(invoker.size_symbol)) {
+      args += [
+        "--size_symbol_name",
+        invoker.size_symbol,
+      ]
+    }
+
+    if (invoker.executable) {
+      args += [ "--executable" ]
+    }
+
+    if (current_cpu == "x64") {
+      args += [ "--64-bit" ]
+    }
+    inputs = [
+      invoker.input,
+    ]
+    outputs = [
+      output,
+    ]
+  }
+}
+
+template("bin_to_linkable") {
+  assert(defined(invoker.deps), "Must define deps")
+  assert(defined(invoker.input), "Must define input binary file")
+  assert(defined(invoker.symbol), "Must define symbol name")
+  target_type = "bin_to_assembly"
+  if (is_win) {
+    target_type = "bin_to_coff"
+  }
+
+  target(target_type, target_name) {
+    forward_variables_from(invoker, "*")
+  }
+}
+
+bin_to_linkable("vm_snapshot_data_linkable") {
   deps = [
     ":generate_snapshot_bin",
   ]
   input = "$target_gen_dir/vm_snapshot_data.bin"
-  output = "$target_gen_dir/vm_snapshot_data.S"
   symbol = "kDartVmSnapshotData"
   executable = false
 }
 
-bin_to_assembly("vm_snapshot_instructions_assembly") {
+bin_to_linkable("vm_snapshot_instructions_linkable") {
   deps = [
     ":generate_snapshot_bin",
   ]
   input = "$target_gen_dir/vm_snapshot_instructions.bin"
-  output = "$target_gen_dir/vm_snapshot_instructions.S"
   symbol = "kDartVmSnapshotInstructions"
   executable = true
 }
 
-bin_to_assembly("isolate_snapshot_data_assembly") {
+bin_to_linkable("isolate_snapshot_data_linkable") {
   deps = [
     ":generate_snapshot_bin",
   ]
   input = "$target_gen_dir/isolate_snapshot_data.bin"
-  output = "$target_gen_dir/isolate_snapshot_data.S"
   symbol = "kDartCoreIsolateSnapshotData"
   executable = false
 }
 
-bin_to_assembly("isolate_snapshot_instructions_assembly") {
+bin_to_linkable("isolate_snapshot_instructions_linkable") {
   deps = [
     ":generate_snapshot_bin",
   ]
   input = "$target_gen_dir/isolate_snapshot_instructions.bin"
-  output = "$target_gen_dir/isolate_snapshot_instructions.S"
   symbol = "kDartCoreIsolateSnapshotInstructions"
   executable = true
 }
 
-template("dill_to_cc") {
-  assert(defined(invoker.dill_file), "Need dill_file in $target_name.")
-  assert(defined(invoker.data_symbol), "Need data_symbol in $target_name.")
-  assert(defined(invoker.size_symbol), "Need size_symbol in $target_name.")
-  assert(defined(invoker.output), "Need output in $target_name.")
-
-  extra_deps = []
-  if (defined(invoker.deps)) {
-    extra_deps += invoker.deps
-  }
-
-  action(target_name) {
-    deps = extra_deps
-    script = "../tools/dill_to_data_cc.py"
-    inputs = [
-      "../tools/dill_to_data_cc.py",
-      invoker.dill_file,
-    ]
-    outputs = [
-      invoker.output,
-    ]
-    args = [
-      "--dill_file=" + rebase_path(invoker.dill_file),
-      "--data_symbol=" + invoker.data_symbol,
-      "--size_symbol=" + invoker.size_symbol,
-      "--output=" + rebase_path(invoker.output),
-    ]
-  }
-}
-
-dill_to_cc("kernel_service_dill_cc") {
+bin_to_linkable("kernel_service_dill_linkable") {
   deps = [
     "../../utils/kernel-service:kernel_service_dill",
   ]
-  dill_file = "$root_gen_dir/kernel_service.dill"
-  data_symbol = "kKernelServiceDill"
+  input = "$root_gen_dir/kernel_service.dill"
+  symbol = "kKernelServiceDill"
   size_symbol = "kKernelServiceDillSize"
-  output = "$root_gen_dir/kernel_service.dill.cc"
+  executable = false
 }
 
-dill_to_cc("platform_dill_cc") {
+bin_to_linkable("platform_dill_linkable") {
   deps = [
     "../vm:vm_legacy_platform",
   ]
-  dill_file = "$root_out_dir/vm_platform.dill"
-  data_symbol = "kPlatformDill"
+  input = "$root_out_dir/vm_platform.dill"
+  symbol = "kPlatformDill"
   size_symbol = "kPlatformDillSize"
-  output = "$target_gen_dir/vm_platform.dill.cc"
+  executable = false
 }
 
-dill_to_cc("platform_strong_dill_cc") {
+bin_to_linkable("platform_strong_dill_linkable") {
   deps = [
     "../vm:vm_platform",
   ]
-  dill_file = "$root_out_dir/vm_platform_strong.dill"
-  data_symbol = "kPlatformStrongDill"
+  input = "$root_out_dir/vm_platform_strong.dill"
+  symbol = "kPlatformStrongDill"
   size_symbol = "kPlatformStrongDillSize"
-  output = "$target_gen_dir/vm_platform_strong.dill.cc"
+  executable = false
 }
 
 source_set("dart_snapshot_cc") {
+  visibility = [ ":*" ]
   deps = [
-    ":isolate_snapshot_data_assembly",
-    ":isolate_snapshot_instructions_assembly",
-    ":vm_snapshot_data_assembly",
-    ":vm_snapshot_instructions_assembly",
+    ":isolate_snapshot_data_linkable",
+    ":isolate_snapshot_instructions_linkable",
+    ":vm_snapshot_data_linkable",
+    ":vm_snapshot_instructions_linkable",
   ]
-  sources = [
-    "$target_gen_dir/isolate_snapshot_data.S",
-    "$target_gen_dir/isolate_snapshot_instructions.S",
-    "$target_gen_dir/vm_snapshot_data.S",
-    "$target_gen_dir/vm_snapshot_instructions.S",
-  ]
+  sources = get_target_outputs(":isolate_snapshot_data_linkable") +
+            get_target_outputs(":isolate_snapshot_instructions_linkable") +
+            get_target_outputs(":vm_snapshot_data_linkable") +
+            get_target_outputs(":vm_snapshot_instructions_linkable")
 }
 
 source_set("dart_kernel_platform_cc") {
+  visibility = [ ":*" ]
   deps = [
-    ":kernel_service_dill_cc",
-    ":platform_dill_cc",
-    ":platform_strong_dill_cc",
+    ":kernel_service_dill_linkable",
+    ":platform_dill_linkable",
+    ":platform_strong_dill_linkable",
   ]
-  sources = [
-    "$root_gen_dir/kernel_service.dill.cc",
-    "$target_gen_dir/vm_platform.dill.cc",
-    "$target_gen_dir/vm_platform_strong.dill.cc",
-  ]
+  sources = get_target_outputs(":kernel_service_dill_linkable") +
+            get_target_outputs(":platform_dill_linkable") +
+            get_target_outputs(":platform_strong_dill_linkable")
 }
 
 template("dart_executable") {
@@ -896,17 +919,17 @@ template("dart_executable") {
              "$dart_zlib_path",
            ] + extra_deps
 
-    if (is_fuchsia) {
-      deps += [ "//zircon/public/lib/launchpad" ]
-    }
-
     defines = extra_defines
+    if (exclude_kernel_service) {
+      defines += [ "EXCLUDE_CFE_AND_KERNEL_PLATFORM" ]
+    }
 
     if (dart_use_tcmalloc) {
       deps += [ "//third_party/tcmalloc" ]
     }
 
     sources = [
+                "dart_embedder_api_impl.cc",
                 "error_exit.cc",
                 "error_exit.h",
                 "main.cc",
@@ -955,9 +978,6 @@ dart_executable("dart") {
   if (dart_runtime_mode != "release") {
     extra_deps += [ "../observatory:standalone_observatory_archive" ]
   }
-  if (dart_runtime_mode != "release") {
-    extra_deps += [ ":dart_kernel_platform_cc" ]
-  }
   extra_sources = [
     "builtin_nolib.cc",
     "dfe.cc",
@@ -970,6 +990,9 @@ dart_executable("dart") {
   ]
   if (dart_runtime_mode == "release") {
     extra_sources += [ "observatory_assets_empty.cc" ]
+  }
+  if (!exclude_kernel_service) {
+    extra_deps += [ ":dart_kernel_platform_cc" ]
   }
 }
 
@@ -1038,9 +1061,6 @@ dart_executable("dart_bootstrap") {
     ":generate_web_sql_cc_file",
     "..:libdart_nosnapshot_with_precompiler",
   ]
-  if (dart_runtime_mode != "release") {
-    extra_deps += [ ":dart_kernel_platform_cc" ]
-  }
   extra_defines = [ "NO_OBSERVATORY" ]
   extra_sources = [
     "builtin.cc",
@@ -1073,6 +1093,9 @@ dart_executable("dart_bootstrap") {
     "$target_gen_dir/web_gl_gen.cc",
     "$target_gen_dir/web_sql_gen.cc",
   ]
+  if (!exclude_kernel_service) {
+    extra_deps += [ ":dart_kernel_platform_cc" ]
+  }
 }
 
 executable("process_test") {
@@ -1153,6 +1176,7 @@ executable("run_vm_tests") {
   # the tests here.
   vm_tests = rebase_path(vm_sources_tests, ".", "../vm")
   compiler_tests = rebase_path(compiler_sources_tests, ".", "../vm/compiler")
+  heap_tests = rebase_path(heap_sources_tests, ".", "../vm/heap")
 
   sources = [
               "builtin_nolib.cc",
@@ -1161,7 +1185,7 @@ executable("run_vm_tests") {
               "run_vm_tests.cc",
               "snapshot_utils.cc",
               "snapshot_utils.h",
-            ] + builtin_impl_tests + vm_tests + compiler_tests
+            ] + builtin_impl_tests + vm_tests + compiler_tests + heap_tests
 
   if (!is_win) {
     ldflags = [ "-rdynamic" ]

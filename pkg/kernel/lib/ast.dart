@@ -672,6 +672,15 @@ enum ClassLevel {
 /// transform a mixin application to become a regular class, and vice versa.
 @coq
 class Class extends NamedNode implements FileUriNode {
+  /// Start offset of the class in the source file it comes from.
+  ///
+  /// Note that this includes annotations if any.
+  ///
+  /// Valid values are from 0 and up, or -1 ([TreeNode.noOffset]) if the file
+  /// start offset is not available (this is the default if none is specifically
+  /// set).
+  int startFileOffset = TreeNode.noOffset;
+
   /// End offset in the source file it comes from. Valid values are from 0 and
   /// up, or -1 ([TreeNode.noOffset]) if the file end offset is not available
   /// (this is the default if none is specifically set).
@@ -696,10 +705,28 @@ class Class extends NamedNode implements FileUriNode {
   /// applications.
   @coq
   String name;
-  bool isAbstract;
+
+  // Must match serialized bit positions.
+  static const int LevelMask = 0x3; // Bits 0 and 1.
+  static const int FlagAbstract = 1 << 2;
+  static const int FlagEnum = 1 << 3;
+  static const int FlagAnonymousMixin = 1 << 4;
+  static const int FlagEliminatedMixin = 1 << 5;
+
+  int flags = 0;
+
+  bool get isAbstract => flags & FlagAbstract != 0;
+
+  void set isAbstract(bool value) {
+    flags = value ? (flags | FlagAbstract) : (flags & ~FlagAbstract);
+  }
 
   /// Whether this class is an enum.
-  bool isEnum = false;
+  bool get isEnum => flags & FlagEnum != 0;
+
+  void set isEnum(bool value) {
+    flags = value ? (flags | FlagEnum) : (flags & ~FlagEnum);
+  }
 
   /// Whether this class is a synthetic implementation created for each
   /// mixed-in class. For example the following code:
@@ -714,7 +741,22 @@ class Class extends NamedNode implements FileUriNode {
   /// abstract class A&B&C&D extends A&B&C mixedIn D {}
   /// class Z extends A&B&C&D {}
   /// All X&Y classes are marked as synthetic.
-  bool isSyntheticMixinImplementation;
+  bool get isAnonymousMixin => flags & FlagAnonymousMixin != 0;
+
+  void set isAnonymousMixin(bool value) {
+    flags =
+        value ? (flags | FlagAnonymousMixin) : (flags & ~FlagAnonymousMixin);
+  }
+
+  /// Whether this class was transformed from a mixin application.
+  /// In such case, its mixed-in type was pulled into the end of implemented
+  /// types list.
+  bool get isEliminatedMixin => flags & FlagEliminatedMixin != 0;
+
+  void set isEliminatedMixin(bool value) {
+    flags =
+        value ? (flags | FlagEliminatedMixin) : (flags & ~FlagEliminatedMixin);
+  }
 
   /// The URI of the source file this class was loaded from.
   Uri fileUri;
@@ -750,8 +792,8 @@ class Class extends NamedNode implements FileUriNode {
 
   Class(
       {this.name,
-      this.isAbstract: false,
-      this.isSyntheticMixinImplementation: false,
+      bool isAbstract: false,
+      bool isAnonymousMixin: false,
       this.supertype,
       this.mixedInType,
       List<TypeParameter> typeParameters,
@@ -775,6 +817,8 @@ class Class extends NamedNode implements FileUriNode {
     setParents(this.procedures, this);
     setParents(this.fields, this);
     setParents(this.redirectingFactoryConstructors, this);
+    this.isAbstract = isAbstract;
+    this.isAnonymousMixin = isAnonymousMixin;
   }
 
   void computeCanonicalNames() {
@@ -938,9 +982,11 @@ class Class extends NamedNode implements FileUriNode {
 
 @coq
 abstract class Member extends NamedNode implements FileUriNode {
-  /// End offset in the source file it comes from. Valid values are from 0 and
-  /// up, or -1 ([TreeNode.noOffset]) if the file end offset is not available
-  /// (this is the default if none is specifically set).
+  /// End offset in the source file it comes from.
+  ///
+  /// Valid values are from 0 and up, or -1 ([TreeNode.noOffset]) if the file
+  /// end offset is not available (this is the default if none is specifically
+  /// set).
   int fileEndOffset = TreeNode.noOffset;
 
   /// List of metadata annotations on the member.
@@ -1189,6 +1235,15 @@ class Field extends Member {
 ///
 /// For unnamed constructors, the name is an empty string (in a [Name]).
 class Constructor extends Member {
+  /// Start offset of the constructor in the source file it comes from.
+  ///
+  /// Note that this includes annotations if any.
+  ///
+  /// Valid values are from 0 and up, or -1 ([TreeNode.noOffset]) if the file
+  /// start offset is not available (this is the default if none is specifically
+  /// set).
+  int startFileOffset = TreeNode.noOffset;
+
   int flags = 0;
   FunctionNode function;
   List<Initializer> initializers;
@@ -1415,6 +1470,15 @@ class RedirectingFactoryConstructor extends Member {
 /// except for the unary minus operator, whose name is `unary-`.
 @coq
 class Procedure extends Member {
+  /// Start offset of the function in the source file it comes from.
+  ///
+  /// Note that this includes annotations if any.
+  ///
+  /// Valid values are from 0 and up, or -1 ([TreeNode.noOffset]) if the file
+  /// start offset is not available (this is the default if none is specifically
+  /// set).
+  int startFileOffset = TreeNode.noOffset;
+
   ProcedureKind kind;
   int flags = 0;
   // function is null if and only if abstract, external.
@@ -3135,6 +3199,10 @@ class StringLiteral extends BasicLiteral {
 }
 
 class IntLiteral extends BasicLiteral {
+  /// Note that this value holds a uint64 value.
+  /// E.g. "0x8000000000000000" will be saved as "-9223372036854775808" despite
+  /// technically (on some platforms, particularly Javascript) being positive.
+  /// If the number is meant to be negative it will be wrapped in a "unary-".
   int value;
 
   IntLiteral(this.value);
@@ -5011,7 +5079,7 @@ class TypeParameter extends TreeNode {
   /// argument of a dynamic invocation of a generic function.
   DartType defaultType;
 
-  TypeParameter([this.name, this.bound]);
+  TypeParameter([this.name, this.bound, this.defaultType]);
 
   // Must match serialized bit positions.
   static const int FlagGenericCovariantImpl = 1 << 0;
@@ -5041,10 +5109,14 @@ class TypeParameter extends TreeNode {
 
   visitChildren(Visitor v) {
     bound.accept(v);
+    defaultType?.accept(v);
   }
 
   transformChildren(Transformer v) {
     bound = v.visitDartType(bound);
+    if (defaultType != null) {
+      defaultType = v.visitDartType(defaultType);
+    }
   }
 
   /// Returns a possibly synthesized name for this type parameter, consistent
@@ -5132,7 +5204,7 @@ abstract class PrimitiveConstant<T> extends Constant {
 
   PrimitiveConstant(this.value);
 
-  String toString() => '${this.runtimeType}($value)';
+  String toString() => '$value';
 
   int get hashCode => value.hashCode;
 
@@ -5581,6 +5653,7 @@ abstract class BinarySink {
 
   void writeCanonicalNameReference(CanonicalName name);
   void writeStringReference(String str);
+  void writeName(Name node);
   void writeDartType(DartType type);
   void writeNode(Node node);
 
@@ -5607,6 +5680,7 @@ abstract class BinarySource {
 
   CanonicalName readCanonicalNameReference();
   String readStringReference();
+  Name readName();
   DartType readDartType();
   FunctionNode readFunctionNode();
 

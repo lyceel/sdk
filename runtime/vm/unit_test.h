@@ -13,7 +13,7 @@
 #include "vm/dart.h"
 #include "vm/dart_api_state.h"
 #include "vm/globals.h"
-#include "vm/heap.h"
+#include "vm/heap/heap.h"
 #include "vm/isolate.h"
 #include "vm/longjump.h"
 #include "vm/object.h"
@@ -318,17 +318,29 @@ class TestCase : TestCaseBase {
                                         const char* source,
                                         const uint8_t** kernel_buffer,
                                         intptr_t* kernel_buffer_size,
-                                        bool incrementally = true);
+                                        bool incrementally = true,
+                                        bool allow_compile_errors = false,
+                                        const char* multiroot_filepaths = NULL,
+                                        const char* multiroot_scheme = NULL);
   static char* CompileTestScriptWithDFE(const char* url,
                                         int sourcefiles_count,
                                         Dart_SourceFile sourcefiles[],
                                         const uint8_t** kernel_buffer,
                                         intptr_t* kernel_buffer_size,
-                                        bool incrementally = true);
+                                        bool incrementally = true,
+                                        bool allow_compile_errors = false,
+                                        const char* multiroot_filepaths = NULL,
+                                        const char* multiroot_scheme = NULL);
   static Dart_Handle LoadTestScript(const char* script,
                                     Dart_NativeEntryResolver resolver,
                                     const char* lib_uri = USER_TEST_URI,
-                                    bool finalize = true);
+                                    bool finalize = true,
+                                    bool allow_compile_errors = false);
+  static Dart_Handle LoadTestScriptWithErrors(
+      const char* script,
+      Dart_NativeEntryResolver resolver = NULL,
+      const char* lib_uri = USER_TEST_URI,
+      bool finalize = true);
   static Dart_Handle LoadTestLibrary(const char* lib_uri,
                                      const char* script,
                                      Dart_NativeEntryResolver resolver = NULL);
@@ -337,9 +349,18 @@ class TestCase : TestCaseBase {
       Dart_SourceFile sourcefiles[],
       Dart_NativeEntryResolver resolver = NULL,
       bool finalize = true,
-      bool incrementally = true);
+      bool incrementally = true,
+      bool allow_compile_errors = false,
+      const char* entry_script_uri = NULL,
+      const char* multiroot_filepaths = NULL,
+      const char* multiroot_scheme = NULL);
   static Dart_Handle LoadCoreTestScript(const char* script,
                                         Dart_NativeEntryResolver resolver);
+
+  static Dart_Handle EvaluateExpression(const Library& lib,
+                                        const String& expr,
+                                        const Array& param_names,
+                                        const Array& param_values);
 
   static Dart_Handle lib();
   static const char* url();
@@ -352,7 +373,6 @@ class TestCase : TestCaseBase {
   static Dart_Handle library_handler(Dart_LibraryTag tag,
                                      Dart_Handle library,
                                      Dart_Handle url);
-  static char* BigintToHexValue(Dart_CObject* bigint);
 
   virtual void Run();
 
@@ -385,7 +405,8 @@ class TestCase : TestCaseBase {
   static char* ValidateCompilationResult(Zone* zone,
                                          Dart_KernelCompilationResult result,
                                          const uint8_t** kernel_buffer,
-                                         intptr_t* kernel_buffer_size);
+                                         intptr_t* kernel_buffer_size,
+                                         bool allow_compile_errors);
 
   RunEntry* const run_;
 };

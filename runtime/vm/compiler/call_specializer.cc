@@ -1,6 +1,7 @@
 // Copyright (c) 2017, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
+
 #ifndef DART_PRECOMPILED_RUNTIME
 #include "vm/compiler/call_specializer.h"
 
@@ -220,7 +221,6 @@ bool CallSpecializer::TryCreateICData(InstanceCallInstr* call) {
         class_ids[1] = kSmiCid;
       }
     }
-
     if (Token::IsRelationalOperator(op_kind) ||
         Token::IsEqualityOperator(op_kind) ||
         Token::IsBinaryOperator(op_kind)) {
@@ -753,8 +753,9 @@ bool CallSpecializer::TryReplaceWithBinaryOp(InstanceCallInstr* call,
   } else if (operands_type == kMintCid) {
     if (!FlowGraphCompiler::SupportsUnboxedInt64()) return false;
     if ((op_kind == Token::kSHR) || (op_kind == Token::kSHL)) {
-      ShiftInt64OpInstr* shift_op = new (Z) ShiftInt64OpInstr(
-          op_kind, new (Z) Value(left), new (Z) Value(right), call->deopt_id());
+      SpeculativeShiftInt64OpInstr* shift_op = new (Z)
+          SpeculativeShiftInt64OpInstr(op_kind, new (Z) Value(left),
+                                       new (Z) Value(right), call->deopt_id());
       ReplaceCall(call, shift_op);
     } else {
       BinaryInt64OpInstr* bin_op = new (Z) BinaryInt64OpInstr(
@@ -871,13 +872,20 @@ bool CallSpecializer::TryInlineImplicitInstanceGetter(InstanceCallInstr* call) {
   const Field& field = Field::ZoneHandle(Z, GetField(class_ids[0], field_name));
   ASSERT(!field.IsNull());
 
-  if (flow_graph()->InstanceCallNeedsClassCheck(call,
-                                                RawFunction::kImplicitGetter)) {
-    if (FLAG_precompiled_mode) {
-      return false;
-    }
-
-    AddReceiverCheck(call);
+  switch (
+      flow_graph()->CheckForInstanceCall(call, RawFunction::kImplicitGetter)) {
+    case FlowGraph::ToCheck::kCheckNull:
+      AddCheckNull(call->Receiver(), call->function_name(), call->deopt_id(),
+                   call->env(), call);
+      break;
+    case FlowGraph::ToCheck::kCheckCid:
+      if (FLAG_precompiled_mode) {
+        return false;  // AOT cannot class check
+      }
+      AddReceiverCheck(call);
+      break;
+    case FlowGraph::ToCheck::kNoCheck:
+      break;
   }
   InlineImplicitInstanceGetter(call, field);
   return true;
@@ -908,12 +916,6 @@ bool CallSpecializer::TryInlineInstanceSetter(InstanceCallInstr* instr,
                                               const ICData& unary_ic_data) {
   ASSERT(!unary_ic_data.NumberOfChecksIs(0) &&
          (unary_ic_data.NumArgsTested() == 1));
-  if (I->argument_type_checks()) {
-    // Checked mode setters are inlined like normal methods by conventional
-    // inlining.
-    return false;
-  }
-
   ASSERT(instr->HasICData());
   if (unary_ic_data.NumberOfChecksIs(0)) {
     // No type feedback collected.
@@ -932,18 +934,28 @@ bool CallSpecializer::TryInlineInstanceSetter(InstanceCallInstr* instr,
     return false;
   }
   // Inline implicit instance setter.
-  const String& field_name =
-      String::Handle(Z, Field::NameFromSetter(instr->function_name()));
+  String& field_name = String::Handle(Z, instr->function_name().raw());
+  if (Function::IsDynamicInvocationForwaderName(field_name)) {
+    field_name = Function::DemangleDynamicInvocationForwarderName(field_name);
+  }
+  field_name = Field::NameFromSetter(field_name);
   const Field& field = Field::ZoneHandle(Z, GetField(class_id, field_name));
   ASSERT(!field.IsNull());
 
-  if (flow_graph()->InstanceCallNeedsClassCheck(instr,
-                                                RawFunction::kImplicitSetter)) {
-    if (FLAG_precompiled_mode) {
-      return false;
-    }
-
-    AddReceiverCheck(instr);
+  switch (
+      flow_graph()->CheckForInstanceCall(instr, RawFunction::kImplicitSetter)) {
+    case FlowGraph::ToCheck::kCheckNull:
+      AddCheckNull(instr->Receiver(), instr->function_name(), instr->deopt_id(),
+                   instr->env(), instr);
+      break;
+    case FlowGraph::ToCheck::kCheckCid:
+      if (FLAG_precompiled_mode) {
+        return false;  // AOT cannot class check
+      }
+      AddReceiverCheck(instr);
+      break;
+    case FlowGraph::ToCheck::kNoCheck:
+      break;
   }
 
   if (I->use_field_guards()) {
@@ -962,6 +974,62 @@ bool CallSpecializer::TryInlineInstanceSetter(InstanceCallInstr* instr,
           instr,
           new (Z) GuardFieldLengthInstr(new (Z) Value(instr->ArgumentAt(1)),
                                         field, instr->deopt_id()),
+          instr->env(), FlowGraph::kEffect);
+    }
+  }
+
+  // Build an AssertAssignable if necessary.
+  if (I->argument_type_checks()) {
+    const AbstractType& dst_type =
+        AbstractType::ZoneHandle(zone(), field.type());
+
+    // Compute if we need to type check the value. Always type check if
+    // not in strong mode or if at a dynamic invocation.
+    bool needs_check = true;
+    if (I->strong() && !instr->interface_target().IsNull() &&
+        (field.kernel_offset() >= 0)) {
+      bool is_covariant = false;
+      bool is_generic_covariant = false;
+      field.GetCovarianceAttributes(&is_covariant, &is_generic_covariant);
+
+      if (is_covariant) {
+        // Always type check covariant fields.
+        needs_check = true;
+      } else if (is_generic_covariant) {
+        // If field is generic covariant then we don't need to check it
+        // if we know that actual type arguments match static type arguments
+        // e.g. if this is an invocation on this (an instance we are storing
+        // into is also a receiver of a surrounding method).
+        needs_check = !flow_graph_->IsReceiver(instr->ArgumentAt(0));
+      } else {
+        // The rest of the stores are checked statically (we are not at
+        // a dynamic invocation).
+        needs_check = false;
+      }
+    }
+
+    if (needs_check) {
+      Definition* instantiator_type_args = flow_graph_->constant_null();
+      Definition* function_type_args = flow_graph_->constant_null();
+      if (!dst_type.IsInstantiated()) {
+        const Class& owner = Class::Handle(Z, field.Owner());
+        if (owner.NumTypeArguments() > 0) {
+          instantiator_type_args = new (Z) LoadFieldInstr(
+              new (Z) Value(instr->ArgumentAt(0)),
+              NativeFieldDesc::GetTypeArgumentsFieldFor(zone(), owner),
+              instr->token_pos());
+          InsertBefore(instr, instantiator_type_args, instr->env(),
+                       FlowGraph::kValue);
+        }
+      }
+
+      InsertBefore(
+          instr,
+          new (Z) AssertAssignableInstr(
+              instr->token_pos(), new (Z) Value(instr->ArgumentAt(1)),
+              new (Z) Value(instantiator_type_args),
+              new (Z) Value(function_type_args), dst_type,
+              String::ZoneHandle(zone(), field.name()), instr->deopt_id()),
           instr->env(), FlowGraph::kEffect);
     }
   }
@@ -1626,14 +1694,12 @@ bool CallSpecializer::SpecializeTestCidsForNumericTypes(
   } else if (type.IsIntType()) {
     ASSERT((*results)[0] == kSmiCid);
     TryAddTest(results, kMintCid, true);
-    TryAddTest(results, kBigintCid, true);
     // Cannot deoptimize since all tests returning true have been added.
     PurgeNegativeTestCidsEntries(results);
     return false;
   } else if (type.IsNumberType()) {
     ASSERT((*results)[0] == kSmiCid);
     TryAddTest(results, kMintCid, true);
-    TryAddTest(results, kBigintCid, true);
     TryAddTest(results, kDoubleCid, true);
     PurgeNegativeTestCidsEntries(results);
     return false;

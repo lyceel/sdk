@@ -23,21 +23,22 @@ runTest() async {
       await runCompiler(memorySourceFiles: MEMORY_SOURCE_FILES);
   Compiler compiler = result.compiler;
   var closedWorld = compiler.backendClosedWorldForTesting;
-  var outputUnitForEntity = compiler.backend.outputUnitData.outputUnitForEntity;
+  var outputUnitForMember = compiler.backend.outputUnitData.outputUnitForMember;
+  var outputUnitForClass = compiler.backend.outputUnitData.outputUnitForClass;
   var mainOutputUnit = compiler.backend.outputUnitData.mainOutputUnit;
   var elementEnvironment = closedWorld.elementEnvironment;
   dynamic lib = elementEnvironment.lookupLibrary(Uri.parse("memory:lib.dart"));
   var customType = elementEnvironment.lookupClass(lib, "CustomType");
   var foo = elementEnvironment.lookupLibraryMember(lib, "foo");
-  Expect.notEquals(mainOutputUnit, outputUnitForEntity(foo));
+  Expect.notEquals(mainOutputUnit, outputUnitForMember(foo));
   // Native elements are not deferred
-  Expect.equals(mainOutputUnit, outputUnitForEntity(customType));
+  Expect.equals(mainOutputUnit, outputUnitForClass(customType));
 }
 
 // The main library imports a file defining a custom element.
 // Registering this class implicitly causes the constructors to be
 // live. Check that this is handled.
-const Map MEMORY_SOURCE_FILES = const {
+const Map<String, String> MEMORY_SOURCE_FILES = const {
   "main.dart": """
 import "lib.dart" deferred as a;
 import 'dart:html';

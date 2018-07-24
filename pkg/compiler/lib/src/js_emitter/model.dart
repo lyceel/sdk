@@ -21,11 +21,6 @@ class Program {
   /// A map from load id to the list of fragments that need to be loaded.
   final Map<String, List<Fragment>> loadMap;
 
-  /// A map from names to strings.
-  ///
-  /// This map is needed to support `const Symbol` expressions;
-  final Map<js.Name, String> symbolsMap;
-
   // If this field is not `null` then its value must be emitted in the embedded
   // global `TYPE_TO_INTERCEPTOR_MAP`. The map references constants and classes.
   final js.Expression typeToInterceptorMap;
@@ -35,8 +30,8 @@ class Program {
   final MetadataCollector _metadataCollector;
   final Iterable<js.TokenFinalizer> finalizers;
 
-  Program(this.fragments, this.holders, this.loadMap, this.symbolsMap,
-      this.typeToInterceptorMap, this._metadataCollector, this.finalizers,
+  Program(this.fragments, this.holders, this.loadMap, this.typeToInterceptorMap,
+      this._metadataCollector, this.finalizers,
       {this.needsNativeSupport,
       this.outputContainsConstantList,
       this.hasSoftDeferredClasses}) {
@@ -389,9 +384,17 @@ class Field {
 
   final bool needsCheckedSetter;
 
+  final bool nullInitializerInAllocator; // TODO(sra): Generalize.
+
   // TODO(floitsch): support renamed fields.
-  Field(this.element, this.name, this.accessorName, this.getterFlags,
-      this.setterFlags, this.needsCheckedSetter);
+  Field(
+      this.element,
+      this.name,
+      this.accessorName,
+      this.getterFlags,
+      this.setterFlags,
+      this.needsCheckedSetter,
+      this.nullInitializerInAllocator);
 
   bool get needsGetter => getterFlags != 0;
   bool get needsUncheckedSetter => setterFlags != 0;
@@ -430,9 +433,9 @@ abstract class DartMethod extends Method {
   final js.Name tearOffName;
   final List<ParameterStubMethod> parameterStubs;
   final bool canBeApplied;
-  final bool canBeReflected;
+  final int applyIndex;
 
-  // Is non-null if [needsTearOff] or [canBeReflected].
+  // Is non-null if [needsTearOff].
   //
   // If the type is encoded in the metadata table this field contains an index
   // into the table. Otherwise the type contains type variables in which case
@@ -440,7 +443,7 @@ abstract class DartMethod extends Method {
   final js.Expression functionType;
 
   // Signature information for this method. This is only required and stored
-  // here if the method [canBeApplied] or [canBeReflected]
+  // here if the method [canBeApplied].
   final int requiredParameterCount;
   final /* Map | List */ optionalParameterDefaultValues;
 
@@ -454,16 +457,15 @@ abstract class DartMethod extends Method {
       {this.needsTearOff,
       this.tearOffName,
       this.canBeApplied,
-      this.canBeReflected,
       this.requiredParameterCount,
       this.optionalParameterDefaultValues,
-      this.functionType})
+      this.functionType,
+      this.applyIndex})
       : super(element, name, code) {
     assert(needsTearOff != null);
     assert(!needsTearOff || tearOffName != null);
     assert(canBeApplied != null);
-    assert(canBeReflected != null);
-    assert((!canBeReflected && !canBeApplied) ||
+    assert(!canBeApplied ||
         (requiredParameterCount != null &&
             optionalParameterDefaultValues != null));
   }
@@ -486,26 +488,29 @@ class InstanceMethod extends DartMethod {
   /// True if the interceptor calling convention is used for this method.
   final bool isIntercepted;
 
+  /// Name called via the general 'catch all' path of Function.apply.
+  ///final js.Name applyName;
+
   InstanceMethod(FunctionEntity element, js.Name name, js.Expression code,
       List<ParameterStubMethod> parameterStubs, js.Name callName,
       {bool needsTearOff,
       js.Name tearOffName,
       this.aliasName,
       bool canBeApplied,
-      bool canBeReflected,
       int requiredParameterCount,
       /* List | Map */ optionalParameterDefaultValues,
       this.isClosureCallMethod,
       this.isIntercepted,
-      js.Expression functionType})
+      js.Expression functionType,
+      int applyIndex})
       : super(element, name, code, parameterStubs, callName,
             needsTearOff: needsTearOff,
             tearOffName: tearOffName,
             canBeApplied: canBeApplied,
-            canBeReflected: canBeReflected,
             requiredParameterCount: requiredParameterCount,
             optionalParameterDefaultValues: optionalParameterDefaultValues,
-            functionType: functionType) {
+            functionType: functionType,
+            applyIndex: applyIndex) {
     assert(isClosureCallMethod != null);
   }
 
@@ -551,8 +556,9 @@ class ParameterStubMethod extends StubMethod {
       : super(name, code);
 
   String toString() {
-    return 'ParameterStubMethod(name=${name.key},element=${element}'
-        ',code=${js.nodeToString(code)})';
+    return 'ParameterStubMethod(name=${name.key}, callName=${callName?.key}'
+        ', element=${element}'
+        ', code=${js.nodeToString(code)})';
   }
 }
 
@@ -573,18 +579,18 @@ class StaticDartMethod extends DartMethod implements StaticMethod {
       {bool needsTearOff,
       js.Name tearOffName,
       bool canBeApplied,
-      bool canBeReflected,
       int requiredParameterCount,
       /* List | Map */ optionalParameterDefaultValues,
-      js.Expression functionType})
+      js.Expression functionType,
+      int applyIndex})
       : super(element, name, code, parameterStubs, callName,
             needsTearOff: needsTearOff,
             tearOffName: tearOffName,
             canBeApplied: canBeApplied,
-            canBeReflected: canBeReflected,
             requiredParameterCount: requiredParameterCount,
             optionalParameterDefaultValues: optionalParameterDefaultValues,
-            functionType: functionType);
+            functionType: functionType,
+            applyIndex: applyIndex);
 
   bool get isStatic => true;
 

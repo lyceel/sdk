@@ -73,8 +73,10 @@ abstract class AbstractResynthesizeTest extends AbstractSingleUnitTest {
 
   /**
    * Return `true` if resynthesizing should be done in strong mode.
+   *
+   * Deprecated - remove this getter.
    */
-  bool get isStrongMode;
+  bool get isStrongMode => true;
 
   void addLibrary(String uri) {
     otherLibrarySources.add(context.sourceFactory.forUri(uri));
@@ -207,7 +209,7 @@ abstract class AbstractResynthesizeTest extends AbstractSingleUnitTest {
         ? resynthesized.actualElement
         : resynthesized;
     if (original is Member) {
-      expect(resynthesizedNonHandle, new isInstanceOf<Member>(), reason: desc);
+      expect(resynthesizedNonHandle, new TypeMatcher<Member>(), reason: desc);
       if (resynthesizedNonHandle is Member) {
         List<DartType> resynthesizedTypeArguments =
             resynthesizedNonHandle.definingType.typeArguments;
@@ -223,7 +225,7 @@ abstract class AbstractResynthesizeTest extends AbstractSingleUnitTest {
       }
     } else {
       expect(
-          resynthesizedNonHandle, isNot(new isInstanceOf<ConstructorMember>()),
+          resynthesizedNonHandle, isNot(new TypeMatcher<ConstructorMember>()),
           reason: desc);
     }
   }
@@ -477,7 +479,7 @@ abstract class AbstractResynthesizeTest extends AbstractSingleUnitTest {
       } else if (o is ThisExpression && r is ThisExpression) {
         // Nothing to compare.
       } else if (o is NullLiteral) {
-        expect(r, new isInstanceOf<NullLiteral>(), reason: desc);
+        expect(r, new TypeMatcher<NullLiteral>(), reason: desc);
       } else if (o is BooleanLiteral && r is BooleanLiteral) {
         expect(r.value, o.value, reason: desc);
       } else if (o is IntegerLiteral && r is IntegerLiteral) {
@@ -764,9 +766,9 @@ abstract class AbstractResynthesizeTest extends AbstractSingleUnitTest {
 
     // Validate members.
     if (oImpl is Member) {
-      expect(rImpl, new isInstanceOf<Member>(), reason: desc);
+      expect(rImpl, new TypeMatcher<Member>(), reason: desc);
     } else {
-      expect(rImpl, isNot(new isInstanceOf<Member>()), reason: desc);
+      expect(rImpl, isNot(new TypeMatcher<Member>()), reason: desc);
     }
   }
 
@@ -1091,7 +1093,7 @@ abstract class AbstractResynthesizeTest extends AbstractSingleUnitTest {
           reason: desc);
       if (original.element.enclosingElement == null &&
           original.element is FunctionElement) {
-        expect(resynthesized.element, new isInstanceOf<FunctionElement>());
+        expect(resynthesized.element, new TypeMatcher<FunctionElement>());
         expect(resynthesized.element.enclosingElement, isNull, reason: desc);
         compareFunctionElements(
             resynthesized.element, original.element, '$desc.element',
@@ -1197,7 +1199,7 @@ abstract class AbstractResynthesizeTest extends AbstractSingleUnitTest {
       Element actualElement = element.actualElement;
       // A handle should never point to a member, because if it did, then
       // "is Member" checks on the handle would produce the wrong result.
-      expect(actualElement, isNot(new isInstanceOf<Member>()), reason: desc);
+      expect(actualElement, isNot(new TypeMatcher<Member>()), reason: desc);
       return getActualElement(actualElement, desc);
     } else if (element is Member) {
       return getActualElement(element.baseElement, desc);
@@ -2389,7 +2391,7 @@ class C<T extends Object, U extends D> {}
 class D {}
 ''');
     checkElementText(library, r'''
-class C<T extends Object, U extends D> {
+class C<T, U extends D> {
 }
 class D {
 }
@@ -2535,11 +2537,9 @@ class C {
 int foo() => 42;
 ''', allowErrors: true);
     if (isSharedFrontEnd) {
-      // It is OK to keep non-constant initializers.
       checkElementText(library, r'''
 class C {
-  static const int f = 1 +
-        foo/*location: test.dart;foo*/();
+  static const int f = #invalidConst;
 }
 int foo() {}
 ''');
@@ -2603,10 +2603,8 @@ const v = 1 + foo();
 int foo() => 42;
 ''', allowErrors: true);
     if (isSharedFrontEnd) {
-      // It is OK to keep non-constant initializers.
       checkElementText(library, r'''
-const int v = 1 +
-        foo/*location: test.dart;foo*/();
+const int v = #invalidConst;
 int foo() {}
 ''');
     } else if (isStrongMode) {
@@ -2620,6 +2618,25 @@ int foo() {}
 const dynamic v = 1 +
         foo/*location: test.dart;foo*/();
 int foo() {}
+''');
+    }
+  }
+
+  test_const_invalid_typeMismatch() async {
+    var library = await checkLibrary(r'''
+const int a = 0;
+const bool b = a + 5;
+''', allowErrors: true);
+    if (isSharedFrontEnd) {
+      checkElementText(library, r'''
+const int a = 0;
+const bool b = #invalidConst;
+''');
+    } else {
+      checkElementText(library, r'''
+const int a = 0;
+const bool b =
+        a/*location: test.dart;a?*/ + 5;
 ''');
     }
   }
@@ -3295,6 +3312,35 @@ const dynamic v =
         length/*location: test.dart;C;length*/;
 ''');
     }
+  }
+
+  test_const_list_inferredType() async {
+    if (!isStrongMode) return;
+    // The summary needs to contain enough information so that when the constant
+    // is resynthesized, the constant value can get the type that was computed
+    // by type inference.
+    var library = await checkLibrary('''
+const Object x = const [1];
+''');
+    checkElementText(library, '''
+const Object x = const <
+        int/*location: dart:core;int*/>[1];
+''');
+  }
+
+  test_const_map_inferredType() async {
+    if (!isStrongMode) return;
+    // The summary needs to contain enough information so that when the constant
+    // is resynthesized, the constant value can get the type that was computed
+    // by type inference.
+    var library = await checkLibrary('''
+const Object x = const {1: 1.0};
+''');
+    checkElementText(library, '''
+const Object x = const <
+        int/*location: dart:core;int*/,
+        double/*location: dart:core;double*/>{1: 1.0};
+''');
   }
 
   test_const_parameterDefaultValue_initializingFormal_functionTyped() async {
@@ -4197,6 +4243,23 @@ const dynamic vThis = #invalidConst;
 ''');
   }
 
+  test_const_topLevel_throw() async {
+    shouldCompareLibraryElements = false;
+    var library = await checkLibrary(r'''
+const c = throw 42;
+''');
+    if (isSharedFrontEnd) {
+      checkElementText(library, r'''
+const dynamic c = #invalidConst;
+''');
+    } else {
+      // This is a bug.
+      checkElementText(library, r'''
+const dynamic c;
+''');
+    }
+  }
+
   test_const_topLevel_typedList() async {
     var library = await checkLibrary(r'''
 const vNull = const <Null>[];
@@ -4579,8 +4642,18 @@ class C {
 }
 int foo() => 42;
 ''', allowErrors: true);
-    // It is OK to keep non-constant initializers.
-    checkElementText(library, r'''
+    if (isSharedFrontEnd) {
+      checkElementText(library, r'''
+class C {
+  final dynamic x;
+  const C() :
+        x/*location: test.dart;C;x*/ = #invalidConst;
+}
+int foo() {}
+''');
+    } else {
+      // It is OK to keep non-constant initializers.
+      checkElementText(library, r'''
 class C {
   final dynamic x;
   const C() :
@@ -4589,6 +4662,7 @@ class C {
 }
 int foo() {}
 ''');
+    }
   }
 
   test_constructor_initializers_field_withParameter() async {
@@ -7474,6 +7548,37 @@ C<dynamic, dynamic> c;
     }
   }
 
+  test_instantiateToBounds_functionTypeAlias_reexported() async {
+    addLibrarySource('/a.dart', r'''
+class O {}
+typedef T F<T extends O>(T p);
+''');
+    addLibrarySource('/b.dart', r'''
+export 'a.dart' show F;
+''');
+    var library = await checkLibrary('''
+import 'b.dart';
+class C {
+  F f() => null;
+}
+''');
+    if (isStrongMode) {
+      checkElementText(library, r'''
+import 'b.dart';
+class C {
+  (O) → O f() {}
+}
+''');
+    } else {
+      checkElementText(library, r'''
+import 'b.dart';
+class C {
+  (dynamic) → dynamic f() {}
+}
+''');
+    }
+  }
+
   test_instantiateToBounds_functionTypeAlias_simple() async {
     var library = await checkLibrary('''
 typedef F<T extends num>(T p);
@@ -8135,6 +8240,21 @@ class C {
   @
         a/*location: test.dart;a?*/
   C();
+}
+const dynamic a = null;
+''');
+  }
+
+  test_metadata_enumConstantDeclaration() async {
+    var library = await checkLibrary('const a = null; enum E { @a v }');
+    checkElementText(library, r'''
+enum E {
+  synthetic final int index;
+  synthetic static const List<E> values;
+  @
+        a/*location: test.dart;a?*/
+  static const E v;
+  String toString() {}
 }
 const dynamic a = null;
 ''');
@@ -10006,7 +10126,7 @@ typedef F<T, U> = U Function(T t);
     var library = await checkLibrary(
         'typedef U F<T extends Object, U extends D>(T t); class D {}');
     checkElementText(library, r'''
-typedef F<T extends Object, U extends D> = U Function(T t);
+typedef F<T, U extends D> = U Function(T t);
 class D {
 }
 ''');
@@ -10537,8 +10657,7 @@ class TestSummaryResynthesizer extends SummaryResynthesizer {
 
   TestSummaryResynthesizer(AnalysisContext context, this.unlinkedSummaries,
       this.linkedSummaries, this.allowMissingFiles)
-      : super(context, context.sourceFactory,
-            context.analysisOptions.strongMode) {
+      : super(context, context.sourceFactory, true) {
     // Clear after resynthesizing TypeProvider in super().
     unlinkedSummariesRequested.clear();
     linkedSummariesRequested.clear();

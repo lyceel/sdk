@@ -72,6 +72,9 @@ for command; do
     ./tools/build.py --mode=release --arch=ia32 create_sdk
     ./tools/build.py --mode=release --arch=ia32 runtime
     tar -czf linux-ia32_profile.tar.gz \
+      --exclude .git \
+      --exclude .gitignore \
+      -- \
       third_party/d8/linux/ia32/natives_blob.bin \
       third_party/d8/linux/ia32/snapshot_blob.bin \
       out/ReleaseIA32/vm_outline.dill \
@@ -92,8 +95,7 @@ for command; do
       pkg \
       runtime/bin \
       runtime/lib \
-      --exclude .git \
-      --exclude .gitignore || (rm -f linux-ia32_profile.tar.gz; exit 1)
+      || (rm -f linux-ia32_profile.tar.gz; exit 1)
     strip -w \
       -K 'kDartVmSnapshotData' \
       -K 'kDartVmSnapshotInstructions' \
@@ -171,6 +173,9 @@ for command; do
       -K '_ZN4dart7Version7commit_E' \
       -K '_ZN4dart9Bootstrap*_paths_E' third_party/d8/linux/ia32/d8
     tar -czf linux-ia32.tar.gz \
+      --exclude .git \
+      --exclude .gitignore \
+      -- \
       third_party/d8/linux/ia32/natives_blob.bin \
       third_party/d8/linux/ia32/snapshot_blob.bin \
       out/ReleaseIA32/vm_outline.dill \
@@ -192,8 +197,7 @@ for command; do
       pkg \
       runtime/bin \
       runtime/lib \
-      --exclude .git \
-      --exclude .gitignore || (rm -f linux-ia32.tar.gz; exit 1)
+      || (rm -f linux-ia32.tar.gz; exit 1)
   elif [ "$command" = linux-ia32-benchmark ]; then
     rm -rf tmp
     mkdir tmp
@@ -205,7 +209,6 @@ main() {
 }
 EOF
     out/ReleaseIA32/dart --profile-period=10000 --packages=.packages hello.dart
-    out/ReleaseIA32/dart --profile-period=10000 --packages=.packages --checked hello.dart
     out/ReleaseIA32/dart-sdk/bin/dart2js --packages=.packages --out=out.js -m hello.dart
     third_party/d8/linux/ia32/d8 --stack_size=1024 sdk/lib/_internal/js_runtime/lib/preambles/d8.js out.js
     out/ReleaseIA32/dart-sdk/bin/dart2js --checked --packages=.packages --out=out.js -m hello.dart
@@ -220,7 +223,6 @@ EOF
     out/ReleaseIA32/dart pkg/front_end/tool/perf.dart scan hello.dart
     out/ReleaseIA32/dart pkg/front_end/tool/fasta_perf.dart --legacy kernel_gen_e2e hello.dart
     out/ReleaseIA32/dart pkg/front_end/tool/fasta_perf.dart kernel_gen_e2e hello.dart
-    out/ReleaseIA32/dart_bootstrap --parse_all --compiler_stats hello.dart
     out/ReleaseIA32/dart pkg/front_end/tool/perf.dart linked_summarize hello.dart
     out/ReleaseIA32/dart pkg/front_end/tool/perf.dart prelinked_summarize hello.dart
     out/ReleaseIA32/dart pkg/front_end/tool/fasta_perf.dart scan hello.dart
@@ -237,6 +239,9 @@ EOF
     ./tools/build.py --mode=release --arch=simdbc64 runtime
     ./tools/build.py --mode=release --arch=x64 runtime_kernel
     tar -czf linux-x64_profile.tar.gz \
+      --exclude .git \
+      --exclude .gitignore \
+      -- \
       third_party/d8/linux/x64/natives_blob.bin \
       third_party/d8/linux/x64/snapshot_blob.bin \
       out/ReleaseX64/vm_outline.dill \
@@ -260,8 +265,7 @@ EOF
       pkg \
       runtime/bin \
       runtime/lib \
-      --exclude .git \
-      --exclude .gitignore || (rm -f linux-x64_profile.tar.gz; exit 1)
+      || (rm -f linux-x64_profile.tar.gz; exit 1)
     strip -w \
       -K 'kDartVmSnapshotData' \
       -K 'kDartVmSnapshotInstructions' \
@@ -358,6 +362,9 @@ EOF
       -K '_ZN4dart7Version7commit_E' \
       -K '_ZN4dart9Bootstrap*_paths_E' out/ReleaseX64/dart_precompiled_runtime
     tar -czf linux-x64.tar.gz \
+      --exclude .git \
+      --exclude .gitignore \
+      -- \
       third_party/d8/linux/x64/natives_blob.bin \
       third_party/d8/linux/x64/snapshot_blob.bin \
       out/ReleaseX64/vm_outline.dill \
@@ -381,8 +388,7 @@ EOF
       pkg \
       runtime/bin \
       runtime/lib \
-      --exclude .git \
-      --exclude .gitignore  || (rm -f linux-x64.tar.gz; exit 1)
+      || (rm -f linux-x64.tar.gz; exit 1)
   elif [ "$command" = linux-x64-benchmark ]; then
     rm -rf tmp
     mkdir tmp
@@ -394,19 +400,13 @@ main() {
 }
 EOF
     out/ReleaseX64/dart --profile-period=10000 --packages=.packages hello.dart
-    out/ReleaseX64/dart --profile-period=10000 --packages=.packages --checked hello.dart
-    out/ReleaseX64/dart_bootstrap --packages=.packages --use-blobs --snapshot-kind=app-aot --snapshot=blob.bin hello.dart
-    out/ReleaseX64/dart_precompiled_runtime --profile-period=10000 blob.bin
-    DART_CONFIGURATION=ReleaseX64 pkg/vm/tool/dart2 --profile-period=10000 --packages=.packages hello.dart
     DART_CONFIGURATION=ReleaseX64 pkg/vm/tool/precompiler2 --packages=.packages hello.dart blob.bin
     DART_CONFIGURATION=ReleaseX64 pkg/vm/tool/dart_precompiled_runtime2 --profile-period=10000 blob.bin
     out/ReleaseSIMDBC64/dart --profile-period=10000 --packages=.packages hello.dart
-    out/ReleaseSIMDBC64/dart --profile-period=10000 --checked --packages=.packages hello.dart
     out/ReleaseX64/dart pkg/front_end/tool/perf.dart parse hello.dart
     out/ReleaseX64/dart pkg/front_end/tool/perf.dart scan hello.dart
     out/ReleaseX64/dart pkg/front_end/tool/fasta_perf.dart --legacy kernel_gen_e2e hello.dart
     out/ReleaseX64/dart pkg/front_end/tool/fasta_perf.dart kernel_gen_e2e hello.dart
-    out/ReleaseX64/dart_bootstrap --parse_all --compiler_stats hello.dart
     out/ReleaseX64/dart pkg/front_end/tool/perf.dart linked_summarize hello.dart
     out/ReleaseX64/dart pkg/front_end/tool/perf.dart prelinked_summarize hello.dart
     out/ReleaseX64/dart pkg/front_end/tool/fasta_perf.dart scan hello.dart

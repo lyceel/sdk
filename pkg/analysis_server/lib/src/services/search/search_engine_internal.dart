@@ -20,6 +20,8 @@ class SearchEngineImpl implements SearchEngine {
 
   @override
   Future<Set<String>> membersOfSubtypes(ClassElement type) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     List<AnalysisDriver> drivers = _drivers.toList();
 
     String libraryUriStr = type.librarySource.uri.toString();
@@ -28,6 +30,8 @@ class SearchEngineImpl implements SearchEngine {
     Set<String> members = new Set<String>();
 
     Future<Null> addMembers(ClassElement type, SubtypeResult subtype) async {
+      // TODO(brianwilkerson) Determine whether this await is necessary.
+      await null;
       if (subtype != null && !visitedIds.add(subtype.id)) {
         return;
       }
@@ -54,9 +58,13 @@ class SearchEngineImpl implements SearchEngine {
 
   @override
   Future<Set<ClassElement>> searchAllSubtypes(ClassElement type) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     Set<ClassElement> allSubtypes = new Set<ClassElement>();
 
     Future<Null> addSubtypes(ClassElement type) async {
+      // TODO(brianwilkerson) Determine whether this await is necessary.
+      await null;
       List<SearchResult> directResults = await _searchDirectSubtypes(type);
       for (SearchResult directResult in directResults) {
         var directSubtype = directResult.enclosingElement as ClassElement;
@@ -72,6 +80,8 @@ class SearchEngineImpl implements SearchEngine {
 
   @override
   Future<List<SearchMatch>> searchMemberDeclarations(String name) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     List<SearchMatch> allDeclarations = [];
     List<AnalysisDriver> drivers = _drivers.toList();
     for (AnalysisDriver driver in drivers) {
@@ -83,11 +93,14 @@ class SearchEngineImpl implements SearchEngine {
 
   @override
   Future<List<SearchMatch>> searchMemberReferences(String name) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     List<SearchResult> allResults = [];
     List<AnalysisDriver> drivers = _drivers.toList();
+    SearchedFiles searchedFiles = _createSearchedFiles(drivers);
     for (AnalysisDriver driver in drivers) {
       List<SearchResult> results =
-          await driver.search.unresolvedMemberReferences(name);
+          await driver.search.unresolvedMemberReferences(name, searchedFiles);
       allResults.addAll(results);
     }
     return allResults.map(SearchMatchImpl.forSearchResult).toList();
@@ -95,10 +108,14 @@ class SearchEngineImpl implements SearchEngine {
 
   @override
   Future<List<SearchMatch>> searchReferences(Element element) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     List<SearchResult> allResults = [];
     List<AnalysisDriver> drivers = _drivers.toList();
+    SearchedFiles searchedFiles = _createSearchedFiles(drivers);
     for (AnalysisDriver driver in drivers) {
-      List<SearchResult> results = await driver.search.references(element);
+      List<SearchResult> results =
+          await driver.search.references(element, searchedFiles);
       allResults.addAll(results);
     }
     return allResults.map(SearchMatchImpl.forSearchResult).toList();
@@ -106,12 +123,16 @@ class SearchEngineImpl implements SearchEngine {
 
   @override
   Future<List<SearchMatch>> searchSubtypes(ClassElement type) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     List<SearchResult> results = await _searchDirectSubtypes(type);
     return results.map(SearchMatchImpl.forSearchResult).toList();
   }
 
   @override
   Future<List<SearchMatch>> searchTopLevelDeclarations(String pattern) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     Set<Element> allElements = new Set<Element>();
     RegExp regExp = new RegExp(pattern);
     List<AnalysisDriver> drivers = _drivers.toList();
@@ -122,11 +143,27 @@ class SearchEngineImpl implements SearchEngine {
     return allElements.map(SearchMatchImpl.forElement).toList();
   }
 
+  /**
+   * Create a new [SearchedFiles] instance in which added files are owned
+   * by the drivers that have them added.
+   */
+  SearchedFiles _createSearchedFiles(List<AnalysisDriver> drivers) {
+    var searchedFiles = new SearchedFiles();
+    for (AnalysisDriver driver in drivers) {
+      searchedFiles.ownAdded(driver.search);
+    }
+    return searchedFiles;
+  }
+
   Future<List<SearchResult>> _searchDirectSubtypes(ClassElement type) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     List<SearchResult> allResults = [];
     List<AnalysisDriver> drivers = _drivers.toList();
+    SearchedFiles searchedFiles = _createSearchedFiles(drivers);
     for (AnalysisDriver driver in drivers) {
-      List<SearchResult> results = await driver.search.subTypes(type);
+      List<SearchResult> results =
+          await driver.search.subTypes(type, searchedFiles);
       allResults.addAll(results);
     }
     return allResults;

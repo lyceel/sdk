@@ -180,6 +180,9 @@ class MixinFullResolution {
       // Factory constructors are not cloned.
       if (procedure.isFactory) continue;
 
+      // NoSuchMethod forwarders aren't cloned.
+      if (procedure.isNoSuchMethodForwarder) continue;
+
       Procedure clone = cloner.clone(procedure);
       // Linear search for a forwarding stub with the same name.
       for (int i = 0; i < originalLength; ++i) {
@@ -232,11 +235,15 @@ class MixinFullResolution {
       }
     }
 
-    // This class implements the mixin type.
+    // This class implements the mixin type. Also, backends rely on the fact
+    // that eliminated mixin is appended into the end of interfaces list.
     class_.implementedTypes.add(class_.mixedInType);
 
     // This class is now a normal class.
     class_.mixedInType = null;
+
+    // Leave breadcrumbs for backends (e.g. for dart:mirrors implementation).
+    class_.isEliminatedMixin = true;
   }
 
   Constructor buildForwardingConstructor(

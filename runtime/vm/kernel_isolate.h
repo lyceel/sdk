@@ -5,8 +5,6 @@
 #ifndef RUNTIME_VM_KERNEL_ISOLATE_H_
 #define RUNTIME_VM_KERNEL_ISOLATE_H_
 
-#if !defined(DART_PRECOMPILED_RUNTIME)
-
 #include "include/dart_api.h"
 #include "include/dart_native_api.h"
 
@@ -16,6 +14,8 @@
 
 namespace dart {
 
+// TODO(33433): The kernel service does not belong in the VM.
+
 class KernelIsolate : public AllStatic {
  public:
   static const char* kName;
@@ -24,8 +24,11 @@ class KernelIsolate : public AllStatic {
   static const int kAcceptTag;
   static const int kTrainTag;
   static const int kCompileExpressionTag;
+  static const int kListDependenciesTag;
+  static const int kNotifyIsolateShutdown;
 
   static void Run();
+  static void Shutdown();
 
   static bool NameEquals(const char* name);
   static bool Exists();
@@ -41,7 +44,9 @@ class KernelIsolate : public AllStatic {
       int source_files_count = 0,
       Dart_SourceFile source_files[] = NULL,
       bool incremental_compile = true,
-      const char* package_config = NULL);
+      const char* package_config = NULL,
+      const char* multiroot_filepaths = NULL,
+      const char* multiroot_scheme = NULL);
 
   static Dart_KernelCompilationResult AcceptCompilation();
   static Dart_KernelCompilationResult UpdateInMemorySources(
@@ -55,6 +60,10 @@ class KernelIsolate : public AllStatic {
       const char* library_url,
       const char* klass,
       bool is_static);
+
+  static Dart_KernelCompilationResult ListDependencies();
+
+  static void NotifyAboutIsolateShutdown(const Isolate* isolate);
 
  protected:
   static Monitor* monitor_;
@@ -78,7 +87,5 @@ class KernelIsolate : public AllStatic {
 };
 
 }  // namespace dart
-
-#endif  // DART_PRECOMPILED_RUNTIME
 
 #endif  // RUNTIME_VM_KERNEL_ISOLATE_H_

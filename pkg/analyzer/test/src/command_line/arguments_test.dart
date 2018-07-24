@@ -40,7 +40,6 @@ class ArgumentsTest {
       '--options=$defaultAnalysisOptionsFilePath',
       '--packages=$defaultPackageFilePath',
       '--package-root=$defaultPackagesDirectoryPath',
-      '--strong',
       '--supermixin',
     ];
     ArgResults result = parse(provider, parser, args);
@@ -154,7 +153,7 @@ class ArgumentsTest {
   void test_defineAnalysisArguments() {
     ArgParser parser = new ArgParser();
     defineAnalysisArguments(parser);
-    expect(parser.options, hasLength(14));
+    expect(parser.options, hasLength(13));
   }
 
   void test_extractDefinedVariables() {

@@ -132,6 +132,22 @@ class HintCode extends ErrorCode {
       correction: "Try removing all but one import of the library.");
 
   /**
+   * Duplicate hidden names.
+   */
+  static const HintCode DUPLICATE_HIDDEN_NAME =
+      const HintCode('DUPLICATE_HIDDEN_NAME', "Duplicate hidden name.",
+          correction: "Try removing the repeated name from the list of hidden "
+              "members.");
+
+  /**
+   * Duplicate shown names.
+   */
+  static const HintCode DUPLICATE_SHOWN_NAME =
+      const HintCode('DUPLICATE_SHOWN_NAME', "Duplicate shown name.",
+          correction: "Try removing the repeated name from the list of shown "
+              "members.");
+
+  /**
    * It is a bad practice for a source file in a package "lib" directory
    * hierarchy to traverse outside that directory hierarchy. For example, a
    * source file in the "lib" directory should not contain a directive such as
@@ -382,10 +398,10 @@ class HintCode extends ErrorCode {
    */
   static const HintCode MISSING_RETURN = const HintCode(
       'MISSING_RETURN',
-      "This function declares a return type of '{0}', but doesn't end with a "
+      "This function has a return type of '{0}', but doesn't end with a "
       "return statement.",
-      correction:
-          "Try adding a return statement, or changing the return type to 'void'.");
+      correction: "Try adding a return statement, "
+          "or changing the return type to 'void'.");
 
   /**
    * Generate a hint for classes that inherit from classes annotated with

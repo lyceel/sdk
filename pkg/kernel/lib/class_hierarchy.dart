@@ -23,7 +23,7 @@ abstract class ClassHierarchy {
       {HandleAmbiguousSupertypes onAmbiguousSupertypes,
       MixinInferrer mixinInferrer}) {
     onAmbiguousSupertypes ??= (Class cls, Supertype a, Supertype b) {
-      if (!cls.isSyntheticMixinImplementation) {
+      if (!cls.isAnonymousMixin) {
         // See https://github.com/dart-lang/sdk/issues/32091
         throw "$cls can't implement both $a and $b";
       }
@@ -949,8 +949,27 @@ class ClosedWorldClassHierarchy implements ClassHierarchy {
   void _buildDeclaredMembers(Class classNode, _ClassInfo info) {
     if (classNode.mixedInType != null) {
       _ClassInfo mixedInfo = _infoFor[classNode.mixedInType.classNode];
-      info.declaredGettersAndCalls = mixedInfo.declaredGettersAndCalls;
-      info.declaredSetters = mixedInfo.declaredSetters;
+
+      List<Member> declaredGettersAndCalls = <Member>[];
+      for (Member mixinMember in mixedInfo.declaredGettersAndCalls) {
+        if (mixinMember is! Procedure ||
+            (mixinMember is Procedure &&
+                !mixinMember.isNoSuchMethodForwarder)) {
+          declaredGettersAndCalls.add(mixinMember);
+        }
+      }
+
+      List<Member> declaredSetters = <Member>[];
+      for (Member mixinMember in mixedInfo.declaredSetters) {
+        if (mixinMember is! Procedure ||
+            (mixinMember is Procedure &&
+                !mixinMember.isNoSuchMethodForwarder)) {
+          declaredSetters.add(mixinMember);
+        }
+      }
+
+      info.declaredGettersAndCalls = declaredGettersAndCalls;
+      info.declaredSetters = declaredSetters;
     } else {
       var members = info.declaredGettersAndCalls = <Member>[];
       var setters = info.declaredSetters = <Member>[];

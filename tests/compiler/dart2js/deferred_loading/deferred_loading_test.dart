@@ -4,6 +4,7 @@
 
 import 'dart:io' hide Link;
 import 'package:async_helper/async_helper.dart';
+import 'package:compiler/src/closure.dart';
 import 'package:compiler/src/common.dart';
 import 'package:compiler/src/compiler.dart';
 import 'package:compiler/src/deferred_load.dart';
@@ -31,8 +32,7 @@ const List<String> compilerOptions = const <String>[];
 main(List<String> args) {
   asyncTest(() async {
     Directory dataDir = new Directory.fromUri(Platform.script.resolve('data'));
-    await checkTests(dataDir, computeKernelOutputUnitData,
-        computeClassDataFromKernel: computeKernelClassOutputUnitData,
+    await checkTests(dataDir, const OutputUnitDataComputer(),
         libDirectory: new Directory.fromUri(Platform.script.resolve('libs')),
         skipForKernel: skipForKernel,
         options: compilerOptions,
@@ -78,73 +78,105 @@ String outputUnitString(OutputUnit unit) {
   return 'OutputUnit(${unit.name}, {$sb})';
 }
 
-/// OutputData for [member] as a kernel based element.
-///
-/// At this point the compiler has already been run, so it is holding the
-/// relevant OutputUnits, we just need to extract that information from it. We
-/// fill [actualMap] with the data computed about what the resulting OutputUnit
-/// is.
-void computeKernelOutputUnitData(
-    Compiler compiler, MemberEntity member, Map<Id, ActualData> actualMap,
-    {bool verbose: false}) {
-  OutputUnitData data = compiler.backend.outputUnitData;
-  String value = outputUnitString(data.outputUnitForEntity(member));
+class OutputUnitDataComputer extends DataComputer {
+  const OutputUnitDataComputer();
 
-  KernelBackendStrategy backendStrategy = compiler.backendStrategy;
-  KernelToElementMapForBuilding elementMap = backendStrategy.elementMap;
-  MemberDefinition definition = elementMap.getMemberDefinition(member);
+  /// OutputData for [member] as a kernel based element.
+  ///
+  /// At this point the compiler has already been run, so it is holding the
+  /// relevant OutputUnits, we just need to extract that information from it. We
+  /// fill [actualMap] with the data computed about what the resulting OutputUnit
+  /// is.
+  @override
+  void computeMemberData(
+      Compiler compiler, MemberEntity member, Map<Id, ActualData> actualMap,
+      {bool verbose: false}) {
+    KernelBackendStrategy backendStrategy = compiler.backendStrategy;
+    KernelToElementMapForBuilding elementMap = backendStrategy.elementMap;
+    MemberDefinition definition = elementMap.getMemberDefinition(member);
+    new OutputUnitIrComputer(compiler.reporter, actualMap, elementMap, member,
+            compiler.backend.outputUnitData, backendStrategy.closureDataLookup)
+        .run(definition.node);
+  }
 
-  _registerValue(
-      computeEntityId(definition.node),
-      value,
-      member,
-      computeSourceSpanFromTreeNode(definition.node),
-      actualMap,
-      compiler.reporter);
+  @override
+  bool get computesClassData => true;
 
-  ir.Member memberNode = definition.node;
-  if (memberNode is ir.Field && memberNode.isConst) {
-    ir.Expression node = memberNode.initializer;
-    ConstantValue constant = elementMap.getConstantValue(node);
-    if (constant.isPrimitive) return;
-    SourceSpan span = computeSourceSpanFromTreeNode(node);
-    if (node is ir.ConstructorInvocation ||
-        node is ir.ListLiteral ||
-        (node is ir.MapLiteral && node.keyType == null)) {
-      // Adjust the source-span to match the AST-based location. The kernel FE
-      // skips the "const" keyword for the expression offset and any prefix in
-      // front of the constructor. The "-6" is an approximation assuming that
-      // there is just a single space after "const" and no prefix.
-      // TODO(sigmund): offsets should be fixed in the FE instead.
-      span = new SourceSpan(span.uri, span.begin - 6, span.end - 6);
-    }
+  @override
+  void computeClassData(
+      Compiler compiler, ClassEntity cls, Map<Id, ActualData> actualMap,
+      {bool verbose: false}) {
+    OutputUnitData data = compiler.backend.outputUnitData;
+    String value = outputUnitString(data.outputUnitForClass(cls));
+
+    KernelBackendStrategy backendStrategy = compiler.backendStrategy;
+    KernelToElementMapForBuilding elementMap = backendStrategy.elementMap;
+    ClassDefinition definition = elementMap.getClassDefinition(cls);
+
     _registerValue(
-        new NodeId(span.begin, IdKind.node),
-        outputUnitString(data.outputUnitForConstant(constant)),
-        member,
-        span,
+        new ClassId(cls.name),
+        value,
+        cls,
+        computeSourceSpanFromTreeNode(definition.node),
         actualMap,
         compiler.reporter);
   }
 }
 
-void computeKernelClassOutputUnitData(
-    Compiler compiler, ClassEntity cls, Map<Id, ActualData> actualMap,
-    {bool verbose: false}) {
-  OutputUnitData data = compiler.backend.outputUnitData;
-  String value = outputUnitString(data.outputUnitForEntity(cls));
+class OutputUnitIrComputer extends IrDataExtractor {
+  final KernelToElementMapForBuilding _elementMap;
+  final OutputUnitData _data;
+  final ClosureDataLookup _closureDataLookup;
 
-  KernelBackendStrategy backendStrategy = compiler.backendStrategy;
-  KernelToElementMapForBuilding elementMap = backendStrategy.elementMap;
-  ClassDefinition definition = elementMap.getClassDefinition(cls);
+  OutputUnitIrComputer(
+      DiagnosticReporter reporter,
+      Map<Id, ActualData> actualMap,
+      this._elementMap,
+      MemberEntity member,
+      this._data,
+      this._closureDataLookup)
+      : super(reporter, actualMap);
 
-  _registerValue(
-      new ClassId(cls.name),
-      value,
-      cls,
-      computeSourceSpanFromTreeNode(definition.node),
-      actualMap,
-      compiler.reporter);
+  String getMemberValue(MemberEntity member) {
+    return outputUnitString(_data.outputUnitForMember(member));
+  }
+
+  @override
+  String computeMemberValue(Id id, ir.Member node) {
+    if (node is ir.Field && node.isConst) {
+      ir.Expression initializer = node.initializer;
+      ConstantValue constant = _elementMap.getConstantValue(initializer);
+      if (!constant.isPrimitive) {
+        SourceSpan span = computeSourceSpanFromTreeNode(initializer);
+        if (initializer is ir.ConstructorInvocation) {
+          // Adjust the source-span to match the AST-based location. The kernel FE
+          // skips the "const" keyword for the expression offset and any prefix in
+          // front of the constructor. The "-6" is an approximation assuming that
+          // there is just a single space after "const" and no prefix.
+          // TODO(sigmund): offsets should be fixed in the FE instead.
+          span = new SourceSpan(span.uri, span.begin - 6, span.end - 6);
+        }
+        _registerValue(
+            new NodeId(span.begin, IdKind.node),
+            outputUnitString(_data.outputUnitForConstant(constant)),
+            node,
+            span,
+            actualMap,
+            reporter);
+      }
+    }
+
+    return getMemberValue(_elementMap.getMember(node));
+  }
+
+  @override
+  String computeNodeValue(Id id, ir.TreeNode node) {
+    if (node is ir.FunctionExpression || node is ir.FunctionDeclaration) {
+      ClosureRepresentationInfo info = _closureDataLookup.getClosureInfo(node);
+      return getMemberValue(info.callMethod);
+    }
+    return null;
+  }
 }
 
 /// Set [actualMap] to hold a key of [id] with the computed data [value]

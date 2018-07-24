@@ -8,9 +8,7 @@ import 'checked_mode_compile_time_error_code_driver_test.dart';
 
 main() {
   defineReflectiveSuite(() {
-    // TODO(scheglov): Restore similar test coverage when the front-end API
-    // allows it.  See https://github.com/dart-lang/sdk/issues/32258.
-    // defineReflectiveTests(CheckedModeCompileTimeErrorCodeTest_Kernel);
+    defineReflectiveTests(CheckedModeCompileTimeErrorCodeTest_Kernel);
   });
 }
 
@@ -22,6 +20,9 @@ class CheckedModeCompileTimeErrorCodeTest_Kernel
 
   @override
   bool get useCFE => true;
+
+  @override
+  bool get usingFastaParser => true;
 
   @failingTest
   @override
@@ -36,13 +37,6 @@ class CheckedModeCompileTimeErrorCodeTest_Kernel
     // Expected 1 errors of type StaticWarningCode.UNDEFINED_CLASS, found 0
     await super
         .test_fieldFormalParameterAssignableToField_fieldType_unresolved_null();
-  }
-
-  @failingTest
-  @override
-  test_fieldFormalParameterAssignableToField_typedef() async {
-    // Expected 1 errors of type StaticWarningCode.ARGUMENT_TYPE_NOT_ASSIGNABLE, found 0
-    await super.test_fieldFormalParameterAssignableToField_typedef();
   }
 
   @failingTest
@@ -151,13 +145,6 @@ class CheckedModeCompileTimeErrorCodeTest_Kernel
 
   @failingTest
   @override
-  test_fieldTypeOk_generic() async {
-    // UnimplementedError: kernel: (Let) let final dynamic #t4 = #lib2::y in let ...
-    await super.test_fieldTypeOk_generic();
-  }
-
-  @failingTest
-  @override
   test_fieldTypeOk_unresolved_null() async {
     // UnimplementedError: kernel: (AsExpression) x as{TypeError} invalid-type
     await super.test_fieldTypeOk_unresolved_null();
@@ -172,12 +159,30 @@ class CheckedModeCompileTimeErrorCodeTest_Kernel
   }
 
   @failingTest
+  @FastaProblem('https://github.com/dart-lang/sdk/issues/31936')
+  @override
+  test_listLiteral_inferredElementType() async =>
+      super.test_listLiteral_inferredElementType();
+
+  @failingTest
   @override
   test_mapKeyTypeNotAssignable() async {
     // Expected 1 errors of type CheckedModeCompileTimeErrorCode.MAP_KEY_TYPE_NOT_ASSIGNABLE, found 0;
     //          1 errors of type StaticWarningCode.MAP_KEY_TYPE_NOT_ASSIGNABLE, found 0
     await super.test_mapKeyTypeNotAssignable();
   }
+
+  @failingTest
+  @FastaProblem('https://github.com/dart-lang/sdk/issues/31936')
+  @override
+  test_mapLiteral_inferredKeyType() async =>
+      super.test_mapLiteral_inferredKeyType();
+
+  @failingTest
+  @FastaProblem('https://github.com/dart-lang/sdk/issues/31936')
+  @override
+  test_mapLiteral_inferredValueType() async =>
+      super.test_mapLiteral_inferredValueType();
 
   @failingTest
   @override

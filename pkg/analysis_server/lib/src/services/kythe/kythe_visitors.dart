@@ -83,6 +83,7 @@ String _getSignature(ResourceProvider provider, Element element,
 
 class CodedBufferWriter {
   CodedBufferWriter(var v);
+
   toBuffer() {}
 }
 
@@ -164,7 +165,7 @@ class KytheDartVisitor extends GeneralizingAstVisitor with OutputUtils {
     // we are looking for an operator such as +=, -=, *=, /=
     //
     Token operator = node.operator;
-    MethodElement element = node.bestElement;
+    MethodElement element = node.staticElement;
     if (operator.type != TokenType.EQ && element != null) {
       // method
       _vNameFromElement(element, schema.FUNCTION_KIND);
@@ -185,7 +186,7 @@ class KytheDartVisitor extends GeneralizingAstVisitor with OutputUtils {
     //
     // operators such as +, -, *, /
     //
-    MethodElement element = node.bestElement;
+    MethodElement element = node.staticElement;
     if (element != null) {
       // method
       _vNameFromElement(element, schema.FUNCTION_KIND);
@@ -295,7 +296,7 @@ class KytheDartVisitor extends GeneralizingAstVisitor with OutputUtils {
       // ClassDeclarations) and super.visitClassTypeAlias is not sufficient.
       //
       _handleRefEdge(
-        node.superclass.name.bestElement,
+        node.superclass.name.staticElement,
         const <String>[schema.REF_EDGE],
         syntacticEntity: node.superclass,
       );
@@ -303,7 +304,7 @@ class KytheDartVisitor extends GeneralizingAstVisitor with OutputUtils {
       // by visitClassDeclaration()
       // extends
       var recordSupertypeVName = _vNameFromElement(
-          node.superclass.name.bestElement, schema.RECORD_KIND);
+          node.superclass.name.staticElement, schema.RECORD_KIND);
       addEdge(_enclosingClassVName, schema.EXTENDS_EDGE, recordSupertypeVName);
 
       // implements
@@ -561,7 +562,7 @@ class KytheDartVisitor extends GeneralizingAstVisitor with OutputUtils {
     var returnType = node.returnType;
     if (returnType is TypeName) {
       _handleRefEdge(
-        returnType.name?.bestElement,
+        returnType.name?.staticElement,
         const <String>[schema.REF_EDGE],
         syntacticEntity: returnType.name,
       );
@@ -618,7 +619,7 @@ class KytheDartVisitor extends GeneralizingAstVisitor with OutputUtils {
     //
     // index method ref/call
     //
-    var element = node.bestElement;
+    var element = node.staticElement;
     var start = node.leftBracket.offset;
     var end = node.rightBracket.end;
 
@@ -721,7 +722,7 @@ class KytheDartVisitor extends GeneralizingAstVisitor with OutputUtils {
 
   @override
   visitMethodInvocation(MethodInvocation node) {
-    var element = node.methodName?.bestElement;
+    var element = node.methodName?.staticElement;
 
     // anchor- ref/call
     _handleRefCallEdge(element, syntacticEntity: node.methodName);
@@ -805,7 +806,7 @@ class KytheDartVisitor extends GeneralizingAstVisitor with OutputUtils {
     if (node.getAncestor((node) => node is CommentReference) != null) {
       // The identifier is in a comment, add just the "ref" edge.
       _handleRefEdge(
-        node.bestElement,
+        node.staticElement,
         const <String>[schema.REF_EDGE],
         syntacticEntity: node,
       );
@@ -813,12 +814,12 @@ class KytheDartVisitor extends GeneralizingAstVisitor with OutputUtils {
       // The node is in a declaration context, and should have
       // "ref/defines/binding" edge as well as the default "ref" edge.
       _handleRefEdge(
-        node.bestElement,
+        node.staticElement,
         const <String>[schema.DEFINES_BINDING_EDGE, schema.REF_EDGE],
         syntacticEntity: node,
       );
     } else {
-      _handleRefCallEdge(node.bestElement, syntacticEntity: node);
+      _handleRefCallEdge(node.staticElement, syntacticEntity: node);
     }
 
     // no children to visit
@@ -894,8 +895,8 @@ class KytheDartVisitor extends GeneralizingAstVisitor with OutputUtils {
   _handleRefCallEdge(
     Element element, {
     SyntacticEntity syntacticEntity: null,
-    start: _notFound,
-    end: _notFound,
+    int start: _notFound,
+    int end: _notFound,
     KytheVName enclosingTarget: null,
   }) {
     if (element is ExecutableElement &&
@@ -931,8 +932,8 @@ class KytheDartVisitor extends GeneralizingAstVisitor with OutputUtils {
     Element element,
     List<String> refEdgeTypes, {
     SyntacticEntity syntacticEntity: null,
-    start: _notFound,
-    end: _notFound,
+    int start: _notFound,
+    int end: _notFound,
     KytheVName enclosingTarget: null,
     KytheVName enclosingAnchor: null,
   }) {
@@ -1242,7 +1243,7 @@ abstract class OutputUtils {
         returnTypeVName = voidBuiltin;
       } else {
         returnTypeVName =
-            _vNameFromElement(returnNode.name.bestElement, schema.TAPP_KIND);
+            _vNameFromElement(returnNode.name.staticElement, schema.TAPP_KIND);
       }
     } else if (returnNode is Identifier) {
       // ConstructorDeclaration returns an Identifier from returnType
@@ -1250,7 +1251,7 @@ abstract class OutputUtils {
         returnTypeVName = voidBuiltin;
       } else {
         returnTypeVName =
-            _vNameFromElement(returnNode.bestElement, schema.TAPP_KIND);
+            _vNameFromElement(returnNode.staticElement, schema.TAPP_KIND);
       }
     }
     // else: return type is null, void, unresolved.

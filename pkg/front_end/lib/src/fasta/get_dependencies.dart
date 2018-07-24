@@ -24,7 +24,6 @@ import 'kernel/kernel_target.dart' show KernelTarget;
 
 import 'uri_translator.dart' show UriTranslator;
 
-// TODO(sigmund): reimplement this API using the directive listener intead.
 Future<List<Uri>> getDependencies(Uri script,
     {Uri sdk,
     Uri packages,
@@ -37,7 +36,7 @@ Future<List<Uri>> getDependencies(Uri script,
     ..packagesFileUri = packages
     ..sdkSummary = platform
     ..sdkRoot = sdk;
-  var pOptions = new ProcessedOptions(options, false, <Uri>[script]);
+  var pOptions = new ProcessedOptions(options, <Uri>[script]);
   return await CompilerContext.runWithOptions(pOptions,
       (CompilerContext c) async {
     FileSystem fileSystem = c.options.fileSystem;
@@ -57,6 +56,6 @@ Future<List<Uri>> getDependencies(Uri script,
     kernelTarget.read(script);
     await dillTarget.buildOutlines();
     await kernelTarget.loader.buildOutlines();
-    return await kernelTarget.loader.getDependencies();
+    return new List<Uri>.from(c.dependencies);
   });
 }

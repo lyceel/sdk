@@ -95,7 +95,6 @@ class StrongModeLocalInferenceTest extends ResolverTestCase {
   void setUp() {
     super.setUp();
     AnalysisOptionsImpl options = new AnalysisOptionsImpl();
-    options.strongMode = true;
     resetWith(options: options);
   }
 
@@ -1599,8 +1598,7 @@ void _mergeSort<T>(T Function(T) list, int compare(T a, T b), T Function(T) targ
     assertNoErrors(source);
     verify([source]);
     var unit = analysisResult.unit;
-    var body = (AstFinder
-        .getTopLevelFunction(unit, '_mergeSort')
+    var body = (AstFinder.getTopLevelFunction(unit, '_mergeSort')
         .functionExpression
         .body as BlockFunctionBody);
     var stmts = body.block.statements;
@@ -1627,8 +1625,7 @@ void _mergeSort<T>(List<T> list, int compare(T a, T b), List<T> target) {
     assertNoErrors(source);
     verify([source]);
     var unit = analysisResult.unit;
-    var body = (AstFinder
-        .getTopLevelFunction(unit, '_mergeSort')
+    var body = (AstFinder.getTopLevelFunction(unit, '_mergeSort')
         .functionExpression
         .body as BlockFunctionBody);
     var stmts = body.block.statements;
@@ -1655,8 +1652,7 @@ void _mergeSort<T>(T list, int compare(T a, T b), T target) {
     assertNoErrors(source);
     verify([source]);
     var unit = analysisResult.unit;
-    var body = (AstFinder
-        .getTopLevelFunction(unit, '_mergeSort')
+    var body = (AstFinder.getTopLevelFunction(unit, '_mergeSort')
         .functionExpression
         .body as BlockFunctionBody);
     var stmts = body.block.statements;
@@ -1710,8 +1706,7 @@ num test(Iterable values) => values.fold(values.first as num, max);
     ]);
     verify([source]);
     var unit = analysisResult.unit;
-    var fold = (AstFinder
-            .getTopLevelFunction(unit, 'test')
+    var fold = (AstFinder.getTopLevelFunction(unit, 'test')
             .functionExpression
             .body as ExpressionFunctionBody)
         .expression as MethodInvocation;
@@ -2810,11 +2805,9 @@ class StrongModeStaticTypeAnalyzer2Test extends StaticTypeAnalyzer2TestShared {
   void setUp() {
     super.setUp();
     AnalysisOptionsImpl options = new AnalysisOptionsImpl();
-    options.strongMode = true;
     resetWith(options: options);
   }
 
-  @failingTest // https://github.com/dart-lang/sdk/issues/32173
   test_dynamicObjectGetter_hashCode() async {
     String code = r'''
 main() {
@@ -2823,10 +2816,9 @@ main() {
 }
 ''';
     await resolveTestUnit(code);
-    expectInitializerType('foo', 'dynamic', isNull);
+    expectInitializerType('foo', 'int');
   }
 
-  @failingTest // https://github.com/dart-lang/sdk/issues/32173
   test_dynamicObjectMethod_toString() async {
     String code = r'''
 main() {
@@ -2835,7 +2827,7 @@ main() {
 }
 ''';
     await resolveTestUnit(code);
-    expectInitializerType('foo', 'dynamic', isNull);
+    expectInitializerType('foo', 'String');
   }
 
   test_futureOr_promotion1() async {
@@ -3262,8 +3254,8 @@ void foo() {
   list.map((e) => e);
   list.map((e) => 3);
 }''');
-    expectIdentifierType('map((e) => e);', '<T>((dynamic) → T) → T', isNull);
-    expectIdentifierType('map((e) => 3);', '<T>((dynamic) → T) → T', isNull);
+    expectIdentifierType('map((e) => e);', '<T>((dynamic) → T) → T');
+    expectIdentifierType('map((e) => 3);', '<T>((dynamic) → T) → T');
 
     MethodInvocation m1 = findIdentifier('map((e) => e);').parent;
     expect(m1.staticInvokeType.toString(), '((dynamic) → dynamic) → dynamic');
@@ -3279,7 +3271,7 @@ main() {
 }
 ''';
     await resolveTestUnit(code);
-    expectInitializerType('foo', 'double', isNull);
+    expectInitializerType('foo', 'double');
   }
 
   test_genericMethod_max_doubleDouble_prefixed() async {
@@ -3290,7 +3282,7 @@ main() {
 }
 ''';
     await resolveTestUnit(code);
-    expectInitializerType('foo', 'double', isNull);
+    expectInitializerType('foo', 'double');
   }
 
   test_genericMethod_max_doubleInt() async {
@@ -3301,7 +3293,7 @@ main() {
 }
 ''';
     await resolveTestUnit(code);
-    expectInitializerType('foo', 'num', isNull);
+    expectInitializerType('foo', 'num');
   }
 
   test_genericMethod_max_intDouble() async {
@@ -3312,7 +3304,7 @@ main() {
 }
 ''';
     await resolveTestUnit(code);
-    expectInitializerType('foo', 'num', isNull);
+    expectInitializerType('foo', 'num');
   }
 
   test_genericMethod_max_intInt() async {
@@ -3323,7 +3315,7 @@ main() {
 }
 ''';
     await resolveTestUnit(code);
-    expectInitializerType('foo', 'int', isNull);
+    expectInitializerType('foo', 'int');
   }
 
   test_genericMethod_nestedBound() async {
@@ -3407,12 +3399,16 @@ class D extends C {
   test_genericMethod_override_bounds() async {
     await resolveTestUnit(r'''
 class A {}
-class B extends A {}
-class C {
-  T f<T extends B>(T x) => null;
-}
-class D extends C {
+class B {
   T f<T extends A>(T x) => null;
+}
+// override with the same bound is OK
+class C extends B {
+  T f<T extends A>(T x) => null;
+}
+// override with new name and the same bound is OK
+class D extends B {
+  Q f<Q extends A>(Q x) => null;
 }
 ''');
   }
@@ -3433,20 +3429,27 @@ class B extends A {
     verify([source]);
   }
 
-  test_genericMethod_override_invalidReturnType() async {
+  test_genericMethod_override_differentContextsSameBounds() async {
     Source source = addSource(r'''
-class C {
-  Iterable<T> f<T>(T x) => null;
+        class GenericMethodBounds<T> {
+  Type get t => T;
+  GenericMethodBounds<E> foo<E extends T>() => new GenericMethodBounds<E>();
+  GenericMethodBounds<E> bar<E extends void Function(T)>() =>
+      new GenericMethodBounds<E>();
 }
-class D extends C {
-  String f<S>(S x) => null;
-}''');
+
+class GenericMethodBoundsDerived extends GenericMethodBounds<num> {
+  GenericMethodBounds<E> foo<E extends num>() => new GenericMethodBounds<E>();
+  GenericMethodBounds<E> bar<E extends void Function(num)>() =>
+      new GenericMethodBounds<E>();
+}
+''');
     await computeAnalysisResult(source);
-    assertErrors(source, [StrongModeCode.INVALID_METHOD_OVERRIDE]);
+    assertNoErrors(source);
     verify([source]);
   }
 
-  test_genericMethod_override_invalidTypeParamBounds() async {
+  test_genericMethod_override_invalidContravariantTypeParamBounds() async {
     Source source = addSource(r'''
 class A {}
 class B extends A {}
@@ -3455,6 +3458,34 @@ class C {
 }
 class D extends C {
   T f<T extends B>(T x) => null;
+}''');
+    await computeAnalysisResult(source);
+    assertErrors(source, [StrongModeCode.INVALID_METHOD_OVERRIDE]);
+    verify([source]);
+  }
+
+  test_genericMethod_override_invalidCovariantTypeParamBounds() async {
+    Source source = addSource(r'''
+class A {}
+class B extends A {}
+class C {
+  T f<T extends B>(T x) => null;
+}
+class D extends C {
+  T f<T extends A>(T x) => null;
+}''');
+    await computeAnalysisResult(source);
+    assertErrors(source, [StrongModeCode.INVALID_METHOD_OVERRIDE]);
+    verify([source]);
+  }
+
+  test_genericMethod_override_invalidReturnType() async {
+    Source source = addSource(r'''
+class C {
+  Iterable<T> f<T>(T x) => null;
+}
+class D extends C {
+  String f<S>(S x) => null;
 }''');
     await computeAnalysisResult(source);
     assertErrors(source, [StrongModeCode.INVALID_METHOD_OVERRIDE]);
@@ -3509,7 +3540,7 @@ C toSpan(dynamic element) {
   }
   return null;
 }''');
-    expectIdentifierType('y = ', 'List<C>', isNull);
+    expectIdentifierType('y = ', 'List<C>');
   }
 
   test_genericMethod_tearoff() async {
@@ -3586,7 +3617,7 @@ main() {
 ''';
     await resolveTestUnit(code);
 
-    expectInitializerType('foo', 'Future<String>', isNull);
+    expectInitializerType('foo', 'Future<String>');
   }
 
   test_genericMethod_then_prefixed() async {
@@ -3599,7 +3630,7 @@ main() {
 }
 ''';
     await resolveTestUnit(code);
-    expectInitializerType('foo', 'Future<String>', isNull);
+    expectInitializerType('foo', 'Future<String>');
   }
 
   test_genericMethod_then_propagatedType() async {
@@ -3616,7 +3647,7 @@ void main() {
     // StaticWarningCode.ARGUMENT_TYPE_NOT_ASSIGNABLE when run with the driver;
     // when run without the driver, it reports no errors.  So we don't bother
     // checking whether the correct errors were reported.
-    expectInitializerType('foo', 'Future<String>', isNull);
+    expectInitializerType('foo', 'Future<String>');
   }
 
   test_genericMethod_toplevel_field_staticTearoff() async {
@@ -3910,6 +3941,48 @@ class C<E> {
 ''');
   }
 
+  @failingTest
+  test_notInstantiatedBound_class_error_recursion() async {
+    String code = r'''
+class A<T extends B> {} // points to a
+class B<T extends A> {} // points to b
+class C<T extends A> {} // points to a cyclical type
+''';
+    await resolveTestUnit(code, noErrors: false);
+    assertErrors(testSource, [
+      StrongModeCode.NOT_INSTANTIATED_BOUND,
+      StrongModeCode.NOT_INSTANTIATED_BOUND,
+      StrongModeCode.NOT_INSTANTIATED_BOUND,
+    ]);
+  }
+
+  @failingTest
+  test_notInstantiatedBound_class_error_recursion_less_direct() async {
+    String code = r'''
+class A<T extends B<A>> {}
+class B<T extends A<B>> {}
+''';
+    await resolveTestUnit(code, noErrors: false);
+    assertErrors(testSource, [
+      StrongModeCode.NOT_INSTANTIATED_BOUND,
+      StrongModeCode.NOT_INSTANTIATED_BOUND,
+    ]);
+  }
+
+  test_notInstantiatedBound_class_error_recursion_typedef() async {
+    String code = r'''
+typedef F(C value);
+class C<T extends F> {}
+class D<T extends C> {}
+''';
+    await resolveTestUnit(code, noErrors: false);
+    assertErrors(testSource, [
+      StrongModeCode.NOT_INSTANTIATED_BOUND,
+      StrongModeCode.NOT_INSTANTIATED_BOUND,
+      CompileTimeErrorCode.TYPE_ALIAS_CANNOT_REFERENCE_ITSELF,
+    ]);
+  }
+
   test_notInstantiatedBound_error_class_argument() async {
     String code = r'''
 class A<K, V extends List<K>> {}
@@ -3959,34 +4032,6 @@ class D<T extends B> {}
     ]);
   }
 
-  @failingTest
-  test_notInstantiatedBound_class_error_recursion() async {
-    String code = r'''
-class A<T extends B> {} // points to a
-class B<T extends A> {} // points to b
-class C<T extends A> {} // points to a cyclical type
-''';
-    await resolveTestUnit(code, noErrors: false);
-    assertErrors(testSource, [
-      StrongModeCode.NOT_INSTANTIATED_BOUND,
-      StrongModeCode.NOT_INSTANTIATED_BOUND,
-      StrongModeCode.NOT_INSTANTIATED_BOUND,
-    ]);
-  }
-
-  @failingTest
-  test_notInstantiatedBound_class_error_recursion_less_direct() async {
-    String code = r'''
-class A<T extends B<A>> {}
-class B<T extends A<B>> {}
-''';
-    await resolveTestUnit(code, noErrors: false);
-    assertErrors(testSource, [
-      StrongModeCode.NOT_INSTANTIATED_BOUND,
-      StrongModeCode.NOT_INSTANTIATED_BOUND,
-    ]);
-  }
-
   test_notInstantiatedBound_error_typedef_argument() async {
     String code = r'''
 class A<K, V extends List<K>> {}
@@ -4012,20 +4057,6 @@ typedef void F<T extends A>();
 ''';
     await resolveTestUnit(code, noErrors: false);
     assertErrors(testSource, [StrongModeCode.NOT_INSTANTIATED_BOUND]);
-  }
-
-  test_notInstantiatedBound_class_error_recursion_typedef() async {
-    String code = r'''
-typedef F(C value);
-class C<T extends F> {}
-class D<T extends C> {}
-''';
-    await resolveTestUnit(code, noErrors: false);
-    assertErrors(testSource, [
-      StrongModeCode.NOT_INSTANTIATED_BOUND,
-      StrongModeCode.NOT_INSTANTIATED_BOUND,
-      CompileTimeErrorCode.TYPE_ALIAS_CANNOT_REFERENCE_ITSELF,
-    ]);
   }
 
   test_notInstantiatedBound_ok_class() async {
@@ -4068,6 +4099,15 @@ class C<T extends A<B, B>> {}
     assertNoErrors(testSource);
   }
 
+  test_notInstantiatedBound_ok_class_function() async {
+    String code = r'''
+class A<T extends void Function()> {}
+class B<T extends A> {}
+''';
+    await resolveTestUnit(code);
+    assertNoErrors(testSource);
+  }
+
   test_notInstantiatedBound_ok_class_typedef() async {
     String code = r'''
 typedef void F<T extends int>();
@@ -4081,15 +4121,6 @@ class C<T extends F> {}
     String code = r'''
 class C<T extends int> {}
 typedef void F<T extends C>();
-''';
-    await resolveTestUnit(code);
-    assertNoErrors(testSource);
-  }
-
-  test_notInstantiatedBound_ok_class_function() async {
-    String code = r'''
-class A<T extends void Function<Z>()> {}
-class B<T extends A> {}
 ''';
     await resolveTestUnit(code);
     assertNoErrors(testSource);
@@ -4290,7 +4321,7 @@ main() {
 }
 ''';
     await resolveTestUnit(code);
-    expectInitializerType('foo', 'int', isNull);
+    expectInitializerType('foo', 'int');
   }
 
   test_ternaryOperator_null_right() async {
@@ -4300,7 +4331,7 @@ main() {
 }
 ''';
     await resolveTestUnit(code);
-    expectInitializerType('foo', 'int', isNull);
+    expectInitializerType('foo', 'int');
   }
 
   Future<Null> _objectMethodOnFunctions_helper2(String code) async {
@@ -4320,7 +4351,6 @@ class StrongModeTypePropagationTest extends ResolverTestCase {
   void setUp() {
     super.setUp();
     AnalysisOptionsImpl options = new AnalysisOptionsImpl();
-    options.strongMode = true;
     resetWith(options: options);
   }
 
@@ -4333,8 +4363,8 @@ main() {
   }
 }''';
     CompilationUnit unit = await resolveSource(code);
-    assertPropagatedIterationType(code, unit, typeProvider.dynamicType, null);
-    assertTypeOfMarkedExpression(code, unit, typeProvider.dynamicType, null);
+    assertPropagatedIterationType(code, unit, typeProvider.dynamicType);
+    assertTypeOfMarkedExpression(code, unit, typeProvider.dynamicType);
   }
 
   test_foreachInference_reusedVar_disabled() async {
@@ -4347,8 +4377,8 @@ main() {
   }
 }''';
     CompilationUnit unit = await resolveSource(code);
-    assertPropagatedIterationType(code, unit, typeProvider.dynamicType, null);
-    assertTypeOfMarkedExpression(code, unit, typeProvider.dynamicType, null);
+    assertPropagatedIterationType(code, unit, typeProvider.dynamicType);
+    assertTypeOfMarkedExpression(code, unit, typeProvider.dynamicType);
   }
 
   test_foreachInference_var() async {
@@ -4360,8 +4390,8 @@ main() {
   }
 }''';
     CompilationUnit unit = await resolveSource(code);
-    assertPropagatedIterationType(code, unit, typeProvider.intType, null);
-    assertTypeOfMarkedExpression(code, unit, typeProvider.intType, null);
+    assertPropagatedIterationType(code, unit, typeProvider.intType);
+    assertTypeOfMarkedExpression(code, unit, typeProvider.intType);
   }
 
   test_foreachInference_var_iterable() async {
@@ -4373,8 +4403,8 @@ main() {
   }
 }''';
     CompilationUnit unit = await resolveSource(code);
-    assertPropagatedIterationType(code, unit, typeProvider.intType, null);
-    assertTypeOfMarkedExpression(code, unit, typeProvider.intType, null);
+    assertPropagatedIterationType(code, unit, typeProvider.intType);
+    assertTypeOfMarkedExpression(code, unit, typeProvider.intType);
   }
 
   test_foreachInference_var_stream() async {
@@ -4387,8 +4417,8 @@ main() async {
   }
 }''';
     CompilationUnit unit = await resolveSource(code);
-    assertPropagatedIterationType(code, unit, typeProvider.intType, null);
-    assertTypeOfMarkedExpression(code, unit, typeProvider.intType, null);
+    assertPropagatedIterationType(code, unit, typeProvider.intType);
+    assertTypeOfMarkedExpression(code, unit, typeProvider.intType);
   }
 
   test_inconsistentMethodInheritance_inferFunctionTypeFromTypedef() async {
@@ -4403,7 +4433,7 @@ abstract class BaseCopy extends Base {
 }
 
 abstract class Override implements Base, BaseCopy {
-  f<E>(x) => null;
+  f<E extends int>(x) => null;
 }
 
 class C extends Override implements Base {}
@@ -4420,8 +4450,8 @@ main() {
   v; // marker
 }''';
     CompilationUnit unit = await resolveSource(code);
-    assertPropagatedAssignedType(code, unit, typeProvider.dynamicType, null);
-    assertTypeOfMarkedExpression(code, unit, typeProvider.dynamicType, null);
+    assertAssignedType(code, unit, typeProvider.dynamicType);
+    assertTypeOfMarkedExpression(code, unit, typeProvider.dynamicType);
   }
 
   test_localVariableInference_constant() async {
@@ -4431,8 +4461,8 @@ main() {
   v; // marker
 }''';
     CompilationUnit unit = await resolveSource(code);
-    assertPropagatedAssignedType(code, unit, typeProvider.intType, null);
-    assertTypeOfMarkedExpression(code, unit, typeProvider.intType, null);
+    assertAssignedType(code, unit, typeProvider.intType);
+    assertTypeOfMarkedExpression(code, unit, typeProvider.intType);
   }
 
   test_localVariableInference_declaredType_disabled() async {
@@ -4442,8 +4472,8 @@ main() {
   v; // marker
 }''';
     CompilationUnit unit = await resolveSource(code);
-    assertPropagatedAssignedType(code, unit, typeProvider.dynamicType, null);
-    assertTypeOfMarkedExpression(code, unit, typeProvider.dynamicType, null);
+    assertAssignedType(code, unit, typeProvider.dynamicType);
+    assertTypeOfMarkedExpression(code, unit, typeProvider.dynamicType);
   }
 
   test_localVariableInference_noInitializer_disabled() async {
@@ -4454,8 +4484,8 @@ main() {
   v; // marker
 }''';
     CompilationUnit unit = await resolveSource(code);
-    assertPropagatedAssignedType(code, unit, typeProvider.dynamicType, null);
-    assertTypeOfMarkedExpression(code, unit, typeProvider.dynamicType, null);
+    assertAssignedType(code, unit, typeProvider.dynamicType);
+    assertTypeOfMarkedExpression(code, unit, typeProvider.dynamicType);
   }
 
   test_localVariableInference_transitive_field_inferred_lexical() async {
@@ -4471,8 +4501,8 @@ main() {
 }
 ''';
     CompilationUnit unit = await resolveSource(code);
-    assertPropagatedAssignedType(code, unit, typeProvider.intType, null);
-    assertTypeOfMarkedExpression(code, unit, typeProvider.intType, null);
+    assertAssignedType(code, unit, typeProvider.intType);
+    assertTypeOfMarkedExpression(code, unit, typeProvider.intType);
   }
 
   test_localVariableInference_transitive_field_inferred_reversed() async {
@@ -4488,8 +4518,8 @@ main() {
 }
 ''';
     CompilationUnit unit = await resolveSource(code);
-    assertPropagatedAssignedType(code, unit, typeProvider.intType, null);
-    assertTypeOfMarkedExpression(code, unit, typeProvider.intType, null);
+    assertAssignedType(code, unit, typeProvider.intType);
+    assertTypeOfMarkedExpression(code, unit, typeProvider.intType);
   }
 
   test_localVariableInference_transitive_field_lexical() async {
@@ -4505,8 +4535,8 @@ main() {
 }
 ''';
     CompilationUnit unit = await resolveSource(code);
-    assertPropagatedAssignedType(code, unit, typeProvider.intType, null);
-    assertTypeOfMarkedExpression(code, unit, typeProvider.intType, null);
+    assertAssignedType(code, unit, typeProvider.intType);
+    assertTypeOfMarkedExpression(code, unit, typeProvider.intType);
   }
 
   test_localVariableInference_transitive_field_reversed() async {
@@ -4522,8 +4552,8 @@ main() {
 }
 ''';
     CompilationUnit unit = await resolveSource(code);
-    assertPropagatedAssignedType(code, unit, typeProvider.intType, null);
-    assertTypeOfMarkedExpression(code, unit, typeProvider.intType, null);
+    assertAssignedType(code, unit, typeProvider.intType);
+    assertTypeOfMarkedExpression(code, unit, typeProvider.intType);
   }
 
   test_localVariableInference_transitive_list_local() async {
@@ -4534,8 +4564,8 @@ main() {
   v; // marker
 }''';
     CompilationUnit unit = await resolveSource(code);
-    assertPropagatedAssignedType(code, unit, typeProvider.intType, null);
-    assertTypeOfMarkedExpression(code, unit, typeProvider.intType, null);
+    assertAssignedType(code, unit, typeProvider.intType);
+    assertTypeOfMarkedExpression(code, unit, typeProvider.intType);
   }
 
   test_localVariableInference_transitive_local() async {
@@ -4546,8 +4576,8 @@ main() {
   v; // marker
 }''';
     CompilationUnit unit = await resolveSource(code);
-    assertPropagatedAssignedType(code, unit, typeProvider.intType, null);
-    assertTypeOfMarkedExpression(code, unit, typeProvider.intType, null);
+    assertAssignedType(code, unit, typeProvider.intType);
+    assertTypeOfMarkedExpression(code, unit, typeProvider.intType);
   }
 
   test_localVariableInference_transitive_toplevel_inferred_lexical() async {
@@ -4559,8 +4589,8 @@ main() {
 }
 ''';
     CompilationUnit unit = await resolveSource(code);
-    assertPropagatedAssignedType(code, unit, typeProvider.intType, null);
-    assertTypeOfMarkedExpression(code, unit, typeProvider.intType, null);
+    assertAssignedType(code, unit, typeProvider.intType);
+    assertTypeOfMarkedExpression(code, unit, typeProvider.intType);
   }
 
   test_localVariableInference_transitive_toplevel_inferred_reversed() async {
@@ -4572,8 +4602,8 @@ main() {
 final x = 3;
 ''';
     CompilationUnit unit = await resolveSource(code);
-    assertPropagatedAssignedType(code, unit, typeProvider.intType, null);
-    assertTypeOfMarkedExpression(code, unit, typeProvider.intType, null);
+    assertAssignedType(code, unit, typeProvider.intType);
+    assertTypeOfMarkedExpression(code, unit, typeProvider.intType);
   }
 
   test_localVariableInference_transitive_toplevel_lexical() async {
@@ -4585,8 +4615,8 @@ main() {
 }
 ''';
     CompilationUnit unit = await resolveSource(code);
-    assertPropagatedAssignedType(code, unit, typeProvider.intType, null);
-    assertTypeOfMarkedExpression(code, unit, typeProvider.intType, null);
+    assertAssignedType(code, unit, typeProvider.intType);
+    assertTypeOfMarkedExpression(code, unit, typeProvider.intType);
   }
 
   test_localVariableInference_transitive_toplevel_reversed() async {
@@ -4598,7 +4628,7 @@ main() {
 int x = 3;
 ''';
     CompilationUnit unit = await resolveSource(code);
-    assertPropagatedAssignedType(code, unit, typeProvider.intType, null);
-    assertTypeOfMarkedExpression(code, unit, typeProvider.intType, null);
+    assertAssignedType(code, unit, typeProvider.intType);
+    assertTypeOfMarkedExpression(code, unit, typeProvider.intType);
   }
 }

@@ -33,8 +33,6 @@ typedef void ExitHandler(int code);
 
 /// Analyzer commandline configuration options.
 class CommandLineOptions {
-  final bool enableNewAnalysisDriver = true;
-
   /// Whether declaration casts are enabled (in strong mode)
   final bool declarationCasts;
 
@@ -93,10 +91,6 @@ class CommandLineOptions {
   /// Whether to display version information
   final bool displayVersion;
 
-  /// Whether to treat type mismatches found during constant evaluation as
-  /// errors.
-  final bool enableTypeChecks;
-
   /// Whether to ignore unrecognized flags
   final bool ignoreUnrecognizedFlags;
 
@@ -115,6 +109,9 @@ class CommandLineOptions {
 
   /// Whether to enable the Dart 2.0 Common Front End.
   final bool useCFE;
+
+  /// Whether to enable parsing via the Fasta parser.
+  final bool useFastaParser;
 
   /// Whether to enable the Dart 2.0 Preview.
   final bool previewDart2;
@@ -141,7 +138,9 @@ class CommandLineOptions {
   final bool infosAreFatal;
 
   /// Whether to use strong static checking.
-  final bool strongMode;
+  ///
+  /// This flag is deprecated and hard-coded to `true`.
+  final bool strongMode = true;
 
   /// Whether implicit casts are enabled (in strong mode)
   final bool implicitCasts;
@@ -182,13 +181,13 @@ class CommandLineOptions {
         disableCacheFlushing = args['disable-cache-flushing'],
         disableHints = args['no-hints'],
         displayVersion = args['version'],
-        enableTypeChecks = args['enable_type_checks'],
         ignoreUnrecognizedFlags = args['ignore-unrecognized-flags'],
         lints = args[lintsFlag],
         log = args['log'],
         machineFormat = args['format'] == 'machine',
         perfReport = args['x-perf-report'],
         useCFE = args['use-cfe'],
+        useFastaParser = args['use-fasta-parser'],
         previewDart2 = args['preview-dart-2'],
         batchMode = args['batch'],
         showPackageWarnings = args['show-package-warnings'] ||
@@ -200,7 +199,6 @@ class CommandLineOptions {
         infosAreFatal = args['fatal-infos'] || args['fatal-hints'],
         warningsAreFatal = args['fatal-warnings'],
         lintsAreFatal = args['fatal-lints'],
-        strongMode = args['strong'],
         implicitCasts = args[implicitCastsFlag],
         implicitDynamic = !args['no-implicit-dynamic'],
         verbose = args['verbose'],
@@ -361,10 +359,9 @@ class CommandLineOptions {
           help: 'Verbose output.',
           negatable: false);
 
-    if (telemetry.SHOW_ANALYTICS_UI) {
-      parser.addFlag('analytics',
-          help: 'Enable or disable sending analytics information to Google.');
-    }
+    parser.addFlag('analytics',
+        help: 'Enable or disable sending analytics information to Google.',
+        hide: !telemetry.SHOW_ANALYTICS_UI);
 
     // Build mode options.
     if (!hide) {
@@ -469,10 +466,10 @@ class CommandLineOptions {
           negatable: false,
           hide: hide)
       ..addFlag('enable_type_checks',
-          help: 'Check types in constant evaluation.',
+          help: 'Check types in constant evaluation (deprecated).',
           defaultsTo: false,
           negatable: false,
-          hide: hide)
+          hide: true)
       // TODO(brianwilkerson) Remove the following option after we're sure that
       // it's no longer being used.
       ..addFlag('enable-assert-initializers',
@@ -511,7 +508,10 @@ class CommandLineOptions {
           help:
               'Enable the Dart 2.0 Common Front End implementation (experimental).',
           defaultsTo: false,
-          negatable: false,
+          hide: hide)
+      ..addFlag('use-fasta-parser',
+          help: 'Whether to enable parsing via the Fasta parser.',
+          defaultsTo: false,
           hide: hide)
       ..addFlag('preview-dart-2',
           help: 'Enable the Dart 2.0 preview.',
@@ -585,6 +585,13 @@ class CommandLineOptions {
           return null; // Only reachable in testing.
         }
       }
+
+      if (results.wasParsed('strong')) {
+        errorSink.writeln(
+            'Note: the --strong flag is deprecated and will be removed in an '
+            'future release.\n');
+      }
+
       return new CommandLineOptions._fromArgs(results);
     } on FormatException catch (e) {
       errorSink.writeln(e.message);

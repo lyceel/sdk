@@ -4,9 +4,6 @@
 
 library dart2js.kernel.frontend_strategy;
 
-import 'package:front_end/src/api_unstable/dart2js.dart' as fe;
-
-import '../../compiler_new.dart' as api;
 import '../common.dart';
 import '../common/backend_api.dart';
 import '../common/resolution.dart';
@@ -20,6 +17,7 @@ import '../elements/types.dart';
 import '../enqueue.dart';
 import '../environment.dart' as env;
 import '../frontend_strategy.dart';
+import '../js_backend/allocator_analysis.dart' show KAllocatorAnalysis;
 import '../js_backend/backend_usage.dart';
 import '../js_backend/interceptor_data.dart';
 import '../js_backend/native_data.dart';
@@ -30,7 +28,7 @@ import '../library_loader.dart';
 import '../native/enqueue.dart' show NativeResolutionEnqueuer;
 import '../native/resolver.dart';
 import '../options.dart';
-import '../universe/class_hierarchy_builder.dart';
+import '../universe/class_hierarchy.dart';
 import '../universe/world_builder.dart';
 import '../universe/world_impact.dart';
 import 'deferred_load.dart';
@@ -50,32 +48,16 @@ class KernelFrontEndStrategy extends FrontendStrategyBase {
   final Map<MemberEntity, ScopeModel> closureModels =
       <MemberEntity, ScopeModel>{};
 
-  fe.InitializedCompilerState initializedCompilerState;
-
-  KernelFrontEndStrategy(
-      this._compilerTask,
-      this._options,
-      DiagnosticReporter reporter,
-      env.Environment environment,
-      this.initializedCompilerState) {
+  KernelFrontEndStrategy(this._compilerTask, this._options,
+      DiagnosticReporter reporter, env.Environment environment) {
     assert(_compilerTask != null);
     _elementMap = new KernelToElementMapForImpactImpl(
         reporter, environment, this, _options);
   }
 
   @override
-  LibraryLoaderTask createLibraryLoader(api.CompilerInput compilerInput,
-      DiagnosticReporter reporter, Measurer measurer) {
-    return new KernelLibraryLoaderTask(
-        _options.librariesSpecificationUri,
-        _options.platformBinaries,
-        _options.packageConfig,
-        _elementMap,
-        compilerInput,
-        reporter,
-        measurer,
-        verbose: _options.verbose,
-        initializedCompilerState: initializedCompilerState);
+  void registerLoadedLibraries(LoadedLibraries loadedLibraries) {
+    _elementMap.addComponent(loadedLibraries.component);
   }
 
   @override
@@ -108,8 +90,7 @@ class KernelFrontEndStrategy extends FrontendStrategyBase {
 
   /// Computes the main function from [mainLibrary] adding additional world
   /// impact to [impactBuilder].
-  FunctionEntity computeMain(
-      LibraryEntity mainLibrary, WorldImpactBuilder impactBuilder) {
+  FunctionEntity computeMain(WorldImpactBuilder impactBuilder) {
     return elementEnvironment.mainFunction;
   }
 
@@ -129,19 +110,24 @@ class KernelFrontEndStrategy extends FrontendStrategyBase {
       InterceptorDataBuilder interceptorDataBuilder,
       BackendUsageBuilder backendUsageBuilder,
       RuntimeTypesNeedBuilder rtiNeedBuilder,
+      KAllocatorAnalysis allocatorAnalysis,
       NativeResolutionEnqueuer nativeResolutionEnqueuer,
       NoSuchMethodRegistry noSuchMethodRegistry,
       SelectorConstraintsStrategy selectorConstraintsStrategy,
       ClassHierarchyBuilder classHierarchyBuilder,
       ClassQueries classQueries) {
-    return new KernelResolutionWorldBuilder(
+    return new ResolutionWorldBuilderImpl(
         _options,
         elementMap,
+        elementMap.elementEnvironment,
+        elementMap.types,
+        elementMap.commonElements,
         nativeBasicData,
         nativeDataBuilder,
         interceptorDataBuilder,
         backendUsageBuilder,
         rtiNeedBuilder,
+        allocatorAnalysis,
         nativeResolutionEnqueuer,
         noSuchMethodRegistry,
         selectorConstraintsStrategy,

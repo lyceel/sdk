@@ -20,11 +20,18 @@ class MyClass {
   }
 }
 
+class _MyClass {
+  void foo() {
+    debugger();
+  }
+}
+
 void testFunction() {
   int i = 0;
   while (true) {
     if (++i % 100000000 == 0) {
       MyClass.method(10000);
+      (new _MyClass()).foo();
     }
   }
 }
@@ -50,23 +57,52 @@ var tests = <IsolateTest>[
     print(result);
     expect(result.valueAsString, equals('105'));
 
-    result = await lib.evaluate('globalVar + staticVar + 5');
-    expect(result.type, equals('Error'));
+    await expectError(() => lib.evaluate('globalVar + staticVar + 5'));
 
     result = await cls.evaluate('globalVar + staticVar + 5');
     print(result);
     expect(result.valueAsString, equals('1105'));
 
-    result = await cls.evaluate('this + 5');
-    expect(result.type, equals('Error'));
+    await expectError(() => cls.evaluate('this + 5'));
 
     result = await instance.evaluate('this + 5');
     print(result);
     expect(result.valueAsString, equals('10005'));
 
-    result = await instance.evaluate('this + frog');
-    expect(result.type, equals('Error'));
+    await expectError(() => instance.evaluate('this + frog'));
   },
+  resumeIsolate,
+  hasStoppedAtBreakpoint,
+  (Isolate isolate) async {
+    ServiceMap stack = await isolate.getStack();
+
+    // Make sure we are in the right place.
+    expect(stack.type, equals('Stack'));
+    expect(stack['frames'].length, greaterThanOrEqualTo(2));
+    expect(stack['frames'][0].function.name, equals('foo'));
+    expect(stack['frames'][0].function.dartOwner.name, equals('_MyClass'));
+
+    var cls = stack['frames'][0].function.dartOwner;
+
+    dynamic result = await cls.evaluate("1+1");
+    print(result);
+    expect(result.valueAsString, equals("2"));
+  }
 ];
+
+expectError(func) async {
+  bool gotException = false;
+  dynamic result;
+  try {
+    result = await func();
+    expect(result.type, equals('Error')); // dart1 semantics
+  } on ServerRpcException catch (e) {
+    expect(e.code, equals(ServerRpcException.kExpressionCompilationError));
+    gotException = true;
+  }
+  if (result?.type != 'Error') {
+    expect(gotException, true); // dart2 semantics
+  }
+}
 
 main(args) => runIsolateTests(args, tests, testeeConcurrent: testFunction);

@@ -240,6 +240,42 @@ class TemplateSlowPathCode : public SlowPathCode {
   }
 };
 
+#if !defined(TARGET_ARCH_DBC)
+
+// Slow path code which calls runtime entry to throw an exception.
+class ThrowErrorSlowPathCode : public TemplateSlowPathCode<Instruction> {
+ public:
+  ThrowErrorSlowPathCode(Instruction* instruction,
+                         const RuntimeEntry& runtime_entry,
+                         intptr_t num_args,
+                         intptr_t try_index)
+      : TemplateSlowPathCode(instruction),
+        runtime_entry_(runtime_entry),
+        num_args_(num_args),
+        try_index_(try_index) {}
+
+  // This name appears in disassembly.
+  virtual const char* name() = 0;
+
+  // Subclasses can override these methods to customize slow path code.
+  virtual void EmitCodeAtSlowPathEntry(FlowGraphCompiler* compiler) {}
+  virtual void AddMetadataForRuntimeCall(FlowGraphCompiler* compiler) {}
+
+  virtual void EmitSharedStubCall(Assembler* assembler,
+                                  bool save_fpu_registers) {
+    UNREACHABLE();
+  }
+
+  virtual void EmitNativeCode(FlowGraphCompiler* compiler);
+
+ private:
+  const RuntimeEntry& runtime_entry_;
+  const intptr_t num_args_;
+  const intptr_t try_index_;
+};
+
+#endif  // !defined(TARGET_ARCH_DBC)
+
 class FlowGraphCompiler : public ValueObject {
  private:
   class BlockInfo : public ZoneAllocated {
@@ -364,21 +400,28 @@ class FlowGraphCompiler : public ValueObject {
                                 const AbstractType& dst_type,
                                 const String& dst_name,
                                 LocationSummary* locs);
-  void GenerateAssertAssignableAOT(TokenPosition token_pos,
-                                   intptr_t deopt_id,
-                                   const AbstractType& dst_type,
-                                   const String& dst_name,
-                                   LocationSummary* locs);
 
-  void GenerateAssertAssignableAOT(const AbstractType& dst_type,
-                                   const String& dst_name,
-                                   const Register instance_reg,
-                                   const Register instantiator_type_args_reg,
-                                   const Register function_type_args_reg,
-                                   const Register subtype_cache_reg,
-                                   const Register dst_type_reg,
-                                   const Register scratch_reg,
-                                   Label* done);
+  // Returns true if we can use a type testing stub based assert
+  // assignable code pattern for the given type.
+  static bool ShouldUseTypeTestingStubFor(bool optimizing,
+                                          const AbstractType& type);
+
+  void GenerateAssertAssignableViaTypeTestingStub(TokenPosition token_pos,
+                                                  intptr_t deopt_id,
+                                                  const AbstractType& dst_type,
+                                                  const String& dst_name,
+                                                  LocationSummary* locs);
+
+  void GenerateAssertAssignableViaTypeTestingStub(
+      const AbstractType& dst_type,
+      const String& dst_name,
+      const Register instance_reg,
+      const Register instantiator_type_args_reg,
+      const Register function_type_args_reg,
+      const Register subtype_cache_reg,
+      const Register dst_type_reg,
+      const Register scratch_reg,
+      Label* done);
 
 // DBC emits calls very differently from all other architectures due to its
 // interpreted nature.
@@ -590,11 +633,6 @@ class FlowGraphCompiler : public ValueObject {
 
   // If the cid does not fit in 16 bits, then this will cause a bailout.
   uint16_t ToEmbeddableCid(intptr_t cid, Instruction* instruction);
-
-  // In optimized code, variables at the catch block entry reside at the top
-  // of the allocatable register range.
-  // Must be in sync with FlowGraphAllocator::ProcessInitialDefinition.
-  intptr_t CatchEntryRegForVariable(const LocalVariable& var);
 #endif  // defined(TARGET_ARCH_DBC)
 
   CompilerDeoptInfo* AddDeoptIndexAtCall(intptr_t deopt_id);
@@ -624,7 +662,8 @@ class FlowGraphCompiler : public ValueObject {
   void ClobberDeadTempRegisters(LocationSummary* locs);
 #endif
 
-  Environment* SlowPathEnvironmentFor(Instruction* instruction);
+  Environment* SlowPathEnvironmentFor(Instruction* instruction,
+                                      intptr_t num_slow_path_args);
 
   intptr_t CurrentTryIndex() const {
     if (current_block_ == NULL) {

@@ -153,6 +153,10 @@ const List<TestData> DATA = const [
     const ConstantData('-(1)', 'IntConstant(-1)'),
     const ConstantData('1 == 2', 'BoolConstant(false)'),
     const ConstantData('1 != 2', 'BoolConstant(true)'),
+    const ConstantData('1 / 0', 'DoubleConstant(Infinity)'),
+    const ConstantData('0 / 0', 'DoubleConstant(NaN)'),
+    const ConstantData('1 << 0', 'IntConstant(1)'),
+    const ConstantData('1 >> 0', 'IntConstant(1)'),
     const ConstantData('"foo".length', 'IntConstant(3)'),
     const ConstantData('identical(0, 1)', 'BoolConstant(false)'),
     const ConstantData('"a" "b"', 'StringConstant("ab")'),
@@ -183,20 +187,23 @@ const List<TestData> DATA = const [
         'MapConstant(<int, int>{IntConstant(0): IntConstant(2)})',
         expectedErrors: MessageKind.EQUAL_MAP_ENTRY_KEY),
     const ConstantData(
-        'const bool.fromEnvironment("foo", defaultValue: false)', const {
-      const {}: 'BoolConstant(false)',
-      const {'foo': 'true'}: 'BoolConstant(true)'
-    }),
+        'const bool.fromEnvironment("foo", defaultValue: false)',
+        const <Map<String, String>, String>{
+          const {}: 'BoolConstant(false)',
+          const {'foo': 'true'}: 'BoolConstant(true)'
+        }),
     const ConstantData(
-        'const int.fromEnvironment("foo", defaultValue: 42)', const {
-      const {}: 'IntConstant(42)',
-      const {'foo': '87'}: 'IntConstant(87)'
-    }),
+        'const int.fromEnvironment("foo", defaultValue: 42)',
+        const <Map<String, String>, String>{
+          const {}: 'IntConstant(42)',
+          const {'foo': '87'}: 'IntConstant(87)'
+        }),
     const ConstantData(
-        'const String.fromEnvironment("foo", defaultValue: "bar")', const {
-      const {}: 'StringConstant("bar")',
-      const {'foo': 'foo'}: 'StringConstant("foo")'
-    }),
+        'const String.fromEnvironment("foo", defaultValue: "bar")',
+        const <Map<String, String>, String>{
+          const {}: 'StringConstant("bar")',
+          const {'foo': 'foo'}: 'StringConstant("foo")'
+        }),
   ]),
   const TestData('env', '''
 const a = const bool.fromEnvironment("foo", defaultValue: true);
@@ -245,7 +252,8 @@ class D extends C {
         'const C.named(87)',
         'ConstructedConstant(C(field1=IntConstant(87),'
         'field2=IntConstant(87)))'),
-    const ConstantData('const C(field1: a, field2: b)', const {
+    const ConstantData(
+        'const C(field1: a, field2: b)', const <Map<String, String>, String>{
       const {}: 'ConstructedConstant(C(field1=BoolConstant(true),'
           'field2=IntConstant(42)))',
       const {'foo': 'false', 'bar': '87'}:
@@ -299,12 +307,12 @@ class B extends A {
   const B(a) : super(a, a * 2);
 }
 ''', const [
-    const ConstantData('const A(c, d)', const {
+    const ConstantData('const A(c, d)', const <Map<String, String>, String>{
       const {}: 'ConstructedConstant(A(field=IntConstant(15)))',
       const {'foo': '7', 'bar': '11'}:
           'ConstructedConstant(A(field=IntConstant(18)))',
     }),
-    const ConstantData('const B(d)', const {
+    const ConstantData('const B(d)', const <Map<String, String>, String>{
       const {}: 'ConstructedConstant(B(field=IntConstant(30)))',
       const {'bar': '42'}: 'ConstructedConstant(B(field=IntConstant(126)))',
     }),
@@ -366,6 +374,9 @@ class B extends A {
  class Class6 extends Class5 {
     const Class6(a) : super(a - 1);
  }
+ class Class7 {
+    const Class7();
+ }
  ''', const [
     const ConstantData(
         r'"$integer $string $boolean"', 'StringConstant("5 baz false")'),
@@ -419,6 +430,18 @@ class B extends A {
         expectedErrors: MessageKind.INVALID_CONSTANT_BINARY_INT_TYPE),
     const ConstantData('0 << string', 'NonConstant',
         expectedErrors: MessageKind.INVALID_CONSTANT_BINARY_INT_TYPE),
+    const ConstantData('1 ~/ 0', 'NonConstant',
+        expectedErrors: MessageKind.INVALID_CONSTANT_DIV),
+    const ConstantData('1 ~/ 0.0', 'NonConstant',
+        expectedErrors: MessageKind.INVALID_CONSTANT_DIV),
+    const ConstantData('1 % 0', 'NonConstant',
+        expectedErrors: MessageKind.INVALID_CONSTANT_DIV),
+    const ConstantData('1 % 0.0', 'NonConstant',
+        expectedErrors: MessageKind.INVALID_CONSTANT_DIV),
+    const ConstantData('1 << -1', 'NonConstant',
+        expectedErrors: MessageKind.INVALID_CONSTANT_SHIFT),
+    const ConstantData('1 >> -1', 'NonConstant',
+        expectedErrors: MessageKind.INVALID_CONSTANT_SHIFT),
     const ConstantData('null[0]', 'NonConstant',
         expectedErrors: MessageKind.INVALID_CONSTANT_INDEX),
     const ConstantData('const bool.fromEnvironment(0)', 'NonConstant',
@@ -502,6 +525,12 @@ class B extends A {
     const ConstantData('const Class6(1)', 'NonConstant',
         expectedErrors: MessageKind.INVALID_ASSERT_VALUE_MESSAGE),
     const ConstantData('const Class6(2)', 'ConstructedConstant(Class6())'),
+    const ConstantData('const Class7()', 'ConstructedConstant(Class7())'),
+    const ConstantData('const Class7() == const Class7()', 'NonConstant',
+        expectedErrors: const [
+          MessageKind.INVALID_CONSTANT_BINARY_PRIMITIVE_TYPE,
+          MessageKind.INVALID_CONSTANT_BINARY_PRIMITIVE_TYPE
+        ]),
   ]),
   const TestData('assert', '''
     class A {
@@ -600,7 +629,9 @@ Future testData(TestData data) async {
         var expectedResults =
             strongMode ? data.strongModeResults : data.expectedResults;
         if (expectedResults is String) {
-          expectedResults = {const <String, String>{}: expectedResults};
+          expectedResults = <Map<String, String>, String>{
+            const <String, String>{}: expectedResults
+          };
         }
         expectedResults.forEach((Map<String, String> env, String expectedText) {
           MemoryEnvironment environment =
@@ -655,7 +686,8 @@ Future testData(TestData data) async {
   if (!skipKernelList.contains(data.name) && !data.strongModeOnly) {
     print(
         '--test kernel-------------------------------------------------------');
-    await runTest([], (Compiler compiler, FieldEntity field) {
+    await runTest([Flags.noPreviewDart2],
+        (Compiler compiler, FieldEntity field) {
       KernelFrontEndStrategy frontendStrategy = compiler.frontendStrategy;
       KernelToElementMap elementMap = frontendStrategy.elementMap;
       return new KernelEvaluationEnvironment(elementMap, null, field,

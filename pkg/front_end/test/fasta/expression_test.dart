@@ -66,7 +66,7 @@ class Context extends ChainContext {
 
   MemoryFileSystem get fileSystem => options.fileSystem;
 
-  T runInContext<T>(T action(CompilerContext c)) {
+  Future<T> runInContext<T>(Future<T> action(CompilerContext c)) {
     return compilerContext.runInContext<T>(action);
   }
 
@@ -298,6 +298,8 @@ class CompileExpression extends Step<List<TestCase>, List<TestCase>, Context> {
       File dillFile = new File.fromUri(dillFileUri);
       if (!await dillFile.exists()) {
         await writeComponentToFile(component, dillFileUri);
+        context.fileSystem.entityForUri(dillFileUri).writeAsBytesSync(
+            await new File.fromUri(dillFileUri).readAsBytes());
       }
 
       var dillCompiler =
@@ -370,7 +372,7 @@ Future<Context> createContext(
     };
 
   final ProcessedOptions options =
-      new ProcessedOptions(optionBuilder, false, [entryPoint]);
+      new ProcessedOptions(optionBuilder, [entryPoint]);
 
   final ExternalStateSnapshot snapshot =
       new ExternalStateSnapshot(await options.loadSdkSummary(null));

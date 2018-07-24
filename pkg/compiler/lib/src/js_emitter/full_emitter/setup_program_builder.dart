@@ -32,7 +32,7 @@ jsAst.Statement buildSetupProgram(
     JavaScriptBackend backend,
     Namer namer,
     Emitter emitter,
-    ClosedWorld closedWorld) {
+    JClosedWorld closedWorld) {
   jsAst.Expression typeInformationAccess =
       emitter.generateEmbeddedGlobalAccess(embeddedNames.TYPE_INFORMATION);
   jsAst.Expression staticsAccess =
@@ -65,10 +65,8 @@ jsAst.Statement buildSetupProgram(
   String defaultValuesField = namer.defaultValuesField;
   String methodsWithOptionalArgumentsField =
       namer.methodsWithOptionalArgumentsField;
-  bool retainMetadata = false;
-  String unmangledNameIndex = retainMetadata
-      ? ' 3 * optionalParameterCount + 2 * requiredParameterCount + 3'
-      : ' 2 * optionalParameterCount + requiredParameterCount + 3';
+  String unmangledNameIndex =
+      ' 2 * optionalParameterCount + requiredParameterCount + 3';
   String receiverParamName =
       compiler.options.enableMinification ? "r" : "receiver";
   String valueParamName = compiler.options.enableMinification ? "v" : "value";
@@ -104,7 +102,6 @@ jsAst.Statement buildSetupProgram(
     'deferredAction': namer.deferredAction,
     'allClasses': allClassesAccess,
     'debugFastObjects': DEBUG_FAST_OBJECTS,
-    'isTreeShakingDisabled': false,
     'precompiled': precompiledAccess,
     'finishedClassesAccess': finishedClassesAccess,
     'needsMixinSupport': emitter.needsMixinSupport,
@@ -116,7 +113,6 @@ jsAst.Statement buildSetupProgram(
     'isObject': namer.operatorIs(closedWorld.commonElements.objectClass),
     'specProperty': js.string(namer.nativeSpecProperty),
     'trivialNsmHandlers': emitter.buildTrivialNsmHandlers(),
-    'hasRetainedMetadata': false,
     'types': typesAccess,
     'objectClassName': js.quoteName(
         namer.runtimeTypeName(closedWorld.commonElements.objectClass)),
@@ -210,15 +206,23 @@ function $setupProgramName(programData, metadataOffset, typesOffset) {
       var accessors = [];
 
       var str = "function " + name + "(";
-      var body = "";
+      var comma = "", body = "";
 
       for (var i = 0; i < fields.length; i++) {
-        if(i != 0) str += ", ";
-
-        var field = generateAccessor(fields[i], accessors, name);
-        var parameter = "p_" + field;
-        str += parameter;
-        body += ("this." + field + " = " + parameter + ";\\n");
+        var fieldDescriptor = fields[i];
+        if (fieldDescriptor.charCodeAt(0) == 48) {
+          // null-initialized field.
+          fieldDescriptor = fieldDescriptor.substring(1);
+          var field = generateAccessor(fieldDescriptor, accessors, name);
+          body += ("this." + field + " = null;\\n");
+        } else {
+          var field = generateAccessor(fieldDescriptor, accessors, name);
+          var parameter = "p_" + field;
+          str += comma;
+          comma = ", ";
+          str += parameter;
+          body += ("this." + field + " = " + parameter + ";\\n");
+        }
       }
       if (supportsDirectProtoAccess) {
         body += "this." + #deferredActionString + "();";
@@ -309,8 +313,6 @@ function $setupProgramName(programData, metadataOffset, typesOffset) {
         var desc = processedClasses.collected[cls];
         var globalObject = desc[0];
         desc = desc[1];
-        if (#isTreeShakingDisabled)
-          constructor["${namer.metadataField}"] = desc;
         allClasses[cls] = constructor;
         globalObject[cls] = constructor;
       }
@@ -488,7 +490,7 @@ function $setupProgramName(programData, metadataOffset, typesOffset) {
               descriptor[property];
           var optionalMethods = descriptor.$methodsWithOptionalArgumentsField;
           if (!optionalMethods) {
-            descriptor.$methodsWithOptionalArgumentsField = optionalMethods={}
+            descriptor.$methodsWithOptionalArgumentsField = optionalMethods = {}
           }
           optionalMethods[property] = previousProperty;
         } else {
@@ -520,11 +522,6 @@ function $setupProgramName(programData, metadataOffset, typesOffset) {
       var classData = descriptor["${namer.classDescriptorProperty}"],
           split, supr, fields = classData;
 
-      if (#hasRetainedMetadata)
-        if (typeof classData == "object" &&
-            classData instanceof Array) {
-          classData = fields = classData[0];
-        }
       // ${ClassBuilder.fieldEncodingDescription}.
       var s = fields.split(";");
       fields = s[1] ? s[1].split(",") : [];
@@ -608,14 +605,19 @@ function $setupProgramName(programData, metadataOffset, typesOffset) {
     // the information is thrown away at the call site. This is to avoid
     // conditionals.
     function addStubs(prototype, array, name, isStatic, functions) {
-      var index = $FUNCTION_INDEX, alias = array[index], f;
+      var index = $FUNCTION_INDEX, applyTrampolineIndex = index, alias = array[index], f;
       if (typeof alias == "string") {
         f = array[++index];
       } else {
         f = alias;
         alias = name;
       }
-      var funcs = [prototype[name] = prototype[alias] = f];
+      if (typeof f == "number") {
+        applyTrampolineIndex = f;
+        f = array[++index];
+      }
+      prototype[name] = prototype[alias] = f;
+      var funcs = [f];
       f.\$stubName = name;
       functions.push(name);
       for (index++; index < array.length; index++) {
@@ -664,20 +666,12 @@ function $setupProgramName(programData, metadataOffset, typesOffset) {
           ${readInt("array", "position")} =
               ${readInt("array", "position")} + metadataOffset;
           position++;
-          if ($retainMetadata) {
-            var metaArray = ${readInt("array", "position")};
-            for (var j = 0; j < metaArray.length; j++) {
-              ${readInt("metaArray", "j")} =
-                ${readInt("metaArray", "j")} + metadataOffset;
-            }
-            position++;
-          }
         }
       }
       var unmangledNameIndex = $unmangledNameIndex;
 
       if (getterStubName) {
-        f = tearOff(funcs, array, isStatic, name, isIntercepted);
+        f = tearOff(funcs, applyTrampolineIndex, array, isStatic, name, isIntercepted);
         prototype[name].\$getter = f;
         f.\$getterStub = true;
         if (isStatic) {
@@ -724,7 +718,7 @@ function $setupProgramName(programData, metadataOffset, typesOffset) {
           funcs[0].$metadataIndexField = unmangledNameIndex + 1;
           // The following line installs the [${JsGetName.CALL_CATCH_ALL}]
           // property for closures.
-          if (optionalParameterCount) prototype[unmangledName + "*"] = funcs[0];
+          if (optionalParameterCount) prototype[unmangledName + "*"] = funcs[applyTrampolineIndex];
         }
       }
     }

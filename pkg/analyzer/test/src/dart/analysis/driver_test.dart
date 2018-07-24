@@ -82,7 +82,7 @@ class AnalysisDriverSchedulerTest {
             [new DartUriResolver(sdk), new ResourceUriResolver(provider)],
             null,
             provider),
-        new AnalysisOptionsImpl()..strongMode = true);
+        new AnalysisOptionsImpl());
     driver.results.forEach(allResults.add);
     return driver;
   }
@@ -570,7 +570,8 @@ part 'part.dart';
 
     // Simulate a change that happens during reading the cached errors.
     bool asyncWorkExecuted = false;
-    driver.test.workToWaitAfterComputingResult = (path) {
+    driver.test.workToWaitAfterComputingResult = (path) async {
+      await new Future.value(); // the rest will be executed asynchronously
       provider.updateFile(path, 'class B');
       driver.changeFile(path);
       asyncWorkExecuted = true;
@@ -1107,6 +1108,53 @@ const x = 1;
     expect(session2, isNot(session1));
   }
 
+  test_discoverAvailableFiles_packages() async {
+    var t = _p('/test/lib/test.dart');
+    var a1 = _p('/aaa/lib/a1.dart');
+    var a2 = _p('/aaa/lib/src/a2.dart');
+    var a3 = _p('/aaa/lib/a3.txt');
+    var b = _p('/bbb/lib/b.dart');
+    var c = _p('/ccc/lib/c.dart');
+
+    provider.newFile(t, 'class T {}');
+    provider.newFile(a1, 'class A1 {}');
+    provider.newFile(a2, 'class A2 {}');
+    provider.newFile(a3, 'text');
+    provider.newFile(b, 'class B {}');
+    provider.newFile(c, 'class C {}');
+
+    driver.addFile(t);
+    // Don't add a1.dart, a2.dart, or b.dart - they should be discovered.
+    // And c.dart is not in .packages, so should not be discovered.
+
+    await driver.discoverAvailableFiles();
+
+    expect(driver.knownFiles, contains(t));
+    expect(driver.knownFiles, contains(a1));
+    expect(driver.knownFiles, contains(a2));
+    expect(driver.knownFiles, isNot(contains(a3)));
+    expect(driver.knownFiles, contains(b));
+    expect(driver.knownFiles, isNot(contains(c)));
+
+    // We call wait for discovery more than once.
+    await driver.discoverAvailableFiles();
+  }
+
+  test_discoverAvailableFiles_sdk() async {
+    await driver.discoverAvailableFiles();
+
+    void assertHasDartUri(String uri) {
+      var file = sdk.mapDartUri(uri).fullName;
+      expect(driver.knownFiles, contains(file));
+    }
+
+    assertHasDartUri('dart:async');
+    assertHasDartUri('dart:collection');
+    assertHasDartUri('dart:convert');
+    assertHasDartUri('dart:core');
+    assertHasDartUri('dart:math');
+  }
+
   test_errors_uriDoesNotExist_export() async {
     addTestFile(r'''
 export 'foo.dart';
@@ -1372,6 +1420,51 @@ bbb() {}
     // We get the same results second time.
     List<String> files2 = await driver.getFilesReferencingName('A');
     expect(files2, unorderedEquals([b, c]));
+  }
+
+  test_getFilesReferencingName_discover() async {
+    var t = _p('/test/lib/test.dart');
+    var a = _p('/aaa/lib/a.dart');
+    var b = _p('/bbb/lib/b.dart');
+    var c = _p('/ccc/lib/c.dart');
+
+    provider.newFile(t, 'int t;');
+    provider.newFile(a, 'int a;');
+    provider.newFile(b, 'int b;');
+    provider.newFile(c, 'int c;');
+
+    driver.addFile(t);
+
+    List<String> files = await driver.getFilesReferencingName('int');
+    expect(files, contains(t));
+    expect(files, contains(a));
+    expect(files, contains(b));
+    expect(files, isNot(contains(c)));
+  }
+
+  test_getFileSync_library() async {
+    var path = _p('/test/lib/a.dart');
+    provider.newFile(path, '');
+    var file = driver.getFileSync(path);
+    expect(file.path, path);
+    expect(file.uri.toString(), 'package:test/a.dart');
+    expect(file.isPart, isFalse);
+  }
+
+  test_getFileSync_notAbsolutePath() async {
+    try {
+      driver.getFileSync('not_absolute.dart');
+      fail('ArgumentError expected.');
+    } on ArgumentError {}
+  }
+
+  test_getFileSync_part() async {
+    var path = _p('/test/lib/a.dart');
+    provider.newFile(path, 'part of lib;');
+    var file = driver.getFileSync(path);
+    expect(file.path, path);
+    expect(file.uri.toString(), 'package:test/a.dart');
+    expect(file.isPart, isTrue);
   }
 
   test_getIndex() async {
@@ -1646,7 +1739,7 @@ class C {}
     ClassDeclaration c = result.unit.declarations[1] as ClassDeclaration;
     Annotation a = c.metadata[0];
     expect(a.name.name, 'fff');
-    expect(a.name.staticElement, new isInstanceOf<FunctionElement>());
+    expect(a.name.staticElement, new TypeMatcher<FunctionElement>());
   }
 
   test_getResult_invalidUri() async {
@@ -1987,6 +2080,39 @@ var A2 = B1;
         await driver.getTopLevelNameDeclarations('X'), [], []);
   }
 
+  test_getTopLevelNameDeclarations_discover() async {
+    var t = _p('/test/lib/test.dart');
+    var a1 = _p('/aaa/lib/a1.dart');
+    var a2 = _p('/aaa/lib/src/a2.dart');
+    var b = _p('/bbb/lib/b.dart');
+    var c = _p('/ccc/lib/c.dart');
+
+    provider.newFile(t, 'class T {}');
+    provider.newFile(a1, 'class A1 {}');
+    provider.newFile(a2, 'class A2 {}');
+    provider.newFile(b, 'class B {}');
+    provider.newFile(c, 'class C {}');
+
+    driver.addFile(t);
+    // Don't add a1.dart, a2.dart, or b.dart - they should be discovered.
+    // And c.dart is not in .packages, so should not be discovered.
+
+    _assertTopLevelDeclarations(
+        await driver.getTopLevelNameDeclarations('T'), [t], [false]);
+
+    _assertTopLevelDeclarations(
+        await driver.getTopLevelNameDeclarations('A1'), [a1], [false]);
+
+    _assertTopLevelDeclarations(
+        await driver.getTopLevelNameDeclarations('A2'), [a2], [false]);
+
+    _assertTopLevelDeclarations(
+        await driver.getTopLevelNameDeclarations('B'), [b], [false]);
+
+    _assertTopLevelDeclarations(
+        await driver.getTopLevelNameDeclarations('C'), [], []);
+  }
+
   test_getTopLevelNameDeclarations_parts() async {
     var a = _p('/test/lib/a.dart');
     var b = _p('/test/lib/b.dart');
@@ -2207,7 +2333,8 @@ import 'b.dart';
   }
 
   test_missingDartLibrary_async() async {
-    provider.getFile(_p(MockSdk.FULL_URI_MAP['dart:async'])).delete();
+    var asyncPath = sdk.mapDartUri('dart:async').fullName;
+    provider.getFile(asyncPath).delete();
     addTestFile('class C {}');
 
     ErrorsResult result = await driver.getErrors(testFile);
@@ -2218,7 +2345,8 @@ import 'b.dart';
   }
 
   test_missingDartLibrary_core() async {
-    provider.getFile(_p(MockSdk.FULL_URI_MAP['dart:core'])).delete();
+    var corePath = sdk.mapDartUri('dart:core').fullName;
+    provider.getFile(corePath).delete();
     addTestFile('class C {}');
 
     ErrorsResult result = await driver.getErrors(testFile);

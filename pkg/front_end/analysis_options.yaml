@@ -3,7 +3,6 @@
 # BSD-style license that can be found in the LICENSE file.
 
 analyzer:
-  strong-mode: true
   language:
     enableSuperMixins: false
   exclude:
@@ -19,3 +18,7 @@ analyzer:
     # Allow deprecated calls (although it would be nice to have a distinction
     # between internal and external deprecated calls).
     deprecated_member_use: ignore
+
+    # TODO(jmesserly): this hint was not working in many cases (#31237).
+    # The hint is now fixed, but the new hints need investigation by CFE folks.
+    missing_return: ignore

@@ -416,22 +416,22 @@ abstract class AbstractClassElementImpl extends ElementImpl
  */
 class AuxiliaryElements {
   /**
-   * The element based on propagated type information, or `null` if the AST
-   * structure has not been resolved or if the node could not be resolved.
-   */
-  final ExecutableElement propagatedElement;
-
-  /**
    * The element based on static type information, or `null` if the AST
    * structure has not been resolved or if the node could not be resolved.
    */
   final ExecutableElement staticElement;
 
   /**
-   * Initialize a newly created pair to have both the [staticElement] and the
-   * [propagatedElement].
+   * Initialize a newly created pair to have both the [staticElement] and
+   * `null`.
    */
-  AuxiliaryElements(this.staticElement, this.propagatedElement);
+  AuxiliaryElements(this.staticElement, ExecutableElement propagatedElement);
+
+  /**
+   * The element based on propagated type information, or `null` if the AST
+   * structure has not been resolved or if the node could not be resolved.
+   */
+  ExecutableElement get propagatedElement => null;
 }
 
 /**
@@ -712,10 +712,7 @@ class ClassElementImpl extends AbstractClassElementImpl
   }
 
   bool get hasBeenInferred {
-    if (_unlinkedClass != null) {
-      return context.analysisOptions.strongMode;
-    }
-    return _hasBeenInferred;
+    return _unlinkedClass != null || _hasBeenInferred;
   }
 
   void set hasBeenInferred(bool hasBeenInferred) {
@@ -765,10 +762,8 @@ class ClassElementImpl extends AbstractClassElementImpl
    * Specification (section 10.4).
    */
   bool get hasNoSuchMethod {
-    MethodElement method = context.analysisOptions.strongMode
-        ? lookUpConcreteMethod(
-            FunctionElement.NO_SUCH_METHOD_METHOD_NAME, library)
-        : lookUpMethod(FunctionElement.NO_SUCH_METHOD_METHOD_NAME, library);
+    MethodElement method = lookUpConcreteMethod(
+        FunctionElement.NO_SUCH_METHOD_METHOD_NAME, library);
     ClassElement definingClass = method?.enclosingElement;
     return definingClass != null && !definingClass.type.isObject;
   }
@@ -900,7 +895,7 @@ class ClassElementImpl extends AbstractClassElementImpl
     if (_kernel != null) {
       _methods ??= _kernel.procedures
           .where((k) =>
-              !k.isForwardingStub &&
+              !k.isSyntheticForwarder &&
               (k.kind == kernel.ProcedureKind.Method ||
                   k.kind == kernel.ProcedureKind.Operator))
           .map((k) => new MethodElementImpl.forKernel(this, k))
@@ -1213,8 +1208,9 @@ class ClassElementImpl extends AbstractClassElementImpl
         visitedClasses.add(this);
       }
       try {
-        ClassElementImpl superElement = AbstractClassElementImpl
-            .getImpl(supertype.element) as ClassElementImpl;
+        ClassElementImpl superElement =
+            AbstractClassElementImpl.getImpl(supertype.element)
+                as ClassElementImpl;
         constructorsToForward =
             superElement._computeMixinAppConstructors(visitedClasses);
       } finally {
@@ -1281,7 +1277,7 @@ class ClassElementImpl extends AbstractClassElementImpl
         if (_kernel.mixedInType != null) {
           _kernelMixins.add(_kernel.mixedInType);
         }
-        while (supertype.classNode.isSyntheticMixinImplementation) {
+        while (supertype.classNode.isAnonymousMixin) {
           var superNode = supertype.classNode;
           var substitute = kernel.Substitution.fromSupertype(supertype);
 
@@ -1715,6 +1711,7 @@ class CompilationUnitElementImpl extends UriReferencedElementImpl
     if (_kernelContext != null) {
       _functions ??= _kernelContext.kernelUnit.procedures
           .where((k) => k.kind == kernel.ProcedureKind.Method)
+          .where((k) => !k.name.name.startsWith('__loadLibrary_'))
           .map((k) => new FunctionElementImpl.forKernel(this, k))
           .toList(growable: false);
     }
@@ -1855,7 +1852,7 @@ class CompilationUnitElementImpl extends UriReferencedElementImpl
   List<ClassElement> get types {
     if (_kernelContext != null) {
       _types ??= _kernelContext.kernelUnit.classes
-          .where((k) => !k.isEnum && !k.isSyntheticMixinImplementation)
+          .where((k) => !k.isEnum && !k.isAnonymousMixin)
           .map((k) => new ClassElementImpl.forKernel(this, k))
           .toList(growable: false);
     }
@@ -2098,6 +2095,19 @@ class ConstFieldElementImpl_EnumValue extends ConstFieldElementImpl_ofEnum {
       _evaluationResult = new EvaluationResultImpl(value);
     }
     return _evaluationResult;
+  }
+
+  @override
+  List<ElementAnnotation> get metadata {
+    if (_kernel != null) {
+      _metadata ??=
+          enclosingUnit._kernelContext.buildAnnotations(_kernel.annotations);
+    }
+    if (_unlinkedEnumValue != null) {
+      return _metadata ??=
+          _buildAnnotations(enclosingUnit, _unlinkedEnumValue.annotations);
+    }
+    return super.metadata;
   }
 
   @override
@@ -2469,7 +2479,7 @@ class ConstructorElementImpl extends ExecutableElementImpl
     if (_redirectedConstructor == null) {
       if (_kernelConstructor != null || _kernelFactory != null) {
         _redirectedConstructor = enclosingUnit._kernelContext
-            .getRedirectedConstructor(_kernelConstructor, _kernelFactory);
+            .getRedirectedConstructor(this, _kernelConstructor, _kernelFactory);
       }
       if (serializedExecutable != null) {
         if (serializedExecutable.isRedirectedConstructor) {
@@ -2797,6 +2807,8 @@ class DynamicElementImpl extends ElementImpl implements TypeDefiningElement {
   @override
   DynamicTypeImpl type;
 
+  LibraryElement _library;
+
   /**
    * Initialize a newly created instance of this class. Instances of this class
    * should <b>not</b> be created except as part of creating the type associated
@@ -2809,6 +2821,14 @@ class DynamicElementImpl extends ElementImpl implements TypeDefiningElement {
 
   @override
   ElementKind get kind => ElementKind.DYNAMIC;
+
+  @override
+  LibraryElement get library => _library;
+
+  set library(LibraryElement library) {
+    assert(library.name == 'dart.core');
+    _library = library;
+  }
 
   @override
   T accept<T>(ElementVisitor<T> visitor) => null;
@@ -4397,8 +4417,7 @@ abstract class ExecutableElementImpl extends ElementImpl
           .resolveLinkedType(this, serializedExecutable.inferredReturnTypeSlot);
       _declaredReturnType = enclosingUnit.resynthesizerContext.resolveTypeRef(
           this, serializedExecutable.returnType,
-          defaultVoid: isSetter && context.analysisOptions.strongMode,
-          declaredType: true);
+          defaultVoid: isSetter, declaredType: true);
     }
     return _returnType ?? _declaredReturnType;
   }
@@ -4411,8 +4430,7 @@ abstract class ExecutableElementImpl extends ElementImpl
   @override
   FunctionType get type {
     if (_kernel != null || serializedExecutable != null) {
-      _type ??= new FunctionTypeImpl.elementWithNameAndArgs(
-          this, null, allEnclosingTypeParameterTypes, false);
+      _type ??= new FunctionTypeImpl(this);
     }
     return _type;
   }
@@ -4580,8 +4598,8 @@ class ExportElementImpl extends UriReferencedElementImpl
             ImportElementImpl._buildCombinatorsForKernel(_kernel.combinators);
       }
       if (_unlinkedExportPublic != null) {
-        _combinators = ImportElementImpl
-            ._buildCombinators(_unlinkedExportPublic.combinators);
+        _combinators = ImportElementImpl._buildCombinators(
+            _unlinkedExportPublic.combinators);
       }
     }
     return _combinators ?? const <NamespaceCombinator>[];
@@ -4930,7 +4948,7 @@ class FieldFormalParameterElementImpl extends ParameterElementImpl
  * A concrete implementation of a [FunctionElement].
  */
 class FunctionElementImpl extends ExecutableElementImpl
-    implements FunctionElement {
+    implements FunctionElement, FunctionTypedElementImpl {
   /**
    * The offset to the beginning of the visible range for this element.
    */
@@ -5133,8 +5151,9 @@ class FunctionElementImpl_forLUB extends FunctionElementImpl {
 
   @override
   List<ParameterElement> get parameters {
-    return _parameters ??= ParameterElementImpl
-        .resynthesizeList(_entityRef.syntheticParams, this, synthetic: true);
+    return _parameters ??= ParameterElementImpl.resynthesizeList(
+        _entityRef.syntheticParams, this,
+        synthetic: true);
   }
 
   @override
@@ -5155,8 +5174,7 @@ class FunctionElementImpl_forLUB extends FunctionElementImpl {
 
   @override
   FunctionType get type {
-    return _type ??=
-        new FunctionTypeImpl.elementWithNameAndArgs(this, null, null, false);
+    return _type ??= new FunctionTypeImpl(this);
   }
 
   @override
@@ -5169,13 +5187,23 @@ class FunctionElementImpl_forLUB extends FunctionElementImpl {
 }
 
 /**
+ * Common internal interface shared by elements whose type is a function type.
+ *
+ * Clients may not extend, implement or mix-in this class.
+ */
+abstract class FunctionTypedElementImpl
+    implements ElementImpl, FunctionTypedElement {
+  void set returnType(DartType returnType);
+}
+
+/**
  * The element used for a generic function type.
  *
  * Clients may not extend, implement or mix-in this class.
  */
 class GenericFunctionTypeElementImpl extends ElementImpl
     with TypeParameterizedElementMixin
-    implements GenericFunctionTypeElement {
+    implements GenericFunctionTypeElement, FunctionTypedElementImpl {
   /**
    * The kernel type.
    */
@@ -5299,8 +5327,7 @@ class GenericFunctionTypeElementImpl extends ElementImpl
 
   @override
   FunctionType get type {
-    _type ??= new FunctionTypeImpl.elementWithNameAndArgs(
-        this, null, allEnclosingTypeParameterTypes, false);
+    _type ??= new FunctionTypeImpl(this);
     return _type;
   }
 
@@ -5481,8 +5508,17 @@ class GenericTypeAliasElementImpl extends ElementImpl
   GenericFunctionTypeElementImpl get function {
     if (_function == null) {
       if (_kernel != null) {
-        _function =
-            new GenericFunctionTypeElementImpl.forKernel(this, _kernel.type);
+        var kernelType = _kernel.type;
+        if (kernelType is kernel.FunctionType) {
+          _function =
+              new GenericFunctionTypeElementImpl.forKernel(this, kernelType);
+        } else {
+          // Error recovery.
+          _function = new GenericFunctionTypeElementImpl.forOffset(-1);
+          _function.enclosingElement = this;
+          _function.returnType = DynamicTypeImpl.instance;
+          _function.parameters = <ParameterElement>[];
+        }
       }
       if (_unlinkedTypedef != null) {
         if (_unlinkedTypedef.style == TypedefStyle.genericFunctionType) {
@@ -5635,6 +5671,15 @@ class GenericTypeAliasElementImpl extends ElementImpl
       }
     }
     return null;
+  }
+
+  @override
+  FunctionType instantiate(List<DartType> argumentTypes) {
+    if (argumentTypes.length != typeParameters.length) {
+      throw new ArgumentError('Wrong number of type arguments supplied');
+    }
+    if (typeParameters.isEmpty) return function.type;
+    return typeAfterSubstitution(argumentTypes);
   }
 
   /**
@@ -6197,7 +6242,7 @@ abstract class KernelUnitResynthesizerContext {
    * Return the [ConstructorElementImpl] to which the given [kernelConstructor]
    * or [kernelFactory] redirects.
    */
-  ConstructorElementImpl getRedirectedConstructor(
+  ConstructorElement getRedirectedConstructor(ElementImpl context,
       kernel.Constructor kernelConstructor, kernel.Procedure kernelFactory);
 
   /**
@@ -8372,6 +8417,10 @@ class ParameterElementImpl extends VariableElementImpl
 
   @override
   List<ElementAnnotation> get metadata {
+    if (_kernel != null) {
+      _metadata ??=
+          enclosingUnit._kernelContext.buildAnnotations(_kernel.annotations);
+    }
     if (unlinkedParam != null) {
       return _metadata ??=
           _buildAnnotations(enclosingUnit, unlinkedParam.annotations);
@@ -9153,12 +9202,6 @@ abstract class PropertyInducingElementImpl
   PropertyAccessorElement setter;
 
   /**
-   * The propagated type of this variable, or `null` if type propagation has not
-   * been performed.
-   */
-  DartType _propagatedType;
-
-  /**
    * Initialize a newly created synthetic element to have the given [name] and
    * [offset].
    */
@@ -9188,19 +9231,12 @@ abstract class PropertyInducingElementImpl
       UnlinkedVariable unlinkedVariable, ElementImpl enclosingElement)
       : super.forSerialized(unlinkedVariable, enclosingElement);
 
+  @deprecated
   @override
-  DartType get propagatedType {
-    if (_unlinkedVariable != null && _propagatedType == null) {
-      _propagatedType = enclosingUnit.resynthesizerContext
-          .resolveLinkedType(this, _unlinkedVariable.propagatedTypeSlot);
-    }
-    return _propagatedType;
-  }
+  DartType get propagatedType => null;
 
-  void set propagatedType(DartType propagatedType) {
-    _assertNotResynthesized(_unlinkedVariable);
-    _propagatedType = _checkElementOfType(propagatedType);
-  }
+  @deprecated
+  void set propagatedType(DartType propagatedType) {}
 
   @override
   DartType get type {

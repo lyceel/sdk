@@ -61,7 +61,7 @@ class CompilerOptions implements DiagnosticOptions {
 
   /// Resolved constant "environment" values passed to the compiler via the `-D`
   /// flags.
-  Map<String, dynamic> environment = const <String, dynamic>{};
+  Map<String, String> environment = const <String, String>{};
 
   /// A possibly null state object for kernel compilation.
   fe.InitializedCompilerState kernelInitializedCompilerState;
@@ -69,26 +69,6 @@ class CompilerOptions implements DiagnosticOptions {
   /// Whether we allow mocking compilation of libraries such as dart:io and
   /// dart:html for unit testing purposes.
   bool allowMockCompilation = false;
-
-  /// Whether to resolve all functions in the program, not just those reachable
-  /// from main. This implies [analyzeOnly] is true as well.
-  bool analyzeAll = false;
-
-  /// Whether to disable tree-shaking for the main script. This marks all
-  /// functions in the main script as reachable (not just a function named
-  /// `main`).
-  // TODO(sigmund): rename. The current name seems to indicate that only the
-  // main function is retained, which is the opposite of what this does.
-  bool analyzeMain = false;
-
-  /// Whether to run the compiler just for the purpose of analysis. That is, to
-  /// run resolution and type-checking alone, but otherwise do not generate any
-  /// code.
-  bool analyzeOnly = false;
-
-  /// Whether to skip analysis of method bodies and field initializers. Implies
-  /// [analyzeOnly].
-  bool analyzeSignaturesOnly = false;
 
   /// Sets a combination of flags for benchmarking 'production' mode.
   bool benchmarkingProduction = false;
@@ -208,6 +188,10 @@ class CompilerOptions implements DiagnosticOptions {
   /// Whether to omit implicit strong mode checks.
   bool omitImplicitChecks = false;
 
+  /// Whether to omit class type arguments only needed for `toString` on
+  /// `Object.runtimeType`.
+  bool laxRuntimeTypeToString = false;
+
   /// What should the compiler do with type assertions of assignments.
   ///
   /// This is an internal configuration option derived from other flags.
@@ -227,7 +211,7 @@ class CompilerOptions implements DiagnosticOptions {
   bool useContentSecurityPolicy = false;
 
   /// Enables strong mode in dart2js.
-  bool strongMode = false;
+  bool strongMode = true;
 
   /// When obfuscating for minification, whether to use the frequency of a name
   /// as an heuristic to pick shorter names.
@@ -273,13 +257,11 @@ class CompilerOptions implements DiagnosticOptions {
   /// Create an options object by parsing flags from [options].
   static CompilerOptions parse(List<String> options,
       {Uri libraryRoot, Uri platformBinaries}) {
+    bool isStrong = _hasOption(options, Flags.strongMode) ||
+        !_hasOption(options, Flags.noPreviewDart2);
     return new CompilerOptions()
       ..libraryRoot = libraryRoot
       ..allowMockCompilation = _hasOption(options, Flags.allowMockCompilation)
-      ..analyzeAll = _hasOption(options, Flags.analyzeAll)
-      ..analyzeMain = _hasOption(options, Flags.analyzeMain)
-      ..analyzeOnly = _hasOption(options, Flags.analyzeOnly)
-      ..analyzeSignaturesOnly = _hasOption(options, Flags.analyzeSignaturesOnly)
       ..benchmarkingProduction =
           _hasOption(options, Flags.benchmarkingProduction)
       ..buildId =
@@ -303,8 +285,8 @@ class CompilerOptions implements DiagnosticOptions {
       ..enableMinification = _hasOption(options, Flags.minify)
       ..enableNativeLiveTypeAnalysis =
           !_hasOption(options, Flags.disableNativeLiveTypeAnalysis)
-      ..enableTypeAssertions = _hasOption(options, Flags.enableCheckedMode) &&
-          !_hasOption(options, Flags.strongMode)
+      ..enableTypeAssertions =
+          _hasOption(options, Flags.enableCheckedMode) && !isStrong
       ..enableUserAssertions = _hasOption(options, Flags.enableCheckedMode) ||
           _hasOption(options, Flags.enableAsserts)
       ..experimentalTrackAllocations =
@@ -321,8 +303,10 @@ class CompilerOptions implements DiagnosticOptions {
       ..platformBinaries =
           platformBinaries ?? _extractUriOption(options, '--platform-binaries=')
       ..sourceMapUri = _extractUriOption(options, '--source-map=')
-      ..strongMode = _hasOption(options, Flags.strongMode)
+      ..strongMode = isStrong
       ..omitImplicitChecks = _hasOption(options, Flags.omitImplicitChecks)
+      ..laxRuntimeTypeToString =
+          _hasOption(options, Flags.laxRuntimeTypeToString)
       ..testMode = _hasOption(options, Flags.testMode)
       ..trustJSInteropTypeAnnotations =
           _hasOption(options, Flags.trustJSInteropTypeAnnotations)
@@ -362,7 +346,6 @@ class CompilerOptions implements DiagnosticOptions {
   }
 
   void deriveOptions() {
-    if (analyzeSignaturesOnly || analyzeAll) analyzeOnly = true;
     if (benchmarkingProduction) {
       useStartupEmitter = true;
       trustPrimitives = true;

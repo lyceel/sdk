@@ -13,7 +13,7 @@
 # or ":copy_libraries" may delete/overwrite your addition, and the build will
 # fail.
 
-import("copy_tree.gni")
+import("../build/dart/copy_tree.gni")
 
 declare_args() {
   # Build a SDK with less stuff. It excludes dart2js, ddc, and web libraries.
@@ -38,13 +38,14 @@ declare_args() {
 # ......pub
 # ......snapshots/
 # ........analysis_server.dart.snapshot
+# ........analysis_server_dart1.dart.snapshot (this is temporary; #33877)
 # ........dart2js.dart.snapshot
 # ........dartanalyzer.dart.snapshot
 # ........dartdoc.dart.snapshot
 # ........dartfmt.dart.snapshot
 # ........dartdevc.dart.snapshot
 # ........dartdevk.dart.snapshot
-# ........kernel_summary_worker.dart.snapshot
+# ........kernel_worker.dart.snapshot
 # ........pub.dart.snapshot
 #.........resources/
 #...........dartdoc/
@@ -118,6 +119,10 @@ _platform_sdk_snapshots = [
     "../utils/analysis_server",
   ],
   [
+    "analysis_server_dart1",
+    "../utils/analysis_server_dart1",
+  ],
+  [
     "dartanalyzer",
     "../utils/dartanalyzer:generate_dartanalyzer_snapshot",
   ],
@@ -130,6 +135,10 @@ _platform_sdk_snapshots = [
     "../utils/dartfmt",
   ],
   [
+    "kernel-service",
+    "../utils/kernel-service",
+  ],
+  [
     "pub",
     "../utils/pub",
   ],
@@ -139,6 +148,10 @@ _full_sdk_snapshots = [
   [
     "analysis_server",
     "../utils/analysis_server",
+  ],
+  [
+    "analysis_server_dart1",
+    "../utils/analysis_server_dart1",
   ],
   [
     "dart2js",
@@ -165,16 +178,16 @@ _full_sdk_snapshots = [
     "../utils/dartfmt",
   ],
   [
-    "kernel_summary_worker",
-    "../utils/bazel:kernel_summary_worker",
-  ],
-  [
-    "pub",
-    "../utils/pub",
+    "kernel_worker",
+    "../utils/bazel:kernel_worker",
   ],
   [
     "kernel-service",
     "../utils/kernel-service",
+  ],
+  [
+    "pub",
+    "../utils/pub",
   ],
 ]
 
@@ -555,7 +568,7 @@ copy("copy_dev_compiler_summary") {
   deps = [
     ":copy_libraries",
     "../utils/dartdevc:dartdevc_sdk",
-    "../utils/dartdevc:dartdevc_sdk_kernel_summary",
+    "../utils/dartdevc:dartdevk_sdk",
   ]
   gen_dir = get_label_info("../utils/dartdevc:dartdevc_sdk", "target_gen_dir")
   sources = [
@@ -642,9 +655,9 @@ copy("copy_dev_compiler_js_legacy") {
 copy("copy_dev_compiler_js_amd_kernel") {
   visibility = [ ":copy_dev_compiler_js" ]
   deps = [
-    "../utils/dartdevc:dartdevc_sdk_kernel_summary",
+    "../utils/dartdevc:dartdevk_sdk",
   ]
-  gen_dir = get_label_info("../utils/dartdevc:dartdevc_sdk_kernel_summary",
+  gen_dir = get_label_info("../utils/dartdevc:dartdevk_sdk",
                            "target_gen_dir")
   sources = [
     "$gen_dir/kernel/amd/dart_sdk.js",
@@ -660,9 +673,9 @@ copy("copy_dev_compiler_js_amd_kernel") {
 copy("copy_dev_compiler_js_common_kernel") {
   visibility = [ ":copy_dev_compiler_js" ]
   deps = [
-    "../utils/dartdevc:dartdevc_sdk_kernel_summary",
+    "../utils/dartdevc:dartdevk_sdk",
   ]
-  gen_dir = get_label_info("../utils/dartdevc:dartdevc_sdk_kernel_summary",
+  gen_dir = get_label_info("../utils/dartdevc:dartdevk_sdk",
                            "target_gen_dir")
   sources = [
     "$gen_dir/kernel/common/dart_sdk.js",
@@ -678,9 +691,9 @@ copy("copy_dev_compiler_js_common_kernel") {
 copy("copy_dev_compiler_js_es6_kernel") {
   visibility = [ ":copy_dev_compiler_js" ]
   deps = [
-    "../utils/dartdevc:dartdevc_sdk_kernel_summary",
+    "../utils/dartdevc:dartdevk_sdk",
   ]
-  gen_dir = get_label_info("../utils/dartdevc:dartdevc_sdk_kernel_summary",
+  gen_dir = get_label_info("../utils/dartdevc:dartdevk_sdk",
                            "target_gen_dir")
   sources = [
     "$gen_dir/kernel/es6/dart_sdk.js",
@@ -695,9 +708,9 @@ copy("copy_dev_compiler_js_es6_kernel") {
 copy("copy_dev_compiler_js_legacy_kernel") {
   visibility = [ ":copy_dev_compiler_js" ]
   deps = [
-    "../utils/dartdevc:dartdevc_sdk_kernel_summary",
+    "../utils/dartdevc:dartdevk_sdk",
   ]
-  gen_dir = get_label_info("../utils/dartdevc:dartdevc_sdk_kernel_summary",
+  gen_dir = get_label_info("../utils/dartdevc:dartdevk_sdk",
                            "target_gen_dir")
   sources = [
     "$gen_dir/kernel/legacy/dart_sdk.js",
@@ -836,6 +849,7 @@ action("write_version_file") {
   visibility = [ ":create_common_sdk" ]
   inputs = [
     "../tools/VERSION",
+    "../.git/logs/HEAD",
   ]
   output = "$root_out_dir/dart-sdk/version"
   outputs = [
@@ -851,6 +865,9 @@ action("write_version_file") {
 # This rule writes the revision file.
 action("write_revision_file") {
   visibility = [ ":create_common_sdk" ]
+  inputs = [
+    "../.git/logs/HEAD",
+  ]
   output = "$root_out_dir/dart-sdk/revision"
   outputs = [
     output,

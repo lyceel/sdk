@@ -6,12 +6,13 @@
 #define RUNTIME_VM_KERNEL_LOADER_H_
 
 #if !defined(DART_PRECOMPILED_RUNTIME)
-#include <map>
 
-#include "vm/compiler/frontend/kernel_binary_flowgraph.h"
-#include "vm/compiler/frontend/kernel_to_il.h"
+#include "vm/bit_vector.h"
+#include "vm/compiler/frontend/kernel_translation_helper.h"
+#include "vm/hash_map.h"
 #include "vm/kernel.h"
 #include "vm/object.h"
+#include "vm/symbols.h"
 
 namespace dart {
 namespace kernel {
@@ -29,6 +30,8 @@ class BuildingTranslationHelper : public TranslationHelper {
 
  private:
   KernelLoader* loader_;
+
+  DISALLOW_COPY_AND_ASSIGN(BuildingTranslationHelper);
 };
 
 template <typename VmType>
@@ -55,7 +58,7 @@ class Mapping {
 class LibraryIndex {
  public:
   // |kernel_data| is the kernel data for one library alone.
-  explicit LibraryIndex(const TypedData& kernel_data);
+  explicit LibraryIndex(const ExternalTypedData& kernel_data);
 
   intptr_t class_count() const { return class_count_; }
   intptr_t procedure_count() const { return procedure_count_; }
@@ -100,7 +103,7 @@ class ClassIndex {
 
   // |class_offset| is the offset of class' kernel data in |kernel_data|.
   // The size of the class' kernel data is |class_size|.
-  ClassIndex(const TypedData& kernel_data,
+  ClassIndex(const ExternalTypedData& kernel_data,
              intptr_t class_offset,
              intptr_t class_size);
 
@@ -142,9 +145,25 @@ class KernelLoader : public ValueObject {
   static void FinishLoading(const Class& klass);
 
   const Array& ReadConstantTable();
-  RawString* DetectExternalName();
+
+  // Check for the presence of a (possibly const) constructor for the
+  // 'ExternalName' class. If found, returns the name parameter to the
+  // constructor.
+  RawString* DetectExternalNameCtor();
+
+  // Check for the presence of a (possibly const) constructor for the 'pragma'
+  // class. Returns whether it was found (no details about the type of pragma).
+  bool DetectPragmaCtor();
+
+  bool IsClassName(NameIndex name, const String& library, const String& klass);
+
   void AnnotateNativeProcedures(const Array& constant_table);
   void LoadNativeExtensionLibraries(const Array& constant_table);
+
+  void ReadProcedureAnnotations(intptr_t annotation_count,
+                                String* native_name,
+                                bool* is_potential_native,
+                                bool* has_pragma_annotation);
 
   const String& DartSymbolPlain(StringIndex index) {
     return translation_helper_.DartSymbolPlain(index);
@@ -183,10 +202,10 @@ class KernelLoader : public ValueObject {
   friend class BuildingTranslationHelper;
 
   KernelLoader(const Script& script,
-               const TypedData& kernel_data,
+               const ExternalTypedData& kernel_data,
                intptr_t data_program_offset);
 
-  void initialize_fields();
+  void InitializeFields();
   static void index_programs(kernel::Reader* reader,
                              GrowableArray<intptr_t>* subprogram_file_starts);
   void walk_incremental_kernel(BitVector* modified_libs);
@@ -233,7 +252,8 @@ class KernelLoader : public ValueObject {
                                   const Function& function,
                                   const AbstractType& field_type);
 
-  void LoadLibraryImportsAndExports(Library* library);
+  void LoadLibraryImportsAndExports(Library* library,
+                                    const Class& toplevel_class);
 
   Library& LookupLibraryOrNull(NameIndex library);
   Library& LookupLibrary(NameIndex library);
@@ -286,10 +306,11 @@ class KernelLoader : public ValueObject {
 
   NameIndex skip_vmservice_library_;
 
-  TypedData& library_kernel_data_;
+  ExternalTypedData& library_kernel_data_;
   KernelProgramInfo& kernel_program_info_;
   BuildingTranslationHelper translation_helper_;
-  StreamingFlowGraphBuilder builder_;
+  KernelReaderHelper helper_;
+  TypeTranslator type_translator_;
 
   Class& external_name_class_;
   Field& external_name_field_;
@@ -301,7 +322,15 @@ class KernelLoader : public ValueObject {
 
   GrowableArray<const Function*> functions_;
   GrowableArray<const Field*> fields_;
+
+  DISALLOW_COPY_AND_ASSIGN(KernelLoader);
 };
+
+RawFunction* CreateFieldInitializerFunction(Thread* thread,
+                                            Zone* zone,
+                                            const Field& field);
+
+ParsedFunction* ParseStaticFieldInitializer(Zone* zone, const Field& field);
 
 }  // namespace kernel
 }  // namespace dart

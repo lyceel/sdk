@@ -27,6 +27,8 @@ class OverrideContributor implements DartCompletionContributor {
   @override
   Future<List<CompletionSuggestion>> computeSuggestions(
       DartCompletionRequest request) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     SimpleIdentifier targetId = _getTargetId(request.target);
     if (targetId == null) {
       return EMPTY_LIST;
@@ -69,6 +71,8 @@ class OverrideContributor implements DartCompletionContributor {
       SimpleIdentifier targetId,
       ExecutableElement element,
       StringBuffer displayTextBuffer) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     DartChangeBuilder builder =
         new DartChangeBuilder(result.driver.currentSession);
     await builder.addFileEdit(result.path, (DartFileEditBuilder builder) {
@@ -86,6 +90,8 @@ class OverrideContributor implements DartCompletionContributor {
    */
   Future<CompletionSuggestion> _buildSuggestion(DartCompletionRequest request,
       SimpleIdentifier targetId, ExecutableElement element) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     StringBuffer displayTextBuffer = new StringBuffer();
     DartChangeBuilder builder = await _buildReplacementText(
         request.result, targetId, element, displayTextBuffer);
@@ -145,24 +151,33 @@ class OverrideContributor implements DartCompletionContributor {
     if (node is ClassDeclaration) {
       Object entity = target.entity;
       if (entity is FieldDeclaration) {
-        NodeList<VariableDeclaration> variables = entity.fields.variables;
-        if (variables.length == 1) {
-          SimpleIdentifier targetId = variables[0].name;
-          if (targetId.name.isEmpty) {
-            return targetId;
-          }
-        }
+        return _getTargetIdFromVarList(entity.fields);
       }
     } else if (node is FieldDeclaration) {
       Object entity = target.entity;
       if (entity is VariableDeclarationList) {
-        NodeList<VariableDeclaration> variables = entity.variables;
-        if (variables.length == 1) {
-          SimpleIdentifier targetId = variables[0].name;
-          if (targetId.name.isEmpty) {
-            return targetId;
-          }
-        }
+        return _getTargetIdFromVarList(entity);
+      }
+    }
+    return null;
+  }
+
+  SimpleIdentifier _getTargetIdFromVarList(VariableDeclarationList fields) {
+    NodeList<VariableDeclaration> variables = fields.variables;
+    if (variables.length == 1) {
+      VariableDeclaration variable = variables[0];
+      SimpleIdentifier targetId = variable.name;
+      if (targetId.name.isEmpty) {
+        // analyzer parser
+        // Actual: class C { foo^ }
+        // Parsed: class C { foo^ _s_ }
+        //   where _s_ is a synthetic id inserted by the analyzer parser
+        return targetId;
+      } else if (fields.keyword == null &&
+          fields.type == null &&
+          variable.initializer == null) {
+        // fasta parser does not insert a synthetic identifier
+        return targetId;
       }
     }
     return null;

@@ -55,36 +55,17 @@ const uint8_t kNativeYieldFlags = 0x2;
 
 enum LogicalOperator { kAnd, kOr };
 
-typedef void (*Dart_ReleaseBufferCallback)(uint8_t* buffer);
-
 class Program {
  public:
-  ~Program() {
-    if (buffer_ownership_ && kernel_data_ != NULL) {
-      ASSERT(release_callback != NULL);
-      release_callback(const_cast<uint8_t*>(kernel_data_));
-    }
-    kernel_data_ = NULL;
-  }
-
-  /**
-   * Read a kernel Program from the given Reader. Note the returned Program
-   * can potentially contain several "sub programs", though the library count
-   * etc will reference the last "sub program" only.
-   * @param reader
-   * @param take_buffer_ownership if set to true, the release callback will be
-   * called upon Program destruction, i.e. the data from reader will likely be
-   * released. If set to false the data will not be released. This is for
-   * instance useful for creating Programs out of "sub programs" where each
-   * "sub program" should not try to release the buffer.
-   * @return
-   */
-  static Program* ReadFrom(Reader* reader, bool take_buffer_ownership = false);
+  // Read a kernel Program from the given Reader. Note the returned Program
+  // can potentially contain several "sub programs", though the library count
+  // etc will reference the last "sub program" only.
+  static Program* ReadFrom(Reader* reader, const char** error = nullptr);
 
   static Program* ReadFromFile(const char* script_uri);
   static Program* ReadFromBuffer(const uint8_t* buffer,
                                  intptr_t buffer_length,
-                                 bool take_buffer_ownership = false);
+                                 const char** error = nullptr);
 
   bool is_single_program() { return single_program_; }
   NameIndex main_method() { return main_method_reference_; }
@@ -101,16 +82,11 @@ class Program {
   const uint8_t* kernel_data() { return kernel_data_; }
   intptr_t kernel_data_size() { return kernel_data_size_; }
   intptr_t library_count() { return library_count_; }
-  void set_release_buffer_callback(Dart_ReleaseBufferCallback callback) {
-    release_callback = callback;
-  }
 
  private:
-  Program()
-      : kernel_data_(NULL), kernel_data_size_(-1), release_callback(NULL) {}
+  Program() : kernel_data_(NULL), kernel_data_size_(-1) {}
 
   bool single_program_;
-  bool buffer_ownership_;
   NameIndex main_method_reference_;  // Procedure.
   intptr_t library_count_;
 
@@ -134,16 +110,8 @@ class Program {
 
   const uint8_t* kernel_data_;
   intptr_t kernel_data_size_;
-  Dart_ReleaseBufferCallback release_callback;
 
   DISALLOW_COPY_AND_ASSIGN(Program);
-};
-
-class KernelSourceFingerprintHelper {
- public:
-  static uint32_t CalculateClassFingerprint(const Class& klass);
-  static uint32_t CalculateFieldFingerprint(const Field& field);
-  static uint32_t CalculateFunctionFingerprint(const Function& func);
 };
 
 class KernelLineStartsReader {
@@ -208,20 +176,25 @@ class KernelLineStartsReader {
 
   const dart::TypedData& line_starts_data_;
   KernelLineStartsHelper* helper_;
-  Dart_ReleaseBufferCallback release_callback;
 
   DISALLOW_COPY_AND_ASSIGN(KernelLineStartsReader);
 };
 
-RawFunction* CreateFieldInitializerFunction(Thread* thread,
-                                            Zone* zone,
-                                            const Field& field);
-
-ParsedFunction* ParseStaticFieldInitializer(Zone* zone, const Field& field);
-
 bool FieldHasFunctionLiteralInitializer(const Field& field,
                                         TokenPosition* start,
                                         TokenPosition* end);
+
+void CollectTokenPositionsFor(const Script& script);
+
+RawObject* EvaluateMetadata(const Field& metadata_field,
+                            bool is_annotations_offset);
+RawObject* BuildParameterDescriptor(const Function& function);
+
+// Returns true if the given function needs dynamic invocation forwarder:
+// that is if any of the arguments require checking on the dynamic
+// call-site: if function has no parameters or has only covariant parameters
+// as such function already checks all of its parameters.
+bool NeedsDynamicInvocationForwarder(const Function& function);
 
 }  // namespace kernel
 }  // namespace dart

@@ -24,8 +24,17 @@ class SourceMapBuilder {
   final LocationProvider locationProvider;
   final List<SourceMapEntry> entries = new List<SourceMapEntry>();
 
-  SourceMapBuilder(this.version, this.sourceMapUri, this.targetFileUri,
-      this.locationProvider);
+  /// Extension used to deobfuscate minified names in error messages.
+  final Map<String, String> minifiedGlobalNames;
+  final Map<String, String> minifiedInstanceNames;
+
+  SourceMapBuilder(
+      this.version,
+      this.sourceMapUri,
+      this.targetFileUri,
+      this.locationProvider,
+      this.minifiedGlobalNames,
+      this.minifiedInstanceNames);
 
   void addMapping(int targetOffset, SourceLocation sourceLocation) {
     entries.add(new SourceMapEntry(sourceLocation, targetOffset));
@@ -87,6 +96,9 @@ class SourceMapBuilder {
       }
     });
 
+    minifiedGlobalNames.values.forEach(nameMap.register);
+    minifiedInstanceNames.values.forEach(nameMap.register);
+
     StringBuffer mappingsBuffer = new StringBuffer();
     writeEntries(lineColumnMap, uriMap, nameMap, mappingsBuffer);
 
@@ -112,7 +124,15 @@ class SourceMapBuilder {
     buffer.write(',\n');
     buffer.write('  "mappings": "');
     buffer.write(mappingsBuffer);
-    buffer.write('"\n}\n');
+    buffer.write('",\n');
+    buffer.write('  "x_org_dartlang_dart2js": {\n');
+    buffer.write('    "minified_names": {\n');
+    buffer.write('      "global": ');
+    writeMinifiedNames(minifiedGlobalNames, nameMap, buffer);
+    buffer.write(',\n');
+    buffer.write('      "instance": ');
+    writeMinifiedNames(minifiedInstanceNames, nameMap, buffer);
+    buffer.write('\n    }\n  }\n}\n');
     return buffer.toString();
   }
 
@@ -170,6 +190,22 @@ class SourceMapBuilder {
     });
   }
 
+  void writeMinifiedNames(Map<String, String> minifiedNames,
+      IndexMap<String> nameMap, StringBuffer buffer) {
+    bool first = true;
+    buffer.write('{');
+    minifiedNames.forEach((String minifiedName, String name) {
+      if (!first) buffer.write(',');
+      buffer.write('"');
+      writeJsonEscapedCharsOn(minifiedName, buffer);
+      buffer.write('"');
+      buffer.write(':');
+      buffer.write(nameMap[name]);
+      first = false;
+    });
+    buffer.write('}');
+  }
+
   /// Returns the source map tag to put at the end a .js file in [fileUri] to
   /// make it point to the source map file in [sourceMapUri].
   static String generateSourceMapTag(Uri sourceMapUri, Uri fileUri) {
@@ -191,6 +227,8 @@ class SourceMapBuilder {
   static void outputSourceMap(
       SourceLocationsProvider sourceLocationsProvider,
       LocationProvider locationProvider,
+      Map<String, String> minifiedGlobalNames,
+      Map<String, String> minifiedInstanceNames,
       String name,
       Uri sourceMapUri,
       Uri fileUri,
@@ -201,7 +239,12 @@ class SourceMapBuilder {
     sourceLocationsProvider.sourceLocations
         .forEach((SourceLocations sourceLocations) {
       SourceMapBuilder sourceMapBuilder = new SourceMapBuilder(
-          sourceLocations.name, sourceMapUri, fileUri, locationProvider);
+          sourceLocations.name,
+          sourceMapUri,
+          fileUri,
+          locationProvider,
+          minifiedGlobalNames,
+          minifiedInstanceNames);
       sourceLocations.forEachSourceLocation(sourceMapBuilder.addMapping);
       String sourceMap = sourceMapBuilder.build();
       String extension = 'js.map';
@@ -276,13 +319,11 @@ class SourceMapEntry {
 /// Map from line/column pairs to lists of [T] elements.
 class LineColumnMap<T> {
   Map<int, Map<int, List<T>>> _map = <int, Map<int, List<T>>>{};
-  var _makeLineMap = () => <int, List<T>>{};
-  var _makeList = () => <T>[];
 
   /// Returns the list of elements associated with ([line],[column]).
   List<T> _getList(int line, int column) {
-    Map<int, List<T>> lineMap = _map.putIfAbsent(line, _makeLineMap);
-    return lineMap.putIfAbsent(column, _makeList);
+    Map<int, List<T>> lineMap = _map[line] ??= <int, List<T>>{};
+    return lineMap[column] ??= <T>[];
   }
 
   /// Adds [element] to the end of the list of elements associated with

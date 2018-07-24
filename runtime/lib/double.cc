@@ -23,7 +23,7 @@ DEFINE_NATIVE_ENTRY(Double_doubleFromInteger, 2) {
   ASSERT(TypeArguments::CheckedHandle(arguments->NativeArgAt(0)).IsNull());
   const Integer& value = Integer::CheckedHandle(arguments->NativeArgAt(1));
   if (FLAG_trace_intrinsified_natives) {
-    OS::Print("Double_doubleFromInteger %s\n", value.ToCString());
+    OS::PrintErr("Double_doubleFromInteger %s\n", value.ToCString());
   }
   return Double::New(value.AsDoubleValue());
 }
@@ -33,7 +33,7 @@ DEFINE_NATIVE_ENTRY(Double_add, 2) {
   GET_NON_NULL_NATIVE_ARGUMENT(Double, right_object, arguments->NativeArgAt(1));
   double right = right_object.value();
   if (FLAG_trace_intrinsified_natives) {
-    OS::Print("Double_add %f + %f\n", left, right);
+    OS::PrintErr("Double_add %f + %f\n", left, right);
   }
   return Double::New(left + right);
 }
@@ -43,7 +43,7 @@ DEFINE_NATIVE_ENTRY(Double_sub, 2) {
   GET_NON_NULL_NATIVE_ARGUMENT(Double, right_object, arguments->NativeArgAt(1));
   double right = right_object.value();
   if (FLAG_trace_intrinsified_natives) {
-    OS::Print("Double_sub %f - %f\n", left, right);
+    OS::PrintErr("Double_sub %f - %f\n", left, right);
   }
   return Double::New(left - right);
 }
@@ -53,7 +53,7 @@ DEFINE_NATIVE_ENTRY(Double_mul, 2) {
   GET_NON_NULL_NATIVE_ARGUMENT(Double, right_object, arguments->NativeArgAt(1));
   double right = right_object.value();
   if (FLAG_trace_intrinsified_natives) {
-    OS::Print("Double_mul %f * %f\n", left, right);
+    OS::PrintErr("Double_mul %f * %f\n", left, right);
   }
   return Double::New(left * right);
 }
@@ -63,7 +63,7 @@ DEFINE_NATIVE_ENTRY(Double_div, 2) {
   GET_NON_NULL_NATIVE_ARGUMENT(Double, right_object, arguments->NativeArgAt(1));
   double right = right_object.value();
   if (FLAG_trace_intrinsified_natives) {
-    OS::Print("Double_div %f / %f\n", left, right);
+    OS::PrintErr("Double_div %f / %f\n", left, right);
   }
   return Double::New(left / right);
 }
@@ -74,66 +74,27 @@ static RawInteger* DoubleToInteger(double val, const char* error_msg) {
     args.SetAt(0, String::Handle(String::New(error_msg)));
     Exceptions::ThrowByType(Exceptions::kUnsupported, args);
   }
-  if (FLAG_limit_ints_to_64_bits) {
-    int64_t ival = 0;
-    if (val <= static_cast<double>(kMinInt64)) {
-      ival = kMinInt64;
-    } else if (val >= static_cast<double>(kMaxInt64)) {
-      ival = kMaxInt64;
-    } else {  // Representable in int64_t.
-      ival = static_cast<int64_t>(val);
-    }
-    return Integer::New(ival);
+  int64_t ival = 0;
+  if (val <= static_cast<double>(kMinInt64)) {
+    ival = kMinInt64;
+  } else if (val >= static_cast<double>(kMaxInt64)) {
+    ival = kMaxInt64;
+  } else {  // Representable in int64_t.
+    ival = static_cast<int64_t>(val);
   }
-  if ((-1.0 < val) && (val < 1.0)) {
-    return Smi::New(0);
-  }
-  DoubleInternals internals = DoubleInternals(val);
-  ASSERT(!internals.IsSpecial());  // Only Infinity and NaN are special.
-  uint64_t significand = internals.Significand();
-  intptr_t exponent = internals.Exponent();
-  if (exponent <= 0) {
-    significand >>= -exponent;
-    exponent = 0;
-  } else if (exponent <= 10) {
-    // A double significand has at most 53 bits. The following shift will
-    // hence not overflow, and yield an integer of at most 63 bits.
-    significand <<= exponent;
-    exponent = 0;
-  }
-  // A significand has at most 63 bits (after the shift above).
-  // The cast to int64_t is hence safe.
-  int64_t ival = static_cast<int64_t>(significand);
-  if (internals.Sign() < 0) {
-    ival = -ival;
-  }
-  if (exponent == 0) {
-    // The double fits in a Smi or Mint.
-    return Integer::New(ival);
-  }
-  Integer& result = Integer::Handle();
-  result = Bigint::NewFromShiftedInt64(ival, exponent);
-  return result.AsValidInteger();
+  return Integer::New(ival);
 }
 
 DEFINE_NATIVE_ENTRY(Double_hashCode, 1) {
   double val = Double::CheckedHandle(arguments->NativeArgAt(0)).value();
   if (FLAG_trace_intrinsified_natives) {
-    OS::Print("Double_hashCode %f\n", val);
+    OS::PrintErr("Double_hashCode %f\n", val);
   }
   if (val >= static_cast<double>(kMinInt64) &&
       val <= static_cast<double>(kMaxInt64)) {
     int64_t ival = static_cast<int64_t>(val);
     if (static_cast<double>(ival) == val) {
       return Integer::New(ival);
-    }
-  } else if (!FLAG_limit_ints_to_64_bits && !isinf(val) && !isnan(val)) {
-    // Since this code is temporary until we limit ints to 64 bits, we
-    // reuse the existing DoubleToInteger helper function and pass it
-    // an empty error message ("") because it cannot fail.
-    const Integer& bigint = Integer::Handle(DoubleToInteger(val, ""));
-    if (bigint.AsDoubleValue() == val) {
-      return bigint.raw();
     }
   }
 
@@ -146,7 +107,7 @@ DEFINE_NATIVE_ENTRY(Double_trunc_div, 2) {
   GET_NON_NULL_NATIVE_ARGUMENT(Double, right_object, arguments->NativeArgAt(1));
   double right = right_object.value();
   if (FLAG_trace_intrinsified_natives) {
-    OS::Print("Double_trunc_div %f ~/ %f\n", left, right);
+    OS::PrintErr("Double_trunc_div %f ~/ %f\n", left, right);
   }
   return DoubleToInteger(trunc(left / right),
                          "Result of truncating division is Infinity or NaN");
@@ -171,8 +132,8 @@ DEFINE_NATIVE_ENTRY(Double_greaterThan, 2) {
   GET_NON_NULL_NATIVE_ARGUMENT(Double, right, arguments->NativeArgAt(1));
   bool result = right.IsNull() ? false : (left.value() > right.value());
   if (FLAG_trace_intrinsified_natives) {
-    OS::Print("Double_greaterThan %s > %s\n", left.ToCString(),
-              right.ToCString());
+    OS::PrintErr("Double_greaterThan %s > %s\n", left.ToCString(),
+                 right.ToCString());
   }
   return Bool::Get(result).raw();
 }
@@ -188,7 +149,8 @@ DEFINE_NATIVE_ENTRY(Double_equal, 2) {
   GET_NON_NULL_NATIVE_ARGUMENT(Double, right, arguments->NativeArgAt(1));
   bool result = right.IsNull() ? false : (left.value() == right.value());
   if (FLAG_trace_intrinsified_natives) {
-    OS::Print("Double_equal %s == %s\n", left.ToCString(), right.ToCString());
+    OS::PrintErr("Double_equal %s == %s\n", left.ToCString(),
+                 right.ToCString());
   }
   return Bool::Get(result).raw();
 }

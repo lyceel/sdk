@@ -73,7 +73,7 @@ class _VisibleForTesting {
         r'''
 library js;
 class JS {
-  const JS([String js]) { }
+  const JS([String js]);
 }
 '''
       ]
@@ -93,7 +93,14 @@ class B extends A {
 }
 ''');
     await computeAnalysisResult(source);
-    assertErrors(source, [HintCode.ABSTRACT_SUPER_MEMBER_REFERENCE]);
+    if (useCFE) {
+      assertErrors(source, [
+        StaticTypeWarningCode.UNDEFINED_SUPER_GETTER,
+        HintCode.ABSTRACT_SUPER_MEMBER_REFERENCE
+      ]);
+    } else {
+      assertErrors(source, [HintCode.ABSTRACT_SUPER_MEMBER_REFERENCE]);
+    }
     verify([source]);
   }
 
@@ -109,7 +116,14 @@ class B extends A {
 }
 ''');
     await computeAnalysisResult(source);
-    assertErrors(source, [HintCode.ABSTRACT_SUPER_MEMBER_REFERENCE]);
+    if (useCFE) {
+      assertErrors(source, [
+        StaticTypeWarningCode.UNDEFINED_SUPER_METHOD,
+        HintCode.ABSTRACT_SUPER_MEMBER_REFERENCE
+      ]);
+    } else {
+      assertErrors(source, [HintCode.ABSTRACT_SUPER_MEMBER_REFERENCE]);
+    }
     verify([source]);
   }
 
@@ -125,7 +139,14 @@ class B extends A {
 }
 ''');
     await computeAnalysisResult(source);
-    assertErrors(source, [HintCode.ABSTRACT_SUPER_MEMBER_REFERENCE]);
+    if (useCFE) {
+      assertErrors(source, [
+        StaticTypeWarningCode.UNDEFINED_SUPER_GETTER,
+        HintCode.ABSTRACT_SUPER_MEMBER_REFERENCE
+      ]);
+    } else {
+      assertErrors(source, [HintCode.ABSTRACT_SUPER_MEMBER_REFERENCE]);
+    }
     verify([source]);
   }
 
@@ -141,7 +162,14 @@ class B extends A {
 }
 ''');
     await computeAnalysisResult(source);
-    assertErrors(source, [HintCode.ABSTRACT_SUPER_MEMBER_REFERENCE]);
+    if (useCFE) {
+      assertErrors(source, [
+        StaticTypeWarningCode.UNDEFINED_SUPER_SETTER,
+        HintCode.ABSTRACT_SUPER_MEMBER_REFERENCE
+      ]);
+    } else {
+      assertErrors(source, [HintCode.ABSTRACT_SUPER_MEMBER_REFERENCE]);
+    }
     verify([source]);
   }
 
@@ -157,7 +185,14 @@ class B extends A {
 }
 ''');
     await computeAnalysisResult(source);
-    assertErrors(source, [HintCode.ABSTRACT_SUPER_MEMBER_REFERENCE]);
+    if (useCFE) {
+      assertErrors(source, [
+        StaticTypeWarningCode.UNDEFINED_SUPER_METHOD,
+        HintCode.ABSTRACT_SUPER_MEMBER_REFERENCE
+      ]);
+    } else {
+      assertErrors(source, [HintCode.ABSTRACT_SUPER_MEMBER_REFERENCE]);
+    }
     verify([source]);
   }
 
@@ -1096,14 +1131,7 @@ class Function {}
 class A extends Function {}
 ''');
     await computeAnalysisResult(source);
-    if (analysisOptions.strongMode) {
-      assertErrors(source, [HintCode.DEPRECATED_EXTENDS_FUNCTION]);
-    } else {
-      assertErrors(source, [
-        HintCode.DEPRECATED_EXTENDS_FUNCTION,
-        StaticWarningCode.FUNCTION_WITHOUT_CALL
-      ]);
-    }
+    assertErrors(source, [HintCode.DEPRECATED_EXTENDS_FUNCTION]);
     verify([source]);
   }
 
@@ -1125,14 +1153,7 @@ class A extends Function {}
 class A extends Object with Function {}
 ''');
     await computeAnalysisResult(source);
-    if (analysisOptions.strongMode) {
-      assertErrors(source, [HintCode.DEPRECATED_MIXIN_FUNCTION]);
-    } else {
-      assertErrors(source, [
-        HintCode.DEPRECATED_MIXIN_FUNCTION,
-        StaticWarningCode.FUNCTION_WITHOUT_CALL
-      ]);
-    }
+    assertErrors(source, [HintCode.DEPRECATED_MIXIN_FUNCTION]);
     verify([source]);
   }
 
@@ -1238,6 +1259,32 @@ class A {}
 class B {}''');
     await computeAnalysisResult(source);
     assertErrors(source, [HintCode.DUPLICATE_IMPORT]);
+    verify([source]);
+  }
+
+  test_duplicateShownHiddenName_hidden() async {
+    Source source = addSource(r'''
+library L;
+export 'lib1.dart' hide A, B, A;''');
+    addNamedSource("/lib1.dart", r'''
+library lib1;
+class A {}
+class B {}''');
+    await computeAnalysisResult(source);
+    assertErrors(source, [HintCode.DUPLICATE_HIDDEN_NAME]);
+    verify([source]);
+  }
+
+  test_duplicateShownHiddenName_shown() async {
+    Source source = addSource(r'''
+library L;
+export 'lib1.dart' show A, B, A;''');
+    addNamedSource("/lib1.dart", r'''
+library lib1;
+class A {}
+class B {}''');
+    await computeAnalysisResult(source);
+    assertErrors(source, [HintCode.DUPLICATE_SHOWN_NAME]);
     verify([source]);
   }
 
@@ -2362,6 +2409,20 @@ class A {
     verify([source]);
   }
 
+  test_missingReturn_method_inferred() async {
+    Source source = addSource(r'''
+abstract class A {
+  int m();
+}
+class B extends A {
+  m() {}
+}
+''');
+    await computeAnalysisResult(source);
+    assertErrors(source, [HintCode.MISSING_RETURN]);
+    verify([source]);
+  }
+
   test_mustBeImmutable_direct() async {
     Source source = addSource(r'''
 import 'package:meta/meta.dart';
@@ -2547,11 +2608,7 @@ import 'dart:async';
 FutureOr<void> f(Future f) async {}
 ''');
     await computeAnalysisResult(source);
-    if (previewDart2) {
-      assertErrors(source, [HintCode.MISSING_RETURN]);
-    } else {
-      assertNoErrors(source);
-    }
+    assertNoErrors(source);
     verify([source]);
   }
 
@@ -3028,7 +3085,6 @@ class C {
 
   test_strongMode_downCastCompositeHint() async {
     AnalysisOptionsImpl options = new AnalysisOptionsImpl();
-    options.strongMode = true;
     options.strongModeHints = true;
     resetWith(options: options);
     Source source = addSource(r'''
@@ -3044,7 +3100,6 @@ main() {
 
   test_strongMode_downCastCompositeNoHint() async {
     AnalysisOptionsImpl options = new AnalysisOptionsImpl();
-    options.strongMode = true;
     options.strongModeHints = false;
     resetWith(options: options);
     Source source = addSource(r'''
@@ -3069,7 +3124,6 @@ main() {
             },
           }
         }));
-    options.strongMode = true;
     options.strongModeHints = false;
     resetWith(options: options);
     Source source = addSource(r'''
@@ -3084,7 +3138,6 @@ main() {
   }
 
   test_strongMode_topLevelInstanceGetter() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   int get g => 0;
@@ -3099,7 +3152,6 @@ var b = new A().g;
   }
 
   test_strongMode_topLevelInstanceGetter_call() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   int Function() get g => () => 0;
@@ -3115,7 +3167,6 @@ var b = a.g();
   }
 
   test_strongMode_topLevelInstanceGetter_field() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   int g;
@@ -3130,7 +3181,6 @@ var b = new A().g;
   }
 
   test_strongMode_topLevelInstanceGetter_field_call() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   int Function() g;
@@ -3146,7 +3196,6 @@ var b = a.g();
   }
 
   test_strongMode_topLevelInstanceGetter_field_prefixedIdentifier() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   int g;
@@ -3162,7 +3211,6 @@ var b = a.g;
   }
 
   test_strongMode_topLevelInstanceGetter_implicitlyTyped() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   get g => 0;
@@ -3179,7 +3227,6 @@ var b = new A().g;
   }
 
   test_strongMode_topLevelInstanceGetter_implicitlyTyped_call() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   get g => () => 0;
@@ -3197,7 +3244,6 @@ var b = a.g();
   }
 
   test_strongMode_topLevelInstanceGetter_implicitlyTyped_field() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   var g = 0;
@@ -3214,7 +3260,6 @@ var b = new A().g;
   }
 
   test_strongMode_topLevelInstanceGetter_implicitlyTyped_field_call() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   var g = () => 0;
@@ -3232,7 +3277,6 @@ var b = a.g();
   }
 
   test_strongMode_topLevelInstanceGetter_implicitlyTyped_field_prefixedIdentifier() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   var g = 0;
@@ -3250,7 +3294,6 @@ var b = a.g;
   }
 
   test_strongMode_topLevelInstanceGetter_implicitlyTyped_fn() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   var x = 0;
@@ -3271,7 +3314,6 @@ var b = f(a.x);
   }
 
   test_strongMode_topLevelInstanceGetter_implicitlyTyped_fn_explicit_type_params() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   var x = 0;
@@ -3288,7 +3330,6 @@ var b = f<int>(a.x);
   }
 
   test_strongMode_topLevelInstanceGetter_implicitlyTyped_fn_not_generic() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   var x = 0;
@@ -3305,7 +3346,6 @@ var b = f(a.x);
   }
 
   test_strongMode_topLevelInstanceGetter_implicitlyTyped_indexExpression() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   var x = 0;
@@ -3322,7 +3362,6 @@ var b = a[a.x];
   }
 
   test_strongMode_topLevelInstanceGetter_implicitlyTyped_invoke() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   var x = 0;
@@ -3342,7 +3381,6 @@ var b = (<T>(y) => 0)(a.x);
   }
 
   test_strongMode_topLevelInstanceGetter_implicitlyTyped_invoke_explicit_type_params() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   var x = 0;
@@ -3358,7 +3396,6 @@ var b = (<T>(y) => 0)<int>(a.x);
   }
 
   test_strongMode_topLevelInstanceGetter_implicitlyTyped_invoke_not_generic() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   var x = 0;
@@ -3374,7 +3411,6 @@ var b = ((y) => 0)(a.x);
   }
 
   test_strongMode_topLevelInstanceGetter_implicitlyTyped_method() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   var x = 0;
@@ -3395,7 +3431,6 @@ var b = a.f(a.x);
   }
 
   test_strongMode_topLevelInstanceGetter_implicitlyTyped_method_explicit_type_params() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   var x = 0;
@@ -3412,7 +3447,6 @@ var b = a.f<int>(a.x);
   }
 
   test_strongMode_topLevelInstanceGetter_implicitlyTyped_method_not_generic() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   var x = 0;
@@ -3429,7 +3463,6 @@ var b = a.f(a.x);
   }
 
   test_strongMode_topLevelInstanceGetter_implicitlyTyped_new() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   var x = 0;
@@ -3452,7 +3485,6 @@ var b = new B(a.x);
   }
 
   test_strongMode_topLevelInstanceGetter_implicitlyTyped_new_explicit_type_params() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   var x = 0;
@@ -3471,7 +3503,6 @@ var b = new B<int>(a.x);
   }
 
   test_strongMode_topLevelInstanceGetter_implicitlyTyped_new_explicit_type_params_named() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   var x = 0;
@@ -3490,7 +3521,6 @@ var b = new B<int>.named(a.x);
   }
 
   test_strongMode_topLevelInstanceGetter_implicitlyTyped_new_explicit_type_params_prefixed() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     addNamedSource('/lib1.dart', '''
 class B<T> {
   B(x);
@@ -3512,7 +3542,6 @@ var b = new foo.B<int>(a.x);
   }
 
   test_strongMode_topLevelInstanceGetter_implicitlyTyped_new_named() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   var x = 0;
@@ -3535,7 +3564,6 @@ var b = new B.named(a.x);
   }
 
   test_strongMode_topLevelInstanceGetter_implicitlyTyped_new_not_generic() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   var x = 0;
@@ -3554,7 +3582,6 @@ var b = new B(a.x);
   }
 
   test_strongMode_topLevelInstanceGetter_implicitlyTyped_new_not_generic_named() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   var x = 0;
@@ -3573,7 +3600,6 @@ var b = new B.named(a.x);
   }
 
   test_strongMode_topLevelInstanceGetter_implicitlyTyped_new_not_generic_prefixed() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     addNamedSource('/lib1.dart', '''
 class B {
   B(x);
@@ -3595,7 +3621,6 @@ var b = new foo.B(a.x);
   }
 
   test_strongMode_topLevelInstanceGetter_implicitlyTyped_new_prefixed() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     addNamedSource('/lib1.dart', '''
 class B<T> {
   B(x);
@@ -3621,7 +3646,6 @@ var b = new foo.B(a.x);
   }
 
   test_strongMode_topLevelInstanceGetter_implicitlyTyped_prefixedIdentifier() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   get g => 0;
@@ -3639,7 +3663,6 @@ var b = a.g;
   }
 
   test_strongMode_topLevelInstanceGetter_implicitlyTyped_propertyAccessLhs() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   var x = new B();
@@ -3663,7 +3686,6 @@ var b = (a.x).y;
   }
 
   test_strongMode_topLevelInstanceGetter_prefixedIdentifier() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   int get g => 0;
@@ -3679,7 +3701,6 @@ var b = a.g;
   }
 
   test_strongMode_topLevelInstanceMethod() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   f() => 0;
@@ -3696,7 +3717,6 @@ var x = new A().f();
   }
 
   test_strongMode_topLevelInstanceMethod_parameter() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   int f(v) => 0;
@@ -3709,7 +3729,6 @@ var x = new A().f(0);
   }
 
   test_strongMode_topLevelInstanceMethod_parameter_generic() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   int f<T>(v) => 0;
@@ -3726,7 +3745,6 @@ var x = new A().f(0);
   }
 
   test_strongMode_topLevelInstanceMethod_parameter_generic_explicit() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   int f<T>(v) => 0;
@@ -3739,7 +3757,6 @@ var x = new A().f<int>(0);
   }
 
   test_strongMode_topLevelInstanceMethod_static() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   static f() => 0;
@@ -3752,7 +3769,6 @@ var x = A.f();
   }
 
   test_strongMode_topLevelInstanceMethod_tearoff() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   f() => 0;
@@ -3769,7 +3785,6 @@ var x = new A().f;
   }
 
   test_strongMode_topLevelInstanceMethod_tearoff_parameter() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   int f(v) => 0;
@@ -3786,7 +3801,6 @@ var x = new A().f;
   }
 
   test_strongMode_topLevelInstanceMethod_tearoff_static() async {
-    resetWith(options: new AnalysisOptionsImpl()..strongMode = true);
     Source source = addSource('''
 class A {
   static f() => 0;
@@ -3925,7 +3939,9 @@ f(var a) {
   }
 }''');
     await computeAnalysisResult(source);
-    if (previewDart2) {
+    if (useCFE) {
+      assertErrors(source, [StaticTypeWarningCode.UNDEFINED_METHOD]);
+    } else if (previewDart2) {
       assertErrors(source, [StaticTypeWarningCode.UNDEFINED_OPERATOR]);
     } else {
       assertErrors(source, [HintCode.UNDEFINED_OPERATOR]);
@@ -3941,7 +3957,12 @@ f(var a) {
   }
 }''');
     await computeAnalysisResult(source);
-    if (previewDart2) {
+    if (useCFE) {
+      assertErrors(source, [
+        StaticTypeWarningCode.UNDEFINED_METHOD,
+        StaticTypeWarningCode.UNDEFINED_METHOD
+      ]);
+    } else if (previewDart2) {
       assertErrors(source, [StaticTypeWarningCode.UNDEFINED_OPERATOR]);
     } else {
       assertErrors(source, [HintCode.UNDEFINED_OPERATOR]);
@@ -3957,7 +3978,9 @@ f(var a) {
   }
 }''');
     await computeAnalysisResult(source);
-    if (previewDart2) {
+    if (useCFE) {
+      assertErrors(source, [StaticTypeWarningCode.UNDEFINED_METHOD]);
+    } else if (previewDart2) {
       assertErrors(source, [StaticTypeWarningCode.UNDEFINED_OPERATOR]);
     } else {
       assertErrors(source, [HintCode.UNDEFINED_OPERATOR]);
@@ -3973,7 +3996,9 @@ f(var a) {
   }
 }''');
     await computeAnalysisResult(source);
-    if (previewDart2) {
+    if (useCFE) {
+      assertErrors(source, [StaticTypeWarningCode.UNDEFINED_METHOD]);
+    } else if (previewDart2) {
       assertErrors(source, [StaticTypeWarningCode.UNDEFINED_OPERATOR]);
     } else {
       assertErrors(source, [HintCode.UNDEFINED_OPERATOR]);

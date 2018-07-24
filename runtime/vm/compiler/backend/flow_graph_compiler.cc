@@ -6,6 +6,7 @@
 
 #include "vm/compiler/backend/flow_graph_compiler.h"
 
+#include "platform/utils.h"
 #include "vm/bit_vector.h"
 #include "vm/compiler/backend/code_statistics.h"
 #include "vm/compiler/backend/il_printer.h"
@@ -77,7 +78,9 @@ void CompilerDeoptInfo::AllocateIncomingParametersRecursive(
   for (Environment::ShallowIterator it(env); !it.Done(); it.Advance()) {
     if (it.CurrentLocation().IsInvalid() &&
         it.CurrentValue()->definition()->IsPushArgument()) {
-      it.SetCurrentLocation(Location::StackSlot((*stack_height)++));
+      it.SetCurrentLocation(
+          Location::StackSlot(FrameSlotForVariableIndex(-*stack_height)));
+      (*stack_height)++;
     }
   }
 }
@@ -361,16 +364,17 @@ void FlowGraphCompiler::EmitCatchEntryState(Environment* env,
         catch_entry_state_maps_builder_->AppendConstant(id, dest_index);
         continue;
       }
-      if (src.stack_index() != dest_index) {
-        catch_entry_state_maps_builder_->AppendMove(src.stack_index(),
-                                                    dest_index);
+      const intptr_t src_index = -VariableIndexForFrameSlot(src.stack_index());
+      if (src_index != dest_index) {
+        catch_entry_state_maps_builder_->AppendMove(src_index, dest_index);
       }
     }
 
     // Process locals. Skip exception_var and stacktrace_var.
-    intptr_t local_base = kFirstLocalSlotFromFp + num_direct_parameters;
-    intptr_t ex_idx = local_base - catch_block->exception_var().index();
-    intptr_t st_idx = local_base - catch_block->stacktrace_var().index();
+    intptr_t local_base = num_direct_parameters;
+    intptr_t ex_idx = local_base - catch_block->exception_var().index().value();
+    intptr_t st_idx =
+        local_base - catch_block->stacktrace_var().index().value();
     for (; i < flow_graph().variable_count(); ++i) {
       // Don't sync captured parameters. They are not in the environment.
       if (flow_graph().captured_parameters()->Contains(i)) continue;
@@ -390,9 +394,9 @@ void FlowGraphCompiler::EmitCatchEntryState(Environment* env,
         catch_entry_state_maps_builder_->AppendConstant(id, dest_index);
         continue;
       }
-      if (src.stack_index() != dest_index) {
-        catch_entry_state_maps_builder_->AppendMove(src.stack_index(),
-                                                    dest_index);
+      const intptr_t src_index = -VariableIndexForFrameSlot(src.stack_index());
+      if (src_index != dest_index) {
+        catch_entry_state_maps_builder_->AppendMove(src_index, dest_index);
       }
     }
     catch_entry_state_maps_builder_->EndMapping();
@@ -628,8 +632,8 @@ void FlowGraphCompiler::AddDescriptor(RawPcDescriptors::Kind kind,
                                       TokenPosition token_pos,
                                       intptr_t try_index) {
   code_source_map_builder_->NoteDescriptor(kind, pc_offset, token_pos);
-  // When running with optimizations disabled, don't emit deopt-descriptors.
-  if (!CanOptimize() && (kind == RawPcDescriptors::kDeopt)) return;
+  // Don't emit deopt-descriptors in AOT mode.
+  if (FLAG_precompiled_mode && (kind == RawPcDescriptors::kDeopt)) return;
   pc_descriptors_list_->AddDescriptor(kind, pc_offset, deopt_id, token_pos,
                                       try_index);
 }
@@ -686,9 +690,20 @@ void FlowGraphCompiler::RecordSafepoint(LocationSummary* locs,
     RegisterSet* registers = locs->live_registers();
     ASSERT(registers != NULL);
     const intptr_t kFpuRegisterSpillFactor = kFpuRegisterSize / kWordSize;
-    const intptr_t live_registers_size =
-        registers->CpuRegisterCount() +
-        (registers->FpuRegisterCount() * kFpuRegisterSpillFactor);
+    intptr_t saved_registers_size = 0;
+    const bool using_shared_stub = locs->call_on_shared_slow_path();
+    if (using_shared_stub) {
+      saved_registers_size =
+          Utils::CountOneBitsWord(kDartAvailableCpuRegs) +
+          (registers->FpuRegisterCount() > 0
+               ? kFpuRegisterSpillFactor * kNumberOfFpuRegisters
+               : 0) +
+          1 /*saved PC*/;
+    } else {
+      saved_registers_size =
+          registers->CpuRegisterCount() +
+          (registers->FpuRegisterCount() * kFpuRegisterSpillFactor);
+    }
 
     BitmapBuilder* bitmap = locs->stack_bitmap();
 
@@ -703,19 +718,22 @@ void FlowGraphCompiler::RecordSafepoint(LocationSummary* locs,
 // append the live registers to it again. The bitmap produced by both calls
 // will be the same.
 #if !defined(TARGET_ARCH_DBC)
-    ASSERT(bitmap->Length() <= (spill_area_size + live_registers_size));
+    ASSERT(bitmap->Length() <= (spill_area_size + saved_registers_size));
     bitmap->SetLength(spill_area_size);
 #else
-    if (bitmap->Length() <= (spill_area_size + live_registers_size)) {
+    ASSERT(slow_path_argument_count == 0);
+    if (bitmap->Length() <= (spill_area_size + saved_registers_size)) {
       bitmap->SetLength(Utils::Maximum(bitmap->Length(), spill_area_size));
     }
 #endif
+
+    ASSERT(slow_path_argument_count == 0 || !using_shared_stub);
 
     // Mark the bits in the stack map in the same order we push registers in
     // slow path code (see FlowGraphCompiler::SaveLiveRegisters).
     //
     // Slow path code can have registers at the safepoint.
-    if (!locs->always_calls()) {
+    if (!locs->always_calls() && !using_shared_stub) {
       RegisterSet* regs = locs->live_registers();
       if (regs->FpuRegisterCount() > 0) {
         // Denote FPU registers with 0 bits in the stackmap.  Based on the
@@ -734,6 +752,7 @@ void FlowGraphCompiler::RecordSafepoint(LocationSummary* locs,
           }
         }
       }
+
       // General purpose registers have the highest register number at the
       // highest address (i.e., first in the stackmap).
       for (intptr_t i = kNumberOfCpuRegisters - 1; i >= 0; --i) {
@@ -744,7 +763,28 @@ void FlowGraphCompiler::RecordSafepoint(LocationSummary* locs,
       }
     }
 
-    // Arguments pushed on top of live registers in the slow path are tagged.
+    if (using_shared_stub) {
+      // To simplify the code in the shared stub, we create an untagged hole
+      // in the stack frame where the shared stub can leave the return address
+      // before saving registers.
+      bitmap->Set(bitmap->Length(), false);
+      if (registers->FpuRegisterCount() > 0) {
+        bitmap->SetRange(bitmap->Length(),
+                         bitmap->Length() +
+                             kNumberOfFpuRegisters * kFpuRegisterSpillFactor -
+                             1,
+                         false);
+      }
+      for (intptr_t i = kNumberOfCpuRegisters - 1; i >= 0; --i) {
+        if ((kReservedCpuRegisters & (1 << i)) != 0) continue;
+        const Register reg = static_cast<Register>(i);
+        bitmap->Set(bitmap->Length(),
+                    locs->live_registers()->ContainsRegister(reg) &&
+                        locs->live_registers()->IsTagged(reg));
+      }
+    }
+
+    // Arguments pushed after live registers in the slow path are tagged.
     for (intptr_t i = 0; i < slow_path_argument_count; ++i) {
       bitmap->Set(bitmap->Length(), true);
     }
@@ -764,7 +804,16 @@ void FlowGraphCompiler::RecordSafepoint(LocationSummary* locs,
 //     MaterializeObjectInstr::RemapRegisters
 //
 Environment* FlowGraphCompiler::SlowPathEnvironmentFor(
-    Instruction* instruction) {
+    Instruction* instruction,
+    intptr_t num_slow_path_args) {
+  const bool using_shared_stub =
+      instruction->locs()->call_on_shared_slow_path();
+  const bool shared_stub_save_fpu_registers =
+      using_shared_stub &&
+      instruction->locs()->live_registers()->FpuRegisterCount() > 0;
+  // TODO(sjindel): Modify logic below to account for slow-path args with shared
+  // stubs.
+  ASSERT(!using_shared_stub || num_slow_path_args == 0);
   if (instruction->env() == NULL) {
     ASSERT(!is_optimizing());
     return NULL;
@@ -774,6 +823,10 @@ Environment* FlowGraphCompiler::SlowPathEnvironmentFor(
   // 1. Iterate the registers in the order they will be spilled to compute
   //    the slots they will be spilled to.
   intptr_t next_slot = StackSize() + env->CountArgsPushed();
+  if (using_shared_stub) {
+    // The PC from the call to the shared stub is pushed here.
+    next_slot++;
+  }
   RegisterSet* regs = instruction->locs()->live_registers();
   intptr_t fpu_reg_slots[kNumberOfFpuRegisters];
   intptr_t cpu_reg_slots[kNumberOfCpuRegisters];
@@ -787,16 +840,21 @@ Environment* FlowGraphCompiler::SlowPathEnvironmentFor(
       next_slot += kFpuRegisterSpillFactor;
       fpu_reg_slots[i] = (next_slot - 1);
     } else {
+      if (using_shared_stub && shared_stub_save_fpu_registers) {
+        next_slot += kFpuRegisterSpillFactor;
+      }
       fpu_reg_slots[i] = -1;
     }
   }
   // General purpose registers are spilled from highest to lowest register
   // number.
   for (intptr_t i = kNumberOfCpuRegisters - 1; i >= 0; --i) {
+    if ((kReservedCpuRegisters & (1 << i)) != 0) continue;
     Register reg = static_cast<Register>(i);
     if (regs->ContainsRegister(reg)) {
       cpu_reg_slots[i] = next_slot++;
     } else {
+      if (using_shared_stub) next_slot++;
       cpu_reg_slots[i] = -1;
     }
   }
@@ -940,7 +998,8 @@ void FlowGraphCompiler::FinalizeVarDescriptors(const Code& code) {
     info.scope_id = 0;
     info.begin_pos = TokenPosition::kMinSource;
     info.end_pos = TokenPosition::kMinSource;
-    info.set_index(parsed_function().current_context_var()->index());
+    info.set_index(
+        FrameSlotForVariable(parsed_function().current_context_var()));
     var_descs.SetVar(0, Symbols::CurrentContextVar(), &info);
   }
   code.set_var_descriptors(var_descs);
@@ -1006,9 +1065,6 @@ void FlowGraphCompiler::FinalizeCodeSourceMap(const Code& code) {
 // Returns 'true' if regular code generation should be skipped.
 bool FlowGraphCompiler::TryIntrinsify() {
   if (FLAG_intrinsify) {
-    const Class& owner = Class::Handle(parsed_function().function().Owner());
-    String& name = String::Handle(parsed_function().function().name());
-
     // Intrinsification skips arguments checks, therefore disable if in checked
     // mode or strong mode.
     //
@@ -1016,9 +1072,7 @@ bool FlowGraphCompiler::TryIntrinsify() {
     // there are no checks necessary in any case and we can therefore intrinsify
     // them even in checked mode and strong mode.
     if (parsed_function().function().kind() == RawFunction::kImplicitGetter) {
-      // TODO(27590) Store Field object inside RawFunction::data_ if possible.
-      name = Field::NameFromGetter(name);
-      const Field& field = Field::Handle(owner.LookupFieldAllowPrivate(name));
+      const Field& field = Field::Handle(function().accessor_field());
       ASSERT(!field.IsNull());
 
       // Only intrinsify getter if the field cannot contain a mutable double.
@@ -1034,9 +1088,7 @@ bool FlowGraphCompiler::TryIntrinsify() {
     } else if (parsed_function().function().kind() ==
                RawFunction::kImplicitSetter) {
       if (!isolate()->argument_type_checks()) {
-        // TODO(27590) Store Field object inside RawFunction::data_ if possible.
-        name = Field::NameFromSetter(name);
-        const Field& field = Field::Handle(owner.LookupFieldAllowPrivate(name));
+        const Field& field = Field::Handle(function().accessor_field());
         ASSERT(!field.IsNull());
 
         if (field.is_instance() &&
@@ -1184,10 +1236,8 @@ void FlowGraphCompiler::GenerateNumberTypeCheck(Register class_id_reg,
   if (type.IsNumberType()) {
     args.Add(kDoubleCid);
     args.Add(kMintCid);
-    args.Add(kBigintCid);
   } else if (type.IsIntType()) {
     args.Add(kMintCid);
-    args.Add(kBigintCid);
   } else if (type.IsDoubleType()) {
     args.Add(kDoubleCid);
   }
@@ -1592,7 +1642,7 @@ const ICData* FlowGraphCompiler::GetOrAddInstanceCallICData(
                           arguments_descriptor, deopt_id, num_args_tested,
                           ICData::kInstance));
 #if defined(TAG_IC_DATA)
-  ic_data.set_tag(Instruction::kInstanceCall);
+  ic_data.set_tag(ICData::Tag::kInstanceCall);
 #endif
   if (deopt_id_to_ic_data_ != NULL) {
     (*deopt_id_to_ic_data_)[deopt_id] = &ic_data;
@@ -1626,7 +1676,7 @@ const ICData* FlowGraphCompiler::GetOrAddStaticCallICData(
                   deopt_id, num_args_tested, rebind_rule));
   ic_data.AddTarget(target);
 #if defined(TAG_IC_DATA)
-  ic_data.set_tag(Instruction::kStaticCall);
+  ic_data.set_tag(ICData::Tag::kStaticCall);
 #endif
   if (deopt_id_to_ic_data_ != NULL) {
     (*deopt_id_to_ic_data_)[deopt_id] = &ic_data;
@@ -1934,7 +1984,12 @@ void FlowGraphCompiler::GenerateCidRangesCheck(Assembler* assembler,
   }
 }
 
-void FlowGraphCompiler::GenerateAssertAssignableAOT(
+bool FlowGraphCompiler::ShouldUseTypeTestingStubFor(bool optimizing,
+                                                    const AbstractType& type) {
+  return FLAG_precompiled_mode || (optimizing && type.IsTypeParameter());
+}
+
+void FlowGraphCompiler::GenerateAssertAssignableViaTypeTestingStub(
     const AbstractType& dst_type,
     const String& dst_name,
     const Register instance_reg,
@@ -2086,6 +2141,58 @@ void FlowGraphCompiler::FrameStateClear() {
   frame_state_.TruncateTo(0);
 }
 #endif  // defined(DEBUG) && !defined(TARGET_ARCH_DBC)
+
+#if !defined(TARGET_ARCH_DBC)
+#define __ compiler->assembler()->
+
+void ThrowErrorSlowPathCode::EmitNativeCode(FlowGraphCompiler* compiler) {
+  if (Assembler::EmittingComments()) {
+    __ Comment("slow path %s operation", name());
+  }
+  const bool use_shared_stub =
+      instruction()->UseSharedSlowPathStub(compiler->is_optimizing());
+  const bool live_fpu_registers =
+      instruction()->locs()->live_registers()->FpuRegisterCount() > 0;
+  ASSERT(!use_shared_stub || num_args_ == 0);
+  __ Bind(entry_label());
+  EmitCodeAtSlowPathEntry(compiler);
+  LocationSummary* locs = instruction()->locs();
+  // Save registers as they are needed for lazy deopt / exception handling.
+  if (!use_shared_stub) {
+    compiler->SaveLiveRegisters(locs);
+  }
+  for (intptr_t i = 0; i < num_args_; ++i) {
+    __ PushRegister(locs->in(i).reg());
+  }
+  if (use_shared_stub) {
+    EmitSharedStubCall(compiler->assembler(), live_fpu_registers);
+  } else {
+    __ CallRuntime(runtime_entry_, num_args_);
+  }
+  // Can't query deopt_id() without checking if instruction can deoptimize...
+  intptr_t deopt_id = Thread::kNoDeoptId;
+  if (instruction()->CanDeoptimize() ||
+      instruction()->CanBecomeDeoptimizationTarget()) {
+    deopt_id = instruction()->deopt_id();
+  }
+  compiler->AddDescriptor(RawPcDescriptors::kOther,
+                          compiler->assembler()->CodeSize(), deopt_id,
+                          instruction()->token_pos(), try_index_);
+  AddMetadataForRuntimeCall(compiler);
+  compiler->RecordSafepoint(locs, num_args_);
+  if ((try_index_ != CatchClauseNode::kInvalidTryIndex) ||
+      (compiler->CurrentTryIndex() != CatchClauseNode::kInvalidTryIndex)) {
+    Environment* env =
+        compiler->SlowPathEnvironmentFor(instruction(), num_args_);
+    compiler->EmitCatchEntryState(env, try_index_);
+  }
+  if (!use_shared_stub) {
+    __ Breakpoint();
+  }
+}
+
+#undef __
+#endif  //  !defined(TARGET_ARCH_DBC)
 
 #endif  // !defined(DART_PRECOMPILED_RUNTIME)
 

@@ -8,8 +8,8 @@ import '../problems.dart' show internalProblem;
 
 import 'builder.dart'
     show
-        Builder,
         ConstructorReferenceBuilder,
+        Declaration,
         LibraryBuilder,
         MemberBuilder,
         MetadataBuilder,
@@ -43,6 +43,8 @@ abstract class ClassBuilder<T extends TypeBuilder, R>
   final ScopeBuilder scopeBuilder;
 
   final ScopeBuilder constructorScopeBuilder;
+
+  Map<String, ConstructorRedirection> redirectingConstructors;
 
   ClassBuilder(
       List<MetadataBuilder> metadata,
@@ -80,6 +82,23 @@ abstract class ClassBuilder<T extends TypeBuilder, R>
     return library.partOfLibrary ?? library;
   }
 
+  /// Registers a constructor redirection for this class and returns true if
+  /// this redirection gives rise to a cycle that has not been reported before.
+  bool checkConstructorCyclic(String source, String target) {
+    ConstructorRedirection redirect = new ConstructorRedirection(target);
+    redirectingConstructors ??= <String, ConstructorRedirection>{};
+    redirectingConstructors[source] = redirect;
+    while (redirect != null) {
+      if (redirect.cycleReported) return false;
+      if (redirect.target == source) {
+        redirect.cycleReported = true;
+        return true;
+      }
+      redirect = redirectingConstructors[redirect.target];
+    }
+    return false;
+  }
+
   @override
   int resolveConstructors(LibraryBuilder library) {
     if (constructorReferences == null) return 0;
@@ -90,19 +109,19 @@ abstract class ClassBuilder<T extends TypeBuilder, R>
   }
 
   /// Used to lookup a static member of this class.
-  Builder findStaticBuilder(
+  Declaration findStaticBuilder(
       String name, int charOffset, Uri fileUri, LibraryBuilder accessingLibrary,
       {bool isSetter: false}) {
     if (accessingLibrary.origin != library.origin && name.startsWith("_")) {
       return null;
     }
-    Builder builder = isSetter
+    Declaration declaration = isSetter
         ? scope.lookupSetter(name, charOffset, fileUri, isInstanceScope: false)
         : scope.lookup(name, charOffset, fileUri, isInstanceScope: false);
-    return builder;
+    return declaration;
   }
 
-  Builder findConstructorOrFactory(
+  Declaration findConstructorOrFactory(
       String name, int charOffset, Uri uri, LibraryBuilder accessingLibrary) {
     if (accessingLibrary.origin != library.origin && name.startsWith("_")) {
       return null;
@@ -137,14 +156,14 @@ abstract class ClassBuilder<T extends TypeBuilder, R>
     Map<TypeVariableBuilder, TypeBuilder> substitutionMap;
     List arguments;
     List variables;
-    Builder builder;
+    Declaration declaration;
 
     /// If [application] is mixing in [superclass] directly or via other named
     /// mixin applications, return it.
     NamedTypeBuilder findSuperclass(MixinApplicationBuilder application) {
       for (TypeBuilder t in application.mixins) {
         if (t is NamedTypeBuilder) {
-          if (t.builder == superclass) return t;
+          if (t.declaration == superclass) return t;
         } else if (t is MixinApplicationBuilder) {
           NamedTypeBuilder s = findSuperclass(t);
           if (s != null) return s;
@@ -154,16 +173,16 @@ abstract class ClassBuilder<T extends TypeBuilder, R>
     }
 
     void handleNamedTypeBuilder(NamedTypeBuilder t) {
-      builder = t.builder;
+      declaration = t.declaration;
       arguments = t.arguments ?? const [];
-      if (builder is ClassBuilder) {
-        ClassBuilder cls = builder;
+      if (declaration is ClassBuilder) {
+        ClassBuilder cls = declaration;
         variables = cls.typeVariables;
         supertype = cls.supertype;
       }
     }
 
-    while (builder != superclass) {
+    while (declaration != superclass) {
       variables = null;
       if (supertype is NamedTypeBuilder) {
         handleNamedTypeBuilder(supertype);
@@ -225,5 +244,12 @@ abstract class ClassBuilder<T extends TypeBuilder, R>
     library.addProblem(message, charOffset, length, fileUri, context: context);
   }
 
-  int get typeVariablesCount;
+  void prepareTopLevelInference() {}
+}
+
+class ConstructorRedirection {
+  String target;
+  bool cycleReported;
+
+  ConstructorRedirection(this.target) : cycleReported = false;
 }

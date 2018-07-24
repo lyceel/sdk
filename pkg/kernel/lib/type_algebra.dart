@@ -229,6 +229,9 @@ FreshTypeParameters getFreshTypeParameters(List<TypeParameter> typeParameters) {
   }
   for (int i = 0; i < typeParameters.length; ++i) {
     freshParameters[i].bound = substitute(typeParameters[i].bound, map);
+    freshParameters[i].defaultType = typeParameters[i].defaultType != null
+        ? substitute(typeParameters[i].defaultType, map)
+        : null;
   }
   return new FreshTypeParameters(freshParameters, Substitution.fromMap(map));
 }
@@ -473,6 +476,9 @@ class _InnerTypeSubstitutor extends _TypeSubstitutor {
     var fresh = new TypeParameter(node.name);
     substitution[node] = new TypeParameterType(fresh);
     fresh.bound = visit(node.bound);
+    if (node.defaultType != null) {
+      fresh.defaultType = visit(node.defaultType);
+    }
     return fresh;
   }
 }
@@ -840,7 +846,9 @@ class _OccurrenceVisitor extends DartTypeVisitor<bool> {
 
   bool handleTypeParameter(TypeParameter node) {
     assert(!variables.contains(node));
-    return node.bound.accept(this);
+    if (node.bound.accept(this)) return true;
+    if (node.defaultType == null) return false;
+    return node.defaultType.accept(this);
   }
 }
 
@@ -876,6 +884,7 @@ class _OccurrenceCollectorVisitor extends DartTypeVisitor {
   visitFunctionType(FunctionType node) {
     for (TypeParameter typeParameter in node.typeParameters) {
       typeParameter.bound.accept(this);
+      typeParameter.defaultType?.accept(this);
     }
     for (DartType parameter in node.positionalParameters) {
       parameter.accept(this);

@@ -16,19 +16,11 @@ abstract class IterableMixin<E> implements Iterable<E> {
   // If changing a method here, also change the other copies.
 
   Iterable<R> cast<R>() => Iterable.castFrom<E, R>(this);
-
-  @Deprecated("Use cast instead.")
-  Iterable<R> retype<R>() => cast<R>();
-
   Iterable<T> map<T>(T f(E element)) => new MappedIterable<E, T>(this, f);
 
   Iterable<E> where(bool f(E element)) => new WhereIterable<E>(this, f);
 
-  // TODO(leafp): Restore this functionality once generic methods are enabled
-  // in the VM and dart2js.
-  // https://github.com/dart-lang/sdk/issues/32463
-  Iterable<T> whereType<T>() =>
-      throw new UnimplementedError("whereType is not yet supported");
+  Iterable<T> whereType<T>() => new WhereTypeIterable<T>(this);
 
   Iterable<T> expand<T>(Iterable<T> f(E element)) =>
       new ExpandIterable<E, T>(this, f);

@@ -47,8 +47,7 @@ import '../../api_prototype/file_system.dart' show FileSystem;
 
 import '../compiler_context.dart' show CompilerContext;
 
-import '../deprecated_problems.dart'
-    show deprecated_InputError, reportCrash, resetCrashReporting;
+import '../crash.dart' show withCrashReporting;
 
 import '../dill/dill_target.dart' show DillTarget;
 
@@ -76,8 +75,8 @@ import '../uri_translator.dart' show UriTranslator;
 
 import 'kernel_builder.dart'
     show
-        Builder,
         ClassBuilder,
+        Declaration,
         InvalidTypeBuilder,
         KernelClassBuilder,
         KernelLibraryBuilder,
@@ -135,7 +134,6 @@ class KernelTarget extends TargetImplementation {
         uriToSource = uriToSource ?? CompilerContext.current.uriToSource,
         metadataCollector = metadataCollector,
         super(dillTarget.ticker, uriTranslator, dillTarget.backendTarget) {
-    resetCrashReporting();
     loader = createLoader();
   }
 
@@ -187,9 +185,9 @@ class KernelTarget extends TargetImplementation {
   void addDirectSupertype(ClassBuilder cls, Set<ClassBuilder> set) {
     if (cls == null) return;
     forEachDirectSupertype(cls, (NamedTypeBuilder type) {
-      Builder builder = type.builder;
-      if (builder is ClassBuilder) {
-        set.add(builder);
+      Declaration declaration = type.declaration;
+      if (declaration is ClassBuilder) {
+        set.add(declaration);
       }
     });
   }
@@ -199,7 +197,7 @@ class KernelTarget extends TargetImplementation {
     List<SourceClassBuilder> result = <SourceClassBuilder>[];
     loader.builders.forEach((Uri uri, LibraryBuilder library) {
       if (library.loader == loader) {
-        library.forEach((String name, Builder member) {
+        library.forEach((String name, Declaration member) {
           if (member is SourceClassBuilder && !member.isPatch) {
             result.add(member);
           }
@@ -220,9 +218,8 @@ class KernelTarget extends TargetImplementation {
     builder.mixedInType = null;
   }
 
-  void handleInputError(deprecated_InputError error, {bool isFullComponent}) {
-    if (error != null) {
-      LocatedMessage message = deprecated_InputError.toMessage(error);
+  void handleInputError(LocatedMessage message, {bool isFullComponent}) {
+    if (message != null) {
       context.report(message, Severity.error);
       errors.add(message);
     }
@@ -232,54 +229,52 @@ class KernelTarget extends TargetImplementation {
   @override
   Future<Component> buildOutlines({CanonicalName nameRoot}) async {
     if (loader.first == null) return null;
-    try {
-      loader.createTypeInferenceEngine();
-      await loader.buildOutlines();
-      loader.coreLibrary.becomeCoreLibrary(const DynamicType());
-      dynamicType.bind(loader.coreLibrary["dynamic"]);
-      loader.resolveParts();
-      loader.computeLibraryScopes();
-      objectType.bind(loader.coreLibrary["Object"]);
-      bottomType.bind(loader.coreLibrary["Null"]);
-      loader.resolveTypes();
-      loader.instantiateToBound(dynamicType, bottomType, objectClassBuilder);
-      List<SourceClassBuilder> myClasses = collectMyClasses();
-      loader.checkSemantics(myClasses);
-      loader.finishTypeVariables(objectClassBuilder, dynamicType);
-      loader.buildComponent();
-      installDefaultSupertypes();
-      installDefaultConstructors(myClasses);
-      loader.resolveConstructors();
-      component =
-          link(new List<Library>.from(loader.libraries), nameRoot: nameRoot);
-      if (metadataCollector != null) {
-        component.addMetadataRepository(metadataCollector.repository);
-      }
-      computeCoreTypes();
-      loader.computeHierarchy();
-      if (!loader.target.disableTypeInference) {
-        loader.prepareTopLevelInference(myClasses);
-        loader.performTopLevelInference(myClasses);
-      }
-      loader.checkOverrides(myClasses);
-      loader.checkAbstractMembers(myClasses);
-      loader.addNoSuchMethodForwarders(myClasses);
-    } on deprecated_InputError catch (e) {
-      ticker.logMs("Got deprecated_InputError");
-      handleInputError(e, isFullComponent: false);
-    } catch (e, s) {
-      return reportCrash(e, s, loader?.currentUriForCrashReporting);
-    }
-    return component;
+    return withCrashReporting<Component>(
+        () async {
+          loader.createTypeInferenceEngine();
+          await loader.buildOutlines();
+          loader.coreLibrary.becomeCoreLibrary(const DynamicType());
+          dynamicType.bind(loader.coreLibrary["dynamic"]);
+          loader.resolveParts();
+          loader.computeLibraryScopes();
+          objectType.bind(loader.coreLibrary["Object"]);
+          bottomType.bind(loader.coreLibrary["Null"]);
+          loader.resolveTypes();
+          loader.computeDefaultTypes(
+              dynamicType, bottomType, objectClassBuilder);
+          List<SourceClassBuilder> myClasses = collectMyClasses();
+          loader.checkSemantics(myClasses);
+          loader.finishTypeVariables(objectClassBuilder, dynamicType);
+          loader.buildComponent();
+          installDefaultSupertypes();
+          installDefaultConstructors(myClasses);
+          loader.resolveConstructors();
+          component = link(new List<Library>.from(loader.libraries),
+              nameRoot: nameRoot);
+          computeCoreTypes();
+          loader.computeHierarchy();
+          loader.performTopLevelInference(myClasses);
+          loader.checkOverrides(myClasses);
+          loader.checkAbstractMembers(myClasses);
+          loader.addNoSuchMethodForwarders(myClasses);
+          return component;
+        },
+        () => loader?.currentUriForCrashReporting,
+        onInputError: (LocatedMessage message) {
+          ticker.logMs("Got unrecoverable error");
+          handleInputError(message, isFullComponent: false);
+          return component;
+        });
   }
 
-  /// Build the kernel representation of the component loaded by this target. The
-  /// component will contain full bodies for the code loaded from sources, and
-  /// only references to the code loaded by the [DillTarget], which may or may
-  /// not include method bodies (depending on what was loaded into that target,
-  /// an outline or a full kernel component).
+  /// Build the kernel representation of the component loaded by this
+  /// target. The component will contain full bodies for the code loaded from
+  /// sources, and only references to the code loaded by the [DillTarget],
+  /// which may or may not include method bodies (depending on what was loaded
+  /// into that target, an outline or a full kernel component).
   ///
-  /// If [verify], run the default kernel verification on the resulting component.
+  /// If [verify], run the default kernel verification on the resulting
+  /// component.
   @override
   Future<Component> buildComponent({bool verify: false}) async {
     if (loader.first == null) return null;
@@ -288,28 +283,31 @@ class KernelTarget extends TargetImplementation {
       return component;
     }
 
-    try {
-      ticker.logMs("Building component");
-      await loader.buildBodies();
-      loader.finishDeferredLoadTearoffs();
-      List<SourceClassBuilder> myClasses = collectMyClasses();
-      finishAllConstructors(myClasses);
-      loader.finishNativeMethods();
-      loader.finishPatchMethods();
-      runBuildTransformations();
+    return withCrashReporting<Component>(
+        () async {
+          ticker.logMs("Building component");
+          await loader.buildBodies();
+          loader.finishDeferredLoadTearoffs();
+          loader.finishNoSuchMethodForwarders();
+          List<SourceClassBuilder> myClasses = collectMyClasses();
+          finishAllConstructors(myClasses);
+          loader.finishNativeMethods();
+          loader.finishPatchMethods();
+          runBuildTransformations();
 
-      if (verify) this.verify();
-      if (errors.isNotEmpty) {
-        handleInputError(null, isFullComponent: true);
-      }
-      handleRecoverableErrors(loader.unhandledErrors);
-    } on deprecated_InputError catch (e) {
-      ticker.logMs("Got deprecated_InputError");
-      handleInputError(e, isFullComponent: true);
-    } catch (e, s) {
-      return reportCrash(e, s, loader?.currentUriForCrashReporting);
-    }
-    return component;
+          if (verify) this.verify();
+          if (errors.isNotEmpty) {
+            handleInputError(null, isFullComponent: true);
+          }
+          handleRecoverableErrors(loader.unhandledErrors);
+          return component;
+        },
+        () => loader?.currentUriForCrashReporting,
+        onInputError: (LocatedMessage message) {
+          ticker.logMs("Got unrecoverable error");
+          handleInputError(message, isFullComponent: true);
+          return component;
+        });
   }
 
   /// Adds a synthetic field named `#errors` to the main library that contains
@@ -348,8 +346,19 @@ class KernelTarget extends TargetImplementation {
       // method. Similarly considerations apply to separate compilation. It
       // could also make sense to add a way to mark .dill files as having
       // compile-time errors.
-      KernelProcedureBuilder mainBuilder = new KernelProcedureBuilder(null, 0,
-          null, "#main", null, null, ProcedureKind.Method, library, -1, -1, -1);
+      KernelProcedureBuilder mainBuilder = new KernelProcedureBuilder(
+          null,
+          0,
+          null,
+          "#main",
+          null,
+          null,
+          ProcedureKind.Method,
+          library,
+          -1,
+          -1,
+          -1,
+          -1);
       library.addBuilder(mainBuilder.name, mainBuilder, -1);
       mainBuilder.body = new Block(new List<Statement>.from(errors.map(
           (LocatedMessage message) => new ExpressionStatement(new Throw(
@@ -385,14 +394,19 @@ class KernelTarget extends TargetImplementation {
         nameRoot: nameRoot, libraries: libraries, uriToSource: uriToSource);
     if (loader.first != null) {
       // TODO(sigmund): do only for full program
-      Builder builder = loader.first.exportScope.lookup("main", -1, null);
-      if (builder is KernelProcedureBuilder) {
-        component.mainMethod = builder.procedure;
-      } else if (builder is DillMemberBuilder) {
-        if (builder.member is Procedure) {
-          component.mainMethod = builder.member;
+      Declaration declaration =
+          loader.first.exportScope.lookup("main", -1, null);
+      if (declaration is KernelProcedureBuilder) {
+        component.mainMethod = declaration.procedure;
+      } else if (declaration is DillMemberBuilder) {
+        if (declaration.member is Procedure) {
+          component.mainMethod = declaration.member;
         }
       }
+    }
+
+    if (metadataCollector != null) {
+      component.addMetadataRepository(metadataCollector.repository);
     }
 
     ticker.logMs("Linked component");
@@ -403,21 +417,22 @@ class KernelTarget extends TargetImplementation {
     Class objectClass = this.objectClass;
     loader.builders.forEach((Uri uri, LibraryBuilder library) {
       if (library.loader == loader) {
-        library.forEach((String name, Builder builder) {
-          while (builder != null) {
-            if (builder is SourceClassBuilder) {
-              Class cls = builder.target;
+        library.forEach((String name, Declaration declaration) {
+          while (declaration != null) {
+            if (declaration is SourceClassBuilder) {
+              Class cls = declaration.target;
               if (cls != objectClass) {
                 cls.supertype ??= objectClass.asRawSupertype;
-                builder.supertype ??= new KernelNamedTypeBuilder("Object", null)
-                  ..bind(objectClassBuilder);
+                declaration.supertype ??=
+                    new KernelNamedTypeBuilder("Object", null)
+                      ..bind(objectClassBuilder);
               }
-              if (builder.isMixinApplication) {
-                cls.mixedInType = builder.mixedInType.buildMixedInType(
-                    library, builder.charOffset, builder.fileUri);
+              if (declaration.isMixinApplication) {
+                cls.mixedInType = declaration.mixedInType.buildMixedInType(
+                    library, declaration.charOffset, declaration.fileUri);
               }
             }
-            builder = builder.next;
+            declaration = declaration.next;
           }
         });
       }
@@ -435,7 +450,7 @@ class KernelTarget extends TargetImplementation {
     ticker.logMs("Installed default constructors");
   }
 
-  KernelClassBuilder get objectClassBuilder => objectType.builder;
+  KernelClassBuilder get objectClassBuilder => objectType.declaration;
 
   Class get objectClass => objectClassBuilder.cls;
 
@@ -463,7 +478,7 @@ class KernelTarget extends TargetImplementation {
         SourceClassBuilder named = supertype;
         TypeBuilder type = named.supertype;
         if (type is NamedTypeBuilder) {
-          supertype = type.builder;
+          supertype = type.declaration;
         } else {
           unhandled("${type.runtimeType}", "installDefaultConstructor",
               builder.charOffset, builder.fileUri);
@@ -513,10 +528,12 @@ class KernelTarget extends TargetImplementation {
       Constructor constructor, Map<TypeParameter, DartType> substitutionMap) {
     VariableDeclaration copyFormal(VariableDeclaration formal) {
       // TODO(ahe): Handle initializers.
-      return new VariableDeclaration(formal.name,
-          type: substitute(formal.type, substitutionMap),
-          isFinal: formal.isFinal,
-          isConst: formal.isConst);
+      var copy = new VariableDeclaration(formal.name,
+          isFinal: formal.isFinal, isConst: formal.isConst);
+      if (formal.type != null) {
+        copy.type = substitute(formal.type, substitutionMap);
+      }
+      return copy;
     }
 
     List<VariableDeclaration> positionalParameters = <VariableDeclaration>[];
@@ -620,7 +637,7 @@ class KernelTarget extends TargetImplementation {
     Map<Constructor, List<FieldInitializer>> fieldInitializers =
         <Constructor, List<FieldInitializer>>{};
     Constructor superTarget;
-    builder.constructors.forEach((String name, Builder member) {
+    builder.constructors.forEach((String name, Declaration member) {
       if (member.isFactory) return;
       MemberBuilder constructorBuilder = member;
       Constructor constructor = constructorBuilder.target;

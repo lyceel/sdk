@@ -40,6 +40,7 @@ import 'package:analysis_server/src/protocol_server.dart' as server;
 import 'package:analysis_server/src/search/search_domain.dart';
 import 'package:analysis_server/src/server/diagnostic_server.dart';
 import 'package:analysis_server/src/services/correction/namespace.dart';
+import 'package:analysis_server/src/services/search/element_visitors.dart';
 import 'package:analysis_server/src/services/search/search_engine.dart';
 import 'package:analysis_server/src/services/search/search_engine_internal.dart';
 import 'package:analysis_server/src/utilities/null_string_sink.dart';
@@ -339,6 +340,11 @@ class AnalysisServer {
   DiagnosticServer diagnosticServer;
 
   /**
+   * The analytics instance; note, this object can be `null`.
+   */
+  telemetry.Analytics get analytics => options.analytics;
+
+  /**
    * Initialize a newly created server to receive requests from and send
    * responses to the given [channel].
    *
@@ -371,7 +377,8 @@ class AnalysisServer {
         new PluginWatcher(resourceProvider, pluginManager);
 
     defaultContextOptions.generateImplicitErrors = false;
-    defaultContextOptions.useFastaParser = options.useCFE;
+    defaultContextOptions.useFastaParser =
+        options.useCFE || options.useFastaParser;
     defaultContextOptions.previewDart2 = options.previewDart2;
 
     {
@@ -382,7 +389,7 @@ class AnalysisServer {
           sink = io.stdout;
         } else if (name.startsWith('file:')) {
           String path = name.substring('file:'.length);
-          sink = new io.File(path).openWrite(mode: io.FileMode.APPEND);
+          sink = new io.File(path).openWrite(mode: io.FileMode.append);
         }
       }
       _analysisPerformanceLogger = new PerformanceLog(sink);
@@ -601,20 +608,19 @@ class AnalysisServer {
    * otherwise in the first driver, otherwise `null` is returned.
    */
   Future<nd.AnalysisResult> getAnalysisResult(String path,
-      {bool sendCachedToStream: false}) async {
+      {bool sendCachedToStream: false}) {
     if (!AnalysisEngine.isDartFileName(path)) {
       return null;
     }
 
-    try {
-      nd.AnalysisDriver driver = getAnalysisDriver(path);
-      return await driver?.getResult(path,
-          sendCachedToStream: sendCachedToStream);
-    } catch (e) {
-      // Ignore the exception.
-      // We don't want to log the same exception again and again.
-      return null;
+    nd.AnalysisDriver driver = getAnalysisDriver(path);
+    if (driver == null) {
+      return new Future.value();
     }
+
+    return driver
+        .getResult(path, sendCachedToStream: sendCachedToStream)
+        .catchError((_) => null);
   }
 
   /**
@@ -657,6 +663,25 @@ class AnalysisServer {
    * [offset] or the node does not have an element.
    */
   Future<Element> getElementAtOffset(String file, int offset) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
+    if (!priorityFiles.contains(file)) {
+      var driver = await getAnalysisDriver(file);
+      if (driver == null) {
+        return null;
+      }
+
+      var unitElementResult = await driver.getUnitElement(file);
+      if (unitElementResult == null) {
+        return null;
+      }
+
+      var element = findElementByNameOffset(unitElementResult.element, offset);
+      if (element != null) {
+        return element;
+      }
+    }
+
     AstNode node = await getNodeAtOffset(file, offset);
     return getElementOfNode(node);
   }
@@ -691,6 +716,8 @@ class AnalysisServer {
    * the [offset].
    */
   Future<AstNode> getNodeAtOffset(String file, int offset) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     nd.AnalysisResult result = await getAnalysisResult(file);
     CompilationUnit unit = result?.unit;
     if (unit != null) {
@@ -705,6 +732,8 @@ class AnalysisServer {
    * Dart file or cannot be resolved.
    */
   Future<CompilationUnit> getResolvedCompilationUnit(String path) async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     nd.AnalysisResult result = await getAnalysisResult(path);
     return result?.unit;
   }
@@ -805,8 +834,12 @@ class AnalysisServer {
   /**
    * Sends a `server.error` notification.
    */
-  void sendServerErrorNotification(String message, exception, stackTrace,
-      {bool fatal: false}) {
+  void sendServerErrorNotification(
+    String message,
+    dynamic exception,
+    /*StackTrace*/ stackTrace, {
+    bool fatal: false,
+  }) {
     StringBuffer buffer = new StringBuffer();
     buffer.write(exception ?? 'null exception');
     if (stackTrace != null) {
@@ -825,18 +858,25 @@ class AnalysisServer {
 
     // send to crash reporting
     if (options.crashReportSender != null) {
-      // Catch and ignore any exceptions when reporting exceptions (network
-      // errors or other).
       options.crashReportSender
-          .sendReport(exception, stackTrace: stackTrace)
-          .catchError((_) {});
+          .sendReport(exception,
+              stackTrace: stackTrace is StackTrace ? stackTrace : null)
+          .catchError((_) {
+        // Catch and ignore any exceptions when reporting exceptions (network
+        // errors or other).
+      });
     }
 
     // remember the last few exceptions
     if (exception is CaughtException) {
       stackTrace ??= exception.stackTrace;
     }
-    exceptions.add(new ServerException(message, exception, stackTrace, fatal));
+    exceptions.add(new ServerException(
+      message,
+      exception,
+      stackTrace is StackTrace ? stackTrace : null,
+      fatal,
+    ));
   }
 
   /**
@@ -978,9 +1018,13 @@ class AnalysisServer {
   Future<Null> shutdown() async {
     running = false;
 
-    await options.analytics
-        ?.waitForLastPing(timeout: new Duration(milliseconds: 200));
-    options.analytics?.close();
+    if (options.analytics != null) {
+      options.analytics
+          .waitForLastPing(timeout: new Duration(milliseconds: 200))
+          .then((_) {
+        options.analytics.close();
+      });
+    }
 
     // Defer closing the channel and shutting down the instrumentation server so
     // that the shutdown response can be sent and logged.
@@ -1082,15 +1126,19 @@ class AnalysisServer {
   ByteStore _createByteStore() {
     const int M = 1024 * 1024 /*1 MiB*/;
     const int G = 1024 * 1024 * 1024 /*1 GiB*/;
+
+    const int memoryCacheSize = 128 * M;
+
     if (resourceProvider is PhysicalResourceProvider) {
       Folder stateLocation =
           resourceProvider.getStateLocation('.analysis-driver');
       if (stateLocation != null) {
         return new MemoryCachingByteStore(
-            new EvictingFileByteStore(stateLocation.path, G), 64 * M);
+            new EvictingFileByteStore(stateLocation.path, G), memoryCacheSize);
       }
     }
-    return new MemoryCachingByteStore(new NullByteStore(), 64 * M);
+
+    return new MemoryCachingByteStore(new NullByteStore(), memoryCacheSize);
   }
 
   /**
@@ -1117,6 +1165,8 @@ class AnalysisServer {
   }
 
   _scheduleAnalysisImplementedNotification() async {
+    // TODO(brianwilkerson) Determine whether this await is necessary.
+    await null;
     Set<String> files = analysisServices[AnalysisService.IMPLEMENTED];
     if (files != null) {
       scheduleImplementedNotification(this, files);
@@ -1162,6 +1212,11 @@ class AnalysisServerOptions {
    * Whether to enable the Dart 2.0 Common Front End implementation.
    */
   bool useCFE = false;
+
+  /**
+   * Whether to enable parsing via the Fasta parser.
+   */
+  bool useFastaParser = false;
 }
 
 /**

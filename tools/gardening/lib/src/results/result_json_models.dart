@@ -28,7 +28,7 @@ class Configuration {
   final bool enableAsserts;
   final bool hotReload;
   final bool hotReloadRollback;
-  final bool previewDart2;
+  final bool noPreviewDart2;
   final List<String> selectors;
 
   Configuration(
@@ -53,23 +53,24 @@ class Configuration {
       this.enableAsserts,
       this.hotReload,
       this.hotReloadRollback,
-      this.previewDart2,
+      this.noPreviewDart2,
       this.selectors);
 
   static Configuration getFromJson(dynamic json) {
+    var isStrong = !(json["no_preview_dart_2"] ?? false);
     return new Configuration(
         json["mode"],
         json["arch"],
         json["compiler"],
         json["runtime"],
         json["checked"],
-        json["strong"],
+        isStrong,
         json["host_checked"],
         json["minified"],
         json["csp"],
         json["fasta"],
         json["system"],
-        json["vm_options"],
+        json["vm_options"].cast<String>(),
         json["use_sdk"],
         json["builder_tag"],
         json["fast_startup"],
@@ -79,8 +80,8 @@ class Configuration {
         json["enable_asserts"] ?? false,
         json["hot_reload"] ?? false,
         json["hot_reload_rollback"] ?? false,
-        json["preview_dart_2"] ?? false,
-        json["selectors"] ?? []);
+        !isStrong,
+        json["selectors"].cast<String>() ?? <String>[]);
   }
 
   /// Returns the arguments needed for running test.py with the arguments
@@ -107,7 +108,7 @@ class Configuration {
       _boolToArg("enable-asserts", enableAsserts),
       _boolToArg("hot-reload", hotReload),
       _boolToArg("hot-reload-rollback", hotReloadRollback),
-      _boolToArg("preview-dart-2", previewDart2)
+      _boolToArg("no-preview-dart-2", noPreviewDart2)
     ].where((x) => x != null).toList();
     if (includeSelectors && selectors != null && selectors.length > 0) {
       args.addAll(selectors);
@@ -119,7 +120,7 @@ class Configuration {
     return "$mode;$arch;$compiler;$runtime;$checked;$strong;$hostChecked;"
         "$minified;$csp;$fasta;$system;$vmOptions;$useSdk;$builderTag;$fastStartup;"
         "$dart2JsWithKernel;$dart2JsOldFrontend;$enableAsserts;$hotReload;"
-        "$hotReloadRollback;$previewDart2;$selectors";
+        "$hotReloadRollback;$noPreviewDart2;$selectors";
   }
 
   String _stringToArg(String name, String value) {
@@ -130,7 +131,7 @@ class Configuration {
   }
 
   String _boolToArg(String name, bool value) {
-    return value ? "--$name" : null;
+    return value == true ? "--$name" : null;
   }
 
   String _listToArg(String name, List<String> strings) {
@@ -157,8 +158,9 @@ class Result {
       this.testExpectations, this.commands);
 
   static Result getFromJson(dynamic json) {
-    var commands = json["commands"].map((x) => Command.getFromJson(x)).toList();
-    var testExpectations = json["test_expectation"];
+    var commands =
+        json["commands"].map<Command>((x) => Command.getFromJson(x)).toList();
+    var testExpectations = json["test_expectation"].cast<String>();
     return new Result(json["configuration"], json["name"], json["result"],
         json["flaky"], json["negative"], testExpectations, commands);
   }
@@ -205,8 +207,10 @@ class TestResult {
 
   List<Result> _results;
   List<Result> get results {
-    return _results ??=
-        this.jsonObject["results"].map((x) => Result.getFromJson(x)).toList();
+    return _results ??= this
+        .jsonObject["results"]
+        .map<Result>((x) => Result.getFromJson(x))
+        .toList();
   }
 
   /// Combines multiple test-results into a single test-result, potentially by

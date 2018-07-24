@@ -69,6 +69,7 @@ Thread::Thread(Isolate* isolate)
       vm_tag_(0),
       task_kind_(kUnknownTask),
       async_stack_trace_(StackTrace::null()),
+      unboxed_int64_runtime_arg_(0),
       dart_stream_(NULL),
       os_thread_(NULL),
       thread_lock_(new Monitor()),
@@ -151,6 +152,8 @@ Thread::Thread(Isolate* isolate)
     ASSERT(current_zone_capacity_ == total_zone_capacity);
   }
 }
+
+static const double double_nan_constant = NAN;
 
 static const struct ALIGN16 {
   uint64_t a;
@@ -246,7 +249,6 @@ void Thread::clear_pending_functions() {
 }
 
 void Thread::set_active_exception(const Object& value) {
-  ASSERT(!value.IsNull());
   active_exception_ = value.raw();
 }
 
@@ -386,14 +388,6 @@ void Thread::PrepareForGC() {
   // at GC time.
   // TODO(koda): Replace with an epilogue (PrepareAfterGC) that acquires.
   store_buffer_block_ = isolate()->store_buffer()->PopEmptyBlock();
-}
-
-void Thread::SetStackLimitFromStackBase(uword stack_base) {
-#if defined(USING_SIMULATOR)
-  SetStackLimit(Simulator::Current()->stack_limit());
-#else
-  SetStackLimit(OSThread::Current()->stack_limit_with_headroom());
-#endif
 }
 
 void Thread::SetStackLimit(uword limit) {
@@ -544,7 +538,7 @@ RawError* Thread::HandleInterrupts() {
       // False result from HandleOOBMessages signals that the isolate should
       // be terminating.
       if (FLAG_trace_isolates) {
-        OS::Print(
+        OS::PrintErr(
             "[!] Terminating isolate due to OOB message:\n"
             "\tisolate:    %s\n",
             isolate()->name());
@@ -630,7 +624,7 @@ void Thread::ClearReusableHandles() {
 }
 
 void Thread::VisitObjectPointers(ObjectPointerVisitor* visitor,
-                                 bool validate_frames) {
+                                 ValidationPolicy validation_policy) {
   ASSERT(visitor != NULL);
 
   if (zone_ != NULL) {
@@ -665,10 +659,6 @@ void Thread::VisitObjectPointers(ObjectPointerVisitor* visitor,
   // (which iterate it's stack) to finish.
   const StackFrameIterator::CrossThreadPolicy cross_thread_policy =
       StackFrameIterator::kAllowCrossThreadIteration;
-
-  const StackFrameIterator::ValidationPolicy validation_policy =
-      validate_frames ? StackFrameIterator::kValidateFrames
-                      : StackFrameIterator::kDontValidateFrames;
 
   // Iterate over all the stack frames and visit objects on the stack.
   StackFrameIterator frames_iterator(top_exit_frame_info(), validation_policy,

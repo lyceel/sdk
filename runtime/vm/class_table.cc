@@ -6,9 +6,8 @@
 
 #include "platform/atomic.h"
 #include "vm/flags.h"
-#include "vm/freelist.h"
 #include "vm/growable_array.h"
-#include "vm/heap.h"
+#include "vm/heap/heap.h"
 #include "vm/object.h"
 #include "vm/raw_object.h"
 #include "vm/visitor.h"
@@ -252,7 +251,7 @@ void ClassTable::Print() {
     cls = At(i);
     if (cls.raw() != reinterpret_cast<RawClass*>(0)) {
       name = cls.Name();
-      OS::Print("%" Pd ": %s\n", i, name.ToCString());
+      OS::PrintErr("%" Pd ": %s\n", i, name.ToCString());
     }
   }
 }

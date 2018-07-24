@@ -23,9 +23,9 @@ import '../fasta_codes.dart'
 
 import '../kernel/kernel_builder.dart'
     show
-        Builder,
-        ClassBuilder,
         ConstructorReferenceBuilder,
+        Declaration,
+        FieldBuilder,
         KernelClassBuilder,
         KernelFieldBuilder,
         KernelFunctionBuilder,
@@ -42,17 +42,19 @@ import '../kernel/kernel_shadow_ast.dart' show ShadowClass;
 
 import '../problems.dart' show unexpected, unhandled;
 
-import 'source_library_builder.dart' show SourceLibraryBuilder;
-
 ShadowClass initializeClass(
     ShadowClass cls,
     List<TypeVariableBuilder> typeVariables,
     String name,
     KernelLibraryBuilder parent,
+    int startCharOffset,
     int charOffset,
     int charEndOffset) {
   cls ??= new ShadowClass(name: name);
   cls.fileUri ??= parent.fileUri;
+  if (cls.startFileOffset == TreeNode.noOffset) {
+    cls.startFileOffset = startCharOffset;
+  }
   if (cls.fileOffset == TreeNode.noOffset) {
     cls.fileOffset = charOffset;
   }
@@ -89,43 +91,48 @@ class SourceClassBuilder extends KernelClassBuilder {
       Scope constructors,
       LibraryBuilder parent,
       this.constructorReferences,
+      int startCharOffset,
       int charOffset,
       int charEndOffset,
       [ShadowClass cls,
       this.mixedInType])
-      : actualCls = initializeClass(
-            cls, typeVariables, name, parent, charOffset, charEndOffset),
+      : actualCls = initializeClass(cls, typeVariables, name, parent,
+            startCharOffset, charOffset, charEndOffset),
         super(metadata, modifiers, name, typeVariables, supertype, interfaces,
             scope, constructors, parent, charOffset) {
     ShadowClass.setBuilder(this.cls, this);
   }
 
-  Class get cls => origin.actualCls;
+  @override
+  ShadowClass get cls => origin.actualCls;
+
+  @override
+  KernelLibraryBuilder get library => super.library;
 
   Class build(KernelLibraryBuilder library, LibraryBuilder coreLibrary) {
-    void buildBuilders(String name, Builder builder) {
+    void buildBuilders(String name, Declaration declaration) {
       do {
-        if (builder.parent != this) {
+        if (declaration.parent != this) {
           unexpected(
-              "$fileUri", "${builder.parent.fileUri}", charOffset, fileUri);
-        } else if (builder is KernelFieldBuilder) {
+              "$fileUri", "${declaration.parent.fileUri}", charOffset, fileUri);
+        } else if (declaration is KernelFieldBuilder) {
           // TODO(ahe): It would be nice to have a common interface for the
           // build method to avoid duplicating these two cases.
-          Member field = builder.build(library);
-          if (!builder.isPatch) {
+          Member field = declaration.build(library);
+          if (!declaration.isPatch) {
             cls.addMember(field);
           }
-        } else if (builder is KernelFunctionBuilder) {
-          Member function = builder.build(library);
-          if (!builder.isPatch) {
+        } else if (declaration is KernelFunctionBuilder) {
+          Member function = declaration.build(library);
+          if (!declaration.isPatch) {
             cls.addMember(function);
           }
         } else {
-          unhandled("${builder.runtimeType}", "buildBuilders",
-              builder.charOffset, builder.fileUri);
+          unhandled("${declaration.runtimeType}", "buildBuilders",
+              declaration.charOffset, declaration.fileUri);
         }
-        builder = builder.next;
-      } while (builder != null);
+        declaration = declaration.next;
+      } while (declaration != null);
     }
 
     scope.forEach(buildBuilders);
@@ -148,9 +155,10 @@ class SourceClassBuilder extends KernelClassBuilder {
       }
     }
 
-    constructors.forEach((String name, Builder constructor) {
-      Builder member = scopeBuilder[name];
+    constructors.forEach((String name, Declaration constructor) {
+      Declaration member = scopeBuilder[name];
       if (member == null) return;
+      if (!member.isStatic) return;
       // TODO(ahe): Revisit these messages. It seems like the last two should
       // be `context` parameter to this message.
       addCompileTimeError(templateConflictsWithMember.withArguments(name),
@@ -169,9 +177,12 @@ class SourceClassBuilder extends KernelClassBuilder {
       }
     });
 
-    scope.setters.forEach((String name, Builder setter) {
-      Builder member = scopeBuilder[name];
-      if (member == null || !member.isField || member.isFinal) return;
+    scope.setters.forEach((String name, Declaration setter) {
+      Declaration member = scopeBuilder[name];
+      if (member == null ||
+          !(member.isField && !member.isFinal ||
+              member.isRegularMethod && member.isStatic && setter.isStatic))
+        return;
       if (member.isInstanceMember == setter.isInstanceMember) {
         addProblem(templateConflictsWithMember.withArguments(name),
             setter.charOffset, noLength);
@@ -185,6 +196,15 @@ class SourceClassBuilder extends KernelClassBuilder {
         addProblem(templateConflictsWithSetterWarning.withArguments(name),
             member.charOffset, noLength);
       }
+    });
+
+    scope.setters.forEach((String name, Declaration setter) {
+      Declaration constructor = constructorScopeBuilder[name];
+      if (constructor == null || !setter.isStatic) return;
+      addProblem(templateConflictsWithConstructor.withArguments(name),
+          setter.charOffset, noLength);
+      addProblem(templateConflictsWithSetter.withArguments(name),
+          constructor.charOffset, noLength);
     });
 
     cls.procedures.sort(compareProcedures);
@@ -201,17 +221,19 @@ class SourceClassBuilder extends KernelClassBuilder {
   }
 
   @override
-  void prepareTopLevelInference(
-      SourceLibraryBuilder library, ClassBuilder currentClass) {
-    scope.forEach((name, builder) {
-      builder.prepareTopLevelInference(library, this);
+  void prepareTopLevelInference() {
+    scope.forEach((String name, Declaration declaration) {
+      if (declaration is FieldBuilder) {
+        declaration.prepareTopLevelInference();
+      }
     });
+    cls.setupApiMembers(library.loader.interfaceResolver);
   }
 
   @override
   void instrumentTopLevelInference(Instrumentation instrumentation) {
-    scope.forEach((name, builder) {
-      builder.instrumentTopLevelInference(instrumentation);
+    scope.forEach((name, declaration) {
+      declaration.instrumentTopLevelInference(instrumentation);
     });
   }
 
@@ -224,11 +246,11 @@ class SourceClassBuilder extends KernelClassBuilder {
     cls.annotations.forEach((m) => m.fileOffset = origin.cls.fileOffset);
 
     int count = 0;
-    scope.forEach((String name, Builder builder) {
-      count += builder.finishPatch();
+    scope.forEach((String name, Declaration declaration) {
+      count += declaration.finishPatch();
     });
-    constructors.forEach((String name, Builder builder) {
-      count += builder.finishPatch();
+    constructors.forEach((String name, Declaration declaration) {
+      count += declaration.finishPatch();
     });
     return count;
   }

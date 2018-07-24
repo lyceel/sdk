@@ -15,6 +15,7 @@
 #include "vm/compiler/frontend/flow_graph_builder.h"
 #include "vm/growable_array.h"
 #include "vm/object_store.h"
+#include "vm/resolver.h"
 
 namespace dart {
 
@@ -274,8 +275,8 @@ void FlowGraph::MergeBlocks() {
       merged->Add(successor->postorder_number());
       changed = true;
       if (FLAG_trace_optimization) {
-        OS::Print("Merged blocks B%" Pd " and B%" Pd "\n", block->block_id(),
-                  successor->block_id());
+        OS::PrintErr("Merged blocks B%" Pd " and B%" Pd "\n", block->block_id(),
+                     successor->block_id());
       }
     }
     // The new block inherits the block id of the last successor to maintain
@@ -416,38 +417,108 @@ bool FlowGraph::IsReceiver(Definition* def) const {
   return (phi->is_receiver() == PhiInstr::kReceiver);
 }
 
-// Use CHA to determine if the call needs a class check: if the callee's
-// receiver is the same as the caller's receiver and there are no overridden
-// callee functions, then no class check is needed.
-bool FlowGraph::InstanceCallNeedsClassCheck(InstanceCallInstr* call,
-                                            RawFunction::Kind kind) const {
+FlowGraph::ToCheck FlowGraph::CheckForInstanceCall(
+    InstanceCallInstr* call,
+    RawFunction::Kind kind) const {
   if (!FLAG_use_cha_deopt && !isolate()->all_classes_finalized()) {
     // Even if class or function are private, lazy class finalization
     // may later add overriding methods.
-    return true;
+    return ToCheck::kCheckCid;
   }
-  Definition* callee_receiver = call->Receiver()->definition();
-  ASSERT(callee_receiver != NULL);
-  if (function().IsDynamicFunction() && IsReceiver(callee_receiver)) {
-    const String& name =
-        (kind == RawFunction::kMethodExtractor)
-            ? String::Handle(zone(),
-                             Field::NameFromGetter(call->function_name()))
-            : call->function_name();
-    const Class& cls = Class::Handle(zone(), function().Owner());
-    intptr_t subclass_count = 0;
-    if (!thread()->cha()->HasOverride(cls, name, &subclass_count)) {
-      if (FLAG_trace_cha) {
-        THR_Print(
-            "  **(CHA) Instance call needs no check, "
-            "no overrides of '%s' '%s'\n",
-            name.ToCString(), cls.ToCString());
+
+  // Best effort to get the receiver class.
+  Value* receiver = call->Receiver();
+  Class& receiver_class = Class::Handle(zone());
+  bool receiver_maybe_null = false;
+  if (function().IsDynamicFunction() && IsReceiver(receiver->definition())) {
+    // Call receiver is callee receiver: calling "this.g()" in f().
+    receiver_class = function().Owner();
+  } else if (FLAG_use_strong_mode_types && isolate()->strong()) {
+    // In strong mode, get the receiver's compile type. Note that
+    // we allow nullable types, which may result in just generating
+    // a null check rather than the more elaborate class check
+    CompileType* type = receiver->Type();
+    const AbstractType* atype = type->ToAbstractType();
+    if (atype->IsInstantiated() && atype->HasResolvedTypeClass() &&
+        !atype->IsDynamicType()) {
+      if (type->is_nullable()) {
+        receiver_maybe_null = true;
       }
-      thread()->cha()->AddToGuardedClasses(cls, subclass_count);
-      return false;
+      receiver_class = atype->type_class();
+      if (receiver_class.is_implemented()) {
+        receiver_class = Class::null();
+      }
     }
   }
-  return true;
+
+  // Useful receiver class information?
+  if (receiver_class.IsNull()) {
+    return ToCheck::kCheckCid;
+  } else if (call->HasICData()) {
+    // If the static class type does not match information found in ICData
+    // (which may be "guessed"), then bail, since subsequent code generation
+    // (AOT and JIT) for inlining uses the latter.
+    // TODO(ajcbik): improve this by using the static class.
+    const intptr_t cid = receiver_class.id();
+    const ICData* data = call->ic_data();
+    bool match = false;
+    Class& cls = Class::Handle(zone());
+    Function& fun = Function::Handle(zone());
+    for (intptr_t i = 0, len = data->NumberOfChecks(); i < len; i++) {
+      fun = data->GetTargetAt(i);
+      cls = fun.Owner();
+      if (data->GetReceiverClassIdAt(i) == cid || cls.id() == cid) {
+        match = true;
+        break;
+      }
+    }
+    if (!match) {
+      return ToCheck::kCheckCid;
+    }
+  }
+
+  const String& method_name =
+      (kind == RawFunction::kMethodExtractor)
+          ? String::Handle(zone(), Field::NameFromGetter(call->function_name()))
+          : call->function_name();
+
+  // If the receiver can have the null value, exclude any method
+  // that is actually valid on a null receiver.
+  if (receiver_maybe_null) {
+#ifdef TARGET_ARCH_DBC
+    // TODO(ajcbik): DBC does not support null check at all yet.
+    return ToCheck::kCheckCid;
+#else
+    const Class& null_class =
+        Class::Handle(zone(), isolate()->object_store()->null_class());
+    const Function& target = Function::Handle(
+        zone(),
+        Resolver::ResolveDynamicAnyArgs(zone(), null_class, method_name));
+    if (!target.IsNull()) {
+      return ToCheck::kCheckCid;
+    }
+#endif
+  }
+
+  // Use CHA to determine if the method is not overridden by any subclass
+  // of the receiver class. Any methods that are valid when the receiver
+  // has a null value are excluded above (to avoid throwing an exception
+  // on something valid, like null.hashCode).
+  intptr_t subclass_count = 0;
+  if (!thread()->cha()->HasOverride(receiver_class, method_name,
+                                    &subclass_count)) {
+    if (FLAG_trace_cha) {
+      THR_Print(
+          "  **(CHA) Instance call needs no class check since there "
+          "are no overrides of method '%s' on '%s'\n",
+          method_name.ToCString(), receiver_class.ToCString());
+    }
+    if (FLAG_use_cha_deopt) {
+      thread()->cha()->AddToGuardedClasses(receiver_class, subclass_count);
+    }
+    return receiver_maybe_null ? ToCheck::kCheckNull : ToCheck::kNoCheck;
+  }
+  return ToCheck::kCheckCid;
 }
 
 Instruction* FlowGraph::CreateCheckClass(Definition* to_check,
@@ -580,25 +651,25 @@ void LivenessAnalysis::Analyze() {
 }
 
 static void PrintBitVector(const char* tag, BitVector* v) {
-  OS::Print("%s:", tag);
+  OS::PrintErr("%s:", tag);
   for (BitVector::Iterator it(v); !it.Done(); it.Advance()) {
-    OS::Print(" %" Pd "", it.Current());
+    OS::PrintErr(" %" Pd "", it.Current());
   }
-  OS::Print("\n");
+  OS::PrintErr("\n");
 }
 
 void LivenessAnalysis::Dump() {
   const intptr_t block_count = postorder_.length();
   for (intptr_t i = 0; i < block_count; i++) {
     BlockEntryInstr* block = postorder_[i];
-    OS::Print("block @%" Pd " -> ", block->block_id());
+    OS::PrintErr("block @%" Pd " -> ", block->block_id());
 
     Instruction* last = block->last_instruction();
     for (intptr_t j = 0; j < last->SuccessorCount(); j++) {
       BlockEntryInstr* succ = last->SuccessorAt(j);
-      OS::Print(" @%" Pd "", succ->block_id());
+      OS::PrintErr(" @%" Pd "", succ->block_id());
     }
-    OS::Print("\n");
+    OS::PrintErr("\n");
 
     PrintBitVector("  live out", live_out_[i]);
     PrintBitVector("  kill", kill_[i]);
@@ -612,7 +683,6 @@ class VariableLivenessAnalysis : public LivenessAnalysis {
   explicit VariableLivenessAnalysis(FlowGraph* flow_graph)
       : LivenessAnalysis(flow_graph->variable_count(), flow_graph->postorder()),
         flow_graph_(flow_graph),
-        num_direct_parameters_(flow_graph->num_direct_parameters()),
         assigned_vars_() {}
 
   // For every block (in preorder) compute and return set of variables that
@@ -657,7 +727,7 @@ class VariableLivenessAnalysis : public LivenessAnalysis {
       return false;
     }
     if (store->is_last()) {
-      const intptr_t index = store->local().BitIndexIn(num_direct_parameters_);
+      const intptr_t index = flow_graph_->EnvIndex(&store->local());
       return GetLiveOutSet(block)->Contains(index);
     }
 
@@ -670,7 +740,7 @@ class VariableLivenessAnalysis : public LivenessAnalysis {
     if (load->local().Equals(*flow_graph_->CurrentContextVar())) {
       return false;
     }
-    const intptr_t index = load->local().BitIndexIn(num_direct_parameters_);
+    const intptr_t index = flow_graph_->EnvIndex(&load->local());
     return load->is_last() && !GetLiveOutSet(block)->Contains(index);
   }
 
@@ -678,7 +748,6 @@ class VariableLivenessAnalysis : public LivenessAnalysis {
   virtual void ComputeInitialSets();
 
   const FlowGraph* flow_graph_;
-  const intptr_t num_direct_parameters_;
   GrowableArray<BitVector*> assigned_vars_;
 };
 
@@ -710,7 +779,7 @@ void VariableLivenessAnalysis::ComputeInitialSets() {
 
       LoadLocalInstr* load = current->AsLoadLocal();
       if (load != NULL) {
-        const intptr_t index = load->local().BitIndexIn(num_direct_parameters_);
+        const intptr_t index = flow_graph_->EnvIndex(&load->local());
         if (index >= live_in->length()) continue;  // Skip tmp_locals.
         live_in->Add(index);
         if (!last_loads->Contains(index)) {
@@ -722,8 +791,7 @@ void VariableLivenessAnalysis::ComputeInitialSets() {
 
       StoreLocalInstr* store = current->AsStoreLocal();
       if (store != NULL) {
-        const intptr_t index =
-            store->local().BitIndexIn(num_direct_parameters_);
+        const intptr_t index = flow_graph_->EnvIndex(&store->local());
         if (index >= live_in->length()) continue;  // Skip tmp_locals.
         if (kill->Contains(index)) {
           if (!live_in->Contains(index)) {
@@ -989,8 +1057,7 @@ void FlowGraph::Rename(GrowableArray<PhiInstr*>* live_phis,
         AllocateSSAIndexes(defn);
         AddToInitialDefinitions(defn);
 
-        intptr_t index = parsed_function_.RawParameterVariable(i)->BitIndexIn(
-            num_direct_parameters_);
+        intptr_t index = EnvIndex(parsed_function_.RawParameterVariable(i));
         env[index] = defn;
       }
     }
@@ -1020,8 +1087,9 @@ void FlowGraph::Rename(GrowableArray<PhiInstr*>* live_phis,
 
       // Replace the argument descriptor slot with a special parameter.
       if (parsed_function().has_arg_desc_var()) {
-        Definition* defn = new SpecialParameterInstr(
-            SpecialParameterInstr::kArgDescriptor, Thread::kNoDeoptId);
+        Definition* defn =
+            new SpecialParameterInstr(SpecialParameterInstr::kArgDescriptor,
+                                      Thread::kNoDeoptId, graph_entry_);
         AllocateSSAIndexes(defn);
         AddToInitialDefinitions(defn);
         env[ArgumentDescriptorEnvIndex()] = defn;
@@ -1081,10 +1149,32 @@ void FlowGraph::RenameRecursive(BlockEntryInstr* block_entry,
         }
       }
     }
-  } else if (block_entry->IsCatchBlockEntry()) {
+  } else if (CatchBlockEntryInstr* catch_entry =
+                 block_entry->AsCatchBlockEntry()) {
+    const intptr_t raw_exception_var_envindex =
+        catch_entry->raw_exception_var() != nullptr
+            ? EnvIndex(catch_entry->raw_exception_var())
+            : -1;
+    const intptr_t raw_stacktrace_var_envindex =
+        catch_entry->raw_stacktrace_var() != nullptr
+            ? EnvIndex(catch_entry->raw_stacktrace_var())
+            : -1;
+
     // Add real definitions for all locals and parameters.
     for (intptr_t i = 0; i < env->length(); ++i) {
-      ParameterInstr* param = new (zone()) ParameterInstr(i, block_entry);
+      // Replace usages of the raw exception/stacktrace variables with
+      // [SpecialParameterInstr]s.
+      Definition* param = nullptr;
+      if (raw_exception_var_envindex == i) {
+        param = new SpecialParameterInstr(SpecialParameterInstr::kException,
+                                          Thread::kNoDeoptId, catch_entry);
+      } else if (raw_stacktrace_var_envindex == i) {
+        param = new SpecialParameterInstr(SpecialParameterInstr::kStackTrace,
+                                          Thread::kNoDeoptId, catch_entry);
+      } else {
+        param = new (zone()) ParameterInstr(i, block_entry);
+      }
+
       param->set_ssa_temp_index(alloc_ssa_temp_index());  // New SSA temp.
       (*env)[i] = param;
       block_entry->AsCatchBlockEntry()->initial_definitions()->Add(param);
@@ -1106,6 +1196,28 @@ void FlowGraph::RenameRecursive(BlockEntryInstr* block_entry,
   // Attach environment to the block entry.
   AttachEnvironment(block_entry, env);
 
+#if defined(TARGET_ARCH_DBC)
+  // On DBC the exception/stacktrace variables are in special registers when
+  // entering the catch block.  The only usage of those special registers is
+  // within the catch block.  A possible lazy-deopt at the beginning of the
+  // catch does not need to move those around, since the registers will be
+  // up-to-date when arriving in the unoptimized code and unoptimized code will
+  // take care of moving them to appropriate slots.
+  if (CatchBlockEntryInstr* catch_entry = block_entry->AsCatchBlockEntry()) {
+    Environment* deopt_env = catch_entry->env();
+    const LocalVariable* raw_exception_var = catch_entry->raw_exception_var();
+    const LocalVariable* raw_stacktrace_var = catch_entry->raw_stacktrace_var();
+    if (raw_exception_var != nullptr) {
+      Value* value = deopt_env->ValueAt(EnvIndex(raw_exception_var));
+      value->BindToEnvironment(constant_null());
+    }
+    if (raw_stacktrace_var != nullptr) {
+      Value* value = deopt_env->ValueAt(EnvIndex(raw_stacktrace_var));
+      value->BindToEnvironment(constant_null());
+    }
+  }
+#endif  // defined(TARGET_ARCH_DBC)
+
   // 2. Process normal instructions.
   for (ForwardInstructionIterator it(block_entry); !it.Done(); it.Advance()) {
     Instruction* current = it.Current();
@@ -1118,8 +1230,8 @@ void FlowGraph::RenameRecursive(BlockEntryInstr* block_entry,
     // 2a. Handle uses:
     // Update the expression stack renaming environment for each use by
     // removing the renamed value.
-    // For each use of a LoadLocal, StoreLocal, DropTemps or Constant: Replace
-    // it with the renamed value.
+    // For each use of a LoadLocal, StoreLocal, MakeTemp, DropTemps or Constant:
+    // replace it with the renamed value.
     for (intptr_t i = current->InputCount() - 1; i >= 0; --i) {
       Value* v = current->InputAt(i);
       // Update expression stack.
@@ -1128,8 +1240,10 @@ void FlowGraph::RenameRecursive(BlockEntryInstr* block_entry,
       Definition* reaching_defn = env->RemoveLast();
       Definition* input_defn = v->definition();
       if (input_defn != reaching_defn) {
+        // Note: constants can only be replaced with other constants.
         ASSERT(input_defn->IsLoadLocal() || input_defn->IsStoreLocal() ||
-               input_defn->IsDropTemps() || input_defn->IsConstant());
+               input_defn->IsDropTemps() || input_defn->IsMakeTemp() ||
+               (input_defn->IsConstant() && reaching_defn->IsConstant()));
         // Assert we are not referencing nulls in the initial environment.
         ASSERT(reaching_defn->ssa_temp_index() != -1);
         v->set_definition(reaching_defn);
@@ -1143,103 +1257,120 @@ void FlowGraph::RenameRecursive(BlockEntryInstr* block_entry,
       env->RemoveLast();
     }
 
-    // 2b. Handle LoadLocal, StoreLocal, DropTemps and Constant.
-    Definition* definition = current->AsDefinition();
-    if (definition != NULL) {
-      LoadLocalInstr* load = definition->AsLoadLocal();
-      StoreLocalInstr* store = definition->AsStoreLocal();
-      DropTempsInstr* drop = definition->AsDropTemps();
-      ConstantInstr* constant = definition->AsConstant();
-      if ((load != NULL) || (store != NULL) || (drop != NULL) ||
-          (constant != NULL)) {
-        Definition* result = NULL;
-        if (store != NULL) {
-          // Update renaming environment.
-          intptr_t index = store->local().BitIndexIn(num_direct_parameters_);
-          result = store->value()->definition();
+    // 2b. Handle LoadLocal/StoreLocal/MakeTemp/DropTemps/Constant and
+    // PushArgument specially. Other definitions are just pushed
+    // to the environment directly.
+    Definition* result = NULL;
+    switch (current->tag()) {
+      case Instruction::kLoadLocal: {
+        LoadLocalInstr* load = current->Cast<LoadLocalInstr>();
 
-          if (!FLAG_prune_dead_locals ||
-              variable_liveness->IsStoreAlive(block_entry, store)) {
-            (*env)[index] = result;
-          } else {
-            (*env)[index] = constant_dead();
-          }
-        } else if (load != NULL) {
-          // The graph construction ensures we do not have an unused LoadLocal
-          // computation.
-          ASSERT(definition->HasTemp());
-          intptr_t index = load->local().BitIndexIn(num_direct_parameters_);
-          result = (*env)[index];
+        // The graph construction ensures we do not have an unused LoadLocal
+        // computation.
+        ASSERT(load->HasTemp());
+        const intptr_t index = EnvIndex(&load->local());
+        result = (*env)[index];
 
-          PhiInstr* phi = result->AsPhi();
-          if ((phi != NULL) && !phi->is_alive()) {
-            phi->mark_alive();
-            live_phis->Add(phi);
-          }
+        PhiInstr* phi = result->AsPhi();
+        if ((phi != NULL) && !phi->is_alive()) {
+          phi->mark_alive();
+          live_phis->Add(phi);
+        }
 
-          if (FLAG_prune_dead_locals &&
-              variable_liveness->IsLastLoad(block_entry, load)) {
-            (*env)[index] = constant_dead();
-          }
+        if (FLAG_prune_dead_locals &&
+            variable_liveness->IsLastLoad(block_entry, load)) {
+          (*env)[index] = constant_dead();
+        }
 
-          // Record captured parameters so that they can be skipped when
-          // emitting sync code inside optimized try-blocks.
-          if (load->local().is_captured_parameter()) {
-            intptr_t index = load->local().BitIndexIn(num_direct_parameters_);
-            captured_parameters_->Add(index);
-          }
+        // Record captured parameters so that they can be skipped when
+        // emitting sync code inside optimized try-blocks.
+        if (load->local().is_captured_parameter()) {
+          captured_parameters_->Add(index);
+        }
 
-          if ((phi != NULL) && isolate()->strong() &&
-              FLAG_use_strong_mode_types) {
-            // Assign type to Phi if it doesn't have a type yet.
-            // For a Phi to appear in the local variable it either was placed
-            // there as incoming value by renaming or it was stored there by
-            // StoreLocal which took this Phi from another local via LoadLocal,
-            // to which this reasoning applies recursively.
-            // This means that we are guaranteed to process LoadLocal for a
-            // matching variable first.
-            if (!phi->HasType()) {
-              ASSERT((index < phi->block()->phis()->length()) &&
-                     ((*phi->block()->phis())[index] == phi));
-              phi->UpdateType(
-                  CompileType::FromAbstractType(load->local().type()));
-            }
-          }
-        } else if (drop != NULL) {
-          // Drop temps from the environment.
-          for (intptr_t j = 0; j < drop->num_temps(); j++) {
-            env->RemoveLast();
-          }
-          if (drop->value() != NULL) {
-            result = drop->value()->definition();
-          }
-          ASSERT((drop->value() != NULL) || !drop->HasTemp());
-        } else {
-          if (definition->HasTemp()) {
-            result = GetConstant(constant->value());
+        if ((phi != NULL) && isolate()->strong() &&
+            FLAG_use_strong_mode_types) {
+          // Assign type to Phi if it doesn't have a type yet.
+          // For a Phi to appear in the local variable it either was placed
+          // there as incoming value by renaming or it was stored there by
+          // StoreLocal which took this Phi from another local via LoadLocal,
+          // to which this reasoning applies recursively.
+          // This means that we are guaranteed to process LoadLocal for a
+          // matching variable first.
+          if (!phi->HasType()) {
+            ASSERT((index < phi->block()->phis()->length()) &&
+                   ((*phi->block()->phis())[index] == phi));
+            phi->UpdateType(
+                CompileType::FromAbstractType(load->local().type()));
           }
         }
-        // Update expression stack or remove from graph.
-        if (definition->HasTemp()) {
-          ASSERT(result != NULL);
-          env->Add(result);
-        }
-        it.RemoveCurrentFromGraph();
-      } else {
-        // Not a load, store, drop or constant.
-        if (definition->HasTemp()) {
-          // Assign fresh SSA temporary and update expression stack.
-          AllocateSSAIndexes(definition);
-          env->Add(definition);
-        }
+        break;
       }
+
+      case Instruction::kStoreLocal: {
+        StoreLocalInstr* store = current->Cast<StoreLocalInstr>();
+        const intptr_t index = EnvIndex(&store->local());
+        result = store->value()->definition();
+
+        if (!FLAG_prune_dead_locals ||
+            variable_liveness->IsStoreAlive(block_entry, store)) {
+          (*env)[index] = result;
+        } else {
+          (*env)[index] = constant_dead();
+        }
+        break;
+      }
+
+      case Instruction::kDropTemps: {
+        // Drop temps from the environment.
+        DropTempsInstr* drop = current->Cast<DropTempsInstr>();
+        for (intptr_t j = 0; j < drop->num_temps(); j++) {
+          env->RemoveLast();
+        }
+        if (drop->value() != NULL) {
+          result = drop->value()->definition();
+        }
+        ASSERT((drop->value() != NULL) || !drop->HasTemp());
+        break;
+      }
+
+      case Instruction::kConstant: {
+        ConstantInstr* constant = current->Cast<ConstantInstr>();
+        if (constant->HasTemp()) {
+          result = GetConstant(constant->value());
+        }
+        break;
+      }
+
+      case Instruction::kMakeTemp: {
+        // Simply push a #null value to the expression stack.
+        result = constant_null_;
+        break;
+      }
+
+      case Instruction::kPushArgument:
+        env->Add(current->Cast<PushArgumentInstr>());
+        continue;
+
+      default:
+        // Other definitions directly go into the environment.
+        if (Definition* definition = current->AsDefinition()) {
+          if (definition->HasTemp()) {
+            // Assign fresh SSA temporary and update expression stack.
+            AllocateSSAIndexes(definition);
+            env->Add(definition);
+          }
+        }
+        continue;
     }
 
-    // 2c. Handle pushed argument.
-    PushArgumentInstr* push = current->AsPushArgument();
-    if (push != NULL) {
-      env->Add(push);
+    // Update expression stack and remove current instruction from the graph.
+    Definition* definition = current->Cast<Definition>();
+    if (definition->HasTemp()) {
+      ASSERT(result != NULL);
+      env->Add(result);
     }
+    it.RemoveCurrentFromGraph();
   }
 
   // 3. Process dominated blocks.
@@ -1390,8 +1521,8 @@ ZoneGrowableArray<BlockEntryInstr*>* FlowGraph::ComputeLoops() const {
       BlockEntryInstr* pred = block->PredecessorAt(i);
       if (block->Dominates(pred)) {
         if (FLAG_trace_optimization) {
-          OS::Print("Back edge B%" Pd " -> B%" Pd "\n", pred->block_id(),
-                    block->block_id());
+          OS::PrintErr("Back edge B%" Pd " -> B%" Pd "\n", pred->block_id(),
+                       block->block_id());
         }
         BitVector* loop_info = FindLoop(pred, block);
         // Loops that share the same loop header are treated as one loop.
@@ -1414,10 +1545,10 @@ ZoneGrowableArray<BlockEntryInstr*>* FlowGraph::ComputeLoops() const {
   if (FLAG_trace_optimization) {
     for (intptr_t i = 0; i < loop_headers->length(); ++i) {
       BlockEntryInstr* header = (*loop_headers)[i];
-      OS::Print("Loop header B%" Pd "\n", header->block_id());
+      OS::PrintErr("Loop header B%" Pd "\n", header->block_id());
       for (BitVector::Iterator it(header->loop_info()); !it.Done();
            it.Advance()) {
-        OS::Print("  B%" Pd "\n", preorder_[it.Current()]->block_id());
+        OS::PrintErr("  B%" Pd "\n", preorder_[it.Current()]->block_id());
       }
     }
   }
@@ -2204,6 +2335,144 @@ void FlowGraph::AppendExtractNthOutputForMerged(Definition* instr,
       new (Z) ExtractNthOutputInstr(new (Z) Value(instr), index, rep, cid);
   instr->ReplaceUsesWith(extract);
   InsertAfter(instr, extract, NULL, FlowGraph::kValue);
+}
+
+//
+// Static helpers for the flow graph utilities.
+//
+
+static TargetEntryInstr* NewTarget(FlowGraph* graph, Instruction* inherit) {
+  TargetEntryInstr* target = new (graph->zone())
+      TargetEntryInstr(graph->allocate_block_id(),
+                       inherit->GetBlock()->try_index(), Thread::kNoDeoptId);
+  target->InheritDeoptTarget(graph->zone(), inherit);
+  return target;
+}
+
+static JoinEntryInstr* NewJoin(FlowGraph* graph, Instruction* inherit) {
+  JoinEntryInstr* join = new (graph->zone())
+      JoinEntryInstr(graph->allocate_block_id(),
+                     inherit->GetBlock()->try_index(), Thread::kNoDeoptId);
+  join->InheritDeoptTarget(graph->zone(), inherit);
+  return join;
+}
+
+static GotoInstr* NewGoto(FlowGraph* graph,
+                          JoinEntryInstr* target,
+                          Instruction* inherit) {
+  GotoInstr* got = new (graph->zone()) GotoInstr(target, Thread::kNoDeoptId);
+  got->InheritDeoptTarget(graph->zone(), inherit);
+  return got;
+}
+
+static BranchInstr* NewBranch(FlowGraph* graph,
+                              ComparisonInstr* cmp,
+                              Instruction* inherit) {
+  BranchInstr* bra = new (graph->zone()) BranchInstr(cmp, Thread::kNoDeoptId);
+  bra->InheritDeoptTarget(graph->zone(), inherit);
+  return bra;
+}
+
+//
+// Flow graph utilities.
+//
+
+// Constructs new diamond decision at the given instruction.
+//
+//               ENTRY
+//             instruction
+//            if (compare)
+//              /   \
+//           B_TRUE B_FALSE
+//              \   /
+//               JOIN
+//
+JoinEntryInstr* FlowGraph::NewDiamond(Instruction* instruction,
+                                      Instruction* inherit,
+                                      ComparisonInstr* compare,
+                                      TargetEntryInstr** b_true,
+                                      TargetEntryInstr** b_false) {
+  BlockEntryInstr* entry = instruction->GetBlock();
+
+  TargetEntryInstr* bt = NewTarget(this, inherit);
+  TargetEntryInstr* bf = NewTarget(this, inherit);
+  JoinEntryInstr* join = NewJoin(this, inherit);
+  GotoInstr* gotot = NewGoto(this, join, inherit);
+  GotoInstr* gotof = NewGoto(this, join, inherit);
+  BranchInstr* bra = NewBranch(this, compare, inherit);
+
+  instruction->AppendInstruction(bra);
+  entry->set_last_instruction(bra);
+
+  *bra->true_successor_address() = bt;
+  *bra->false_successor_address() = bf;
+
+  bt->AppendInstruction(gotot);
+  bt->set_last_instruction(gotot);
+
+  bf->AppendInstruction(gotof);
+  bf->set_last_instruction(gotof);
+
+  // Update dominance relation incrementally.
+  for (intptr_t i = 0, n = entry->dominated_blocks().length(); i < n; ++i) {
+    join->AddDominatedBlock(entry->dominated_blocks()[i]);
+  }
+  entry->ClearDominatedBlocks();
+  entry->AddDominatedBlock(bt);
+  entry->AddDominatedBlock(bf);
+  entry->AddDominatedBlock(join);
+
+  // TODO(ajcbik): update pred/succ/ordering incrementally too.
+
+  // Return new blocks.
+  *b_true = bt;
+  *b_false = bf;
+  return join;
+}
+
+JoinEntryInstr* FlowGraph::NewDiamond(Instruction* instruction,
+                                      Instruction* inherit,
+                                      const LogicalAnd& condition,
+                                      TargetEntryInstr** b_true,
+                                      TargetEntryInstr** b_false) {
+  // First diamond for first comparison.
+  TargetEntryInstr* bt = nullptr;
+  TargetEntryInstr* bf = nullptr;
+  JoinEntryInstr* mid_point =
+      NewDiamond(instruction, inherit, condition.oper1, &bt, &bf);
+
+  // Short-circuit second comparison and connect through phi.
+  condition.oper2->InsertAfter(bt);
+  AllocateSSAIndexes(condition.oper2);
+  condition.oper2->InheritDeoptTarget(zone(), inherit);  // must inherit
+  PhiInstr* phi =
+      AddPhi(mid_point, condition.oper2, GetConstant(Bool::False()));
+  StrictCompareInstr* circuit = new (zone()) StrictCompareInstr(
+      inherit->token_pos(), Token::kEQ_STRICT, new (zone()) Value(phi),
+      new (zone()) Value(GetConstant(Bool::True())), false,
+      Thread::kNoDeoptId);  // don't inherit
+
+  // Return new blocks through the second diamond.
+  return NewDiamond(mid_point, inherit, circuit, b_true, b_false);
+}
+
+PhiInstr* FlowGraph::AddPhi(JoinEntryInstr* join,
+                            Definition* d1,
+                            Definition* d2) {
+  PhiInstr* phi = new (zone()) PhiInstr(join, 2);
+  Value* v1 = new (zone()) Value(d1);
+  Value* v2 = new (zone()) Value(d2);
+
+  AllocateSSAIndexes(phi);
+
+  phi->mark_alive();
+  phi->SetInputAt(0, v1);
+  phi->SetInputAt(1, v2);
+  d1->AddInputUse(v1);
+  d2->AddInputUse(v2);
+  join->InsertPhi(phi);
+
+  return phi;
 }
 
 }  // namespace dart

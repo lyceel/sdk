@@ -49,7 +49,7 @@ import 'dart:_internal'
 import 'dart:_native_typed_data';
 
 import 'dart:_js_names'
-    show extractKeys, mangledNames, unmangleAllIdentifiersIfPreservedAnyways;
+    show extractKeys, unmangleAllIdentifiersIfPreservedAnyways;
 
 part 'annotations.dart';
 part 'constant_map.dart';
@@ -251,9 +251,9 @@ createInvocationMirror(
 }
 
 createUnmangledInvocationMirror(
-    Symbol symbol, internalName, kind, arguments, argumentNames) {
+    Symbol symbol, internalName, kind, arguments, argumentNames, types) {
   return new JSInvocationMirror(
-      symbol, internalName, kind, arguments, argumentNames, 0);
+      symbol, internalName, kind, arguments, argumentNames, types);
 }
 
 void throwInvalidReflectionError(String memberName) {
@@ -312,30 +312,16 @@ class JSInvocationMirror implements Invocation {
   var /* String or Symbol */ _memberName;
   final String _internalName;
   final int _kind;
-  final List<Type> _typeArguments;
   final List _arguments;
   final List _namedArgumentNames;
   final int _typeArgumentCount;
-  /** Map from argument name to index in _arguments. */
-  Map<String, dynamic> _namedIndices = null;
 
   JSInvocationMirror(this._memberName, this._internalName, this._kind,
       this._arguments, this._namedArgumentNames, this._typeArgumentCount);
 
   Symbol get memberName {
     if (_memberName is Symbol) return _memberName;
-    String name = _memberName;
-    String unmangledName = mangledNames[name];
-    if (unmangledName != null) {
-      name = unmangledName.split(':')[0];
-    } else {
-      if (mangledNames[_internalName] == null) {
-        print("Warning: '$name' is used reflectively but not in MirrorsUsed. "
-            "This will break minified code.");
-      }
-    }
-    _memberName = new _symbol_dev.Symbol.unvalidated(name);
-    return _memberName;
+    return _memberName = new _symbol_dev.Symbol.unvalidated(_memberName);
   }
 
   bool get isMethod => _kind == METHOD;
@@ -348,8 +334,7 @@ class JSInvocationMirror implements Invocation {
     int start = _arguments.length - _typeArgumentCount;
     var list = <Type>[];
     for (int index = 0; index < _typeArgumentCount; index++) {
-      list.add(
-          createRuntimeType(runtimeTypeToString(_arguments[start + index])));
+      list.add(createRuntimeType(_arguments[start + index]));
     }
     return list;
   }
@@ -1258,8 +1243,13 @@ class Primitives {
     String selectorName =
         '${JS_GET_NAME(JsGetName.CALL_PREFIX)}\$$argumentCount$names';
 
-    return function.noSuchMethod(createUnmangledInvocationMirror(#call,
-        selectorName, JSInvocationMirror.METHOD, arguments, namedArgumentList));
+    return function.noSuchMethod(createUnmangledInvocationMirror(
+        #call,
+        selectorName,
+        JSInvocationMirror.METHOD,
+        arguments,
+        namedArgumentList,
+        0));
   }
 
   /**
@@ -2515,8 +2505,15 @@ abstract class Closure implements Function {
    * Caution: this function may be called when building constants.
    * TODO(ahe): Don't call this function when building constants.
    */
-  static fromTearOff(receiver, List functions, var reflectionInfo,
-      bool isStatic, jsArguments, String propertyName) {
+  static fromTearOff(
+    receiver,
+    List functions,
+    int applyTrampolineIndex,
+    var reflectionInfo,
+    bool isStatic,
+    jsArguments,
+    String propertyName,
+  ) {
     JS_EFFECT(() {
       // The functions are called here to model the calls from JS forms below.
       // The types in the JS forms in the arguments are propagated in type
@@ -2648,20 +2645,24 @@ abstract class Closure implements Function {
 
     JS('', '#[#] = #', prototype, JS_GET_NAME(JsGetName.SIGNATURE_NAME),
         signatureFunction);
-
+    var applyTrampoline = trampoline;
     JS('', '#[#] = #', prototype, callName, trampoline);
     for (int i = 1; i < functions.length; i++) {
       var stub = functions[i];
       var stubCallName = JS('String|Null', '#[#]', stub,
           JS_GET_NAME(JsGetName.CALL_NAME_PROPERTY));
       if (stubCallName != null) {
-        JS('', '#[#] = #', prototype, stubCallName,
-            isStatic ? stub : forwardCallTo(receiver, stub, isIntercepted));
+        stub = isStatic ? stub : forwardCallTo(receiver, stub, isIntercepted);
+        JS('', '#[#] = #', prototype, stubCallName, stub);
+      }
+      if (i == applyTrampolineIndex) {
+        applyTrampoline = stub;
+        JS('', '#.\$reflectionInfo = #', applyTrampoline, reflectionInfo);
       }
     }
 
     JS('', '#[#] = #', prototype, JS_GET_NAME(JsGetName.CALL_CATCH_ALL),
-        trampoline);
+        applyTrampoline);
     String reqArgProperty = JS_GET_NAME(JsGetName.REQUIRED_PARAMETER_PROPERTY);
     String defValProperty = JS_GET_NAME(JsGetName.DEFAULT_VALUES_PROPERTY);
     JS('', '#.# = #.#', prototype, reqArgProperty, function, reqArgProperty);
@@ -2938,11 +2939,12 @@ abstract class Closure implements Function {
 }
 
 /// Called from implicit method getter (aka tear-off).
-closureFromTearOff(
-    receiver, functions, reflectionInfo, isStatic, jsArguments, name) {
+closureFromTearOff(receiver, functions, applyTrampolineIndex, reflectionInfo,
+    isStatic, jsArguments, name) {
   return Closure.fromTearOff(
       receiver,
       JSArray.markFixedList(functions),
+      applyTrampolineIndex,
       reflectionInfo is List
           ? JSArray.markFixedList(reflectionInfo)
           : reflectionInfo,
@@ -3010,7 +3012,8 @@ class BoundClosure extends TearOffClosure {
 
   toString() {
     var receiver = _receiver == null ? _self : _receiver;
-    return "Closure '$_name' of ${Primitives.objectToHumanReadableString(receiver)}";
+    return "Closure '$_name' of "
+        "${Primitives.objectToHumanReadableString(receiver)}";
   }
 
   @NoInline()
@@ -3045,8 +3048,8 @@ class BoundClosure extends TearOffClosure {
   @NoSideEffects()
   static String computeFieldNamed(String fieldName) {
     var template = new BoundClosure('self', 'target', 'receiver', 'name');
-    var names = JSArray
-        .markFixedList(JS('', 'Object.getOwnPropertyNames(#)', template));
+    var names = JSArray.markFixedList(
+        JS('', 'Object.getOwnPropertyNames(#)', template));
     for (int i = 0; i < names.length; i++) {
       var name = names[i];
       if (JS('bool', '#[#] === #', template, name, fieldName)) {
@@ -3086,7 +3089,7 @@ abstract class Instantiation extends Closure {
 }
 
 /// Instantiation classes are subclasses of [Instantiation]. For now we have a
-/// few canned subclasses. Later we might generate the classes on demand.
+/// fixed number of subclasses. Later we might generate the classes on demand.
 class Instantiation1<T1> extends Instantiation {
   Instantiation1(Closure f) : super(f);
   List get _types => [T1];
@@ -3102,16 +3105,283 @@ class Instantiation3<T1, T2, T3> extends Instantiation {
   List get _types => [T1, T2, T3];
 }
 
-Instantiation instantiate1<U>(Closure f) {
-  return new Instantiation1<U>(f);
+class Instantiation4<T1, T2, T3, T4> extends Instantiation {
+  Instantiation4(Closure f) : super(f);
+  List get _types => [T1, T2, T3, T4];
 }
 
-Instantiation instantiate2<U, V>(Closure f) {
-  return new Instantiation2<U, V>(f);
+class Instantiation5<T1, T2, T3, T4, T5> extends Instantiation {
+  Instantiation5(Closure f) : super(f);
+  List get _types => [T1, T2, T3, T4, T5];
 }
 
-Instantiation instantiate3<U, V, W>(Closure f) {
-  return new Instantiation3<U, V, W>(f);
+class Instantiation6<T1, T2, T3, T4, T5, T6> extends Instantiation {
+  Instantiation6(Closure f) : super(f);
+  List get _types => [T1, T2, T3, T4, T5, T6];
+}
+
+class Instantiation7<T1, T2, T3, T4, T5, T6, T7> extends Instantiation {
+  Instantiation7(Closure f) : super(f);
+  List get _types => [T1, T2, T3, T4, T5, T6, T7];
+}
+
+class Instantiation8<T1, T2, T3, T4, T5, T6, T7, T8> extends Instantiation {
+  Instantiation8(Closure f) : super(f);
+  List get _types => [T1, T2, T3, T4, T5, T6, T7, T8];
+}
+
+class Instantiation9<T1, T2, T3, T4, T5, T6, T7, T8, T9> extends Instantiation {
+  Instantiation9(Closure f) : super(f);
+  List get _types => [T1, T2, T3, T4, T5, T6, T7, T8, T9];
+}
+
+class Instantiation10<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10>
+    extends Instantiation {
+  Instantiation10(Closure f) : super(f);
+  List get _types => [T1, T2, T3, T4, T5, T6, T7, T8, T9, T10];
+}
+
+class Instantiation11<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11>
+    extends Instantiation {
+  Instantiation11(Closure f) : super(f);
+  List get _types => [T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11];
+}
+
+class Instantiation12<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12>
+    extends Instantiation {
+  Instantiation12(Closure f) : super(f);
+  List get _types => [T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12];
+}
+
+class Instantiation13<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13>
+    extends Instantiation {
+  Instantiation13(Closure f) : super(f);
+  List get _types => [T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13];
+}
+
+class Instantiation14<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13,
+    T14> extends Instantiation {
+  Instantiation14(Closure f) : super(f);
+  List get _types =>
+      [T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14];
+}
+
+class Instantiation15<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13,
+    T14, T15> extends Instantiation {
+  Instantiation15(Closure f) : super(f);
+  List get _types =>
+      [T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15];
+}
+
+class Instantiation16<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13,
+    T14, T15, T16> extends Instantiation {
+  Instantiation16(Closure f) : super(f);
+  List get _types =>
+      [T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16];
+}
+
+class Instantiation17<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13,
+    T14, T15, T16, T17> extends Instantiation {
+  Instantiation17(Closure f) : super(f);
+  List get _types => [
+        T1,
+        T2,
+        T3,
+        T4,
+        T5,
+        T6,
+        T7,
+        T8,
+        T9,
+        T10,
+        T11,
+        T12,
+        T13,
+        T14,
+        T15,
+        T16,
+        T17
+      ];
+}
+
+class Instantiation18<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13,
+    T14, T15, T16, T17, T18> extends Instantiation {
+  Instantiation18(Closure f) : super(f);
+  List get _types => [
+        T1,
+        T2,
+        T3,
+        T4,
+        T5,
+        T6,
+        T7,
+        T8,
+        T9,
+        T10,
+        T11,
+        T12,
+        T13,
+        T14,
+        T15,
+        T16,
+        T17,
+        T18
+      ];
+}
+
+class Instantiation19<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13,
+    T14, T15, T16, T17, T18, T19> extends Instantiation {
+  Instantiation19(Closure f) : super(f);
+  List get _types => [
+        T1,
+        T2,
+        T3,
+        T4,
+        T5,
+        T6,
+        T7,
+        T8,
+        T9,
+        T10,
+        T11,
+        T12,
+        T13,
+        T14,
+        T15,
+        T16,
+        T17,
+        T18,
+        T19
+      ];
+}
+
+class Instantiation20<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13,
+    T14, T15, T16, T17, T18, T19, T20> extends Instantiation {
+  Instantiation20(Closure f) : super(f);
+  List get _types => [
+        T1,
+        T2,
+        T3,
+        T4,
+        T5,
+        T6,
+        T7,
+        T8,
+        T9,
+        T10,
+        T11,
+        T12,
+        T13,
+        T14,
+        T15,
+        T16,
+        T17,
+        T18,
+        T19,
+        T20
+      ];
+}
+
+Instantiation instantiate1<T1>(Closure f) {
+  return new Instantiation1<T1>(f);
+}
+
+Instantiation instantiate2<T1, T2>(Closure f) {
+  return new Instantiation2<T1, T2>(f);
+}
+
+Instantiation instantiate3<T1, T2, T3>(Closure f) {
+  return new Instantiation3<T1, T2, T3>(f);
+}
+
+Instantiation instantiate4<T1, T2, T3, T4>(Closure f) {
+  return new Instantiation4<T1, T2, T3, T4>(f);
+}
+
+Instantiation instantiate5<T1, T2, T3, T4, T5>(Closure f) {
+  return new Instantiation5<T1, T2, T3, T4, T5>(f);
+}
+
+Instantiation instantiate6<T1, T2, T3, T4, T5, T6>(Closure f) {
+  return new Instantiation6<T1, T2, T3, T4, T5, T6>(f);
+}
+
+Instantiation instantiate7<T1, T2, T3, T4, T5, T6, T7>(Closure f) {
+  return new Instantiation7<T1, T2, T3, T4, T5, T6, T7>(f);
+}
+
+Instantiation instantiate8<T1, T2, T3, T4, T5, T6, T7, T8>(Closure f) {
+  return new Instantiation8<T1, T2, T3, T4, T5, T6, T7, T8>(f);
+}
+
+Instantiation instantiate9<T1, T2, T3, T4, T5, T6, T7, T8, T9>(Closure f) {
+  return new Instantiation9<T1, T2, T3, T4, T5, T6, T7, T8, T9>(f);
+}
+
+Instantiation instantiate10<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10>(
+    Closure f) {
+  return new Instantiation10<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10>(f);
+}
+
+Instantiation instantiate11<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11>(
+    Closure f) {
+  return new Instantiation11<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11>(f);
+}
+
+Instantiation instantiate12<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12>(
+    Closure f) {
+  return new Instantiation12<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12>(
+      f);
+}
+
+Instantiation
+    instantiate13<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13>(
+        Closure f) {
+  return new Instantiation13<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12,
+      T13>(f);
+}
+
+Instantiation
+    instantiate14<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14>(
+        Closure f) {
+  return new Instantiation14<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12,
+      T13, T14>(f);
+}
+
+Instantiation instantiate15<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12,
+    T13, T14, T15>(Closure f) {
+  return new Instantiation15<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12,
+      T13, T14, T15>(f);
+}
+
+Instantiation instantiate16<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12,
+    T13, T14, T15, T16>(Closure f) {
+  return new Instantiation16<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12,
+      T13, T14, T15, T16>(f);
+}
+
+Instantiation instantiate17<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12,
+    T13, T14, T15, T16, T17>(Closure f) {
+  return new Instantiation17<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12,
+      T13, T14, T15, T16, T17>(f);
+}
+
+Instantiation instantiate18<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12,
+    T13, T14, T15, T16, T17, T18>(Closure f) {
+  return new Instantiation18<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12,
+      T13, T14, T15, T16, T17, T18>(f);
+}
+
+Instantiation instantiate19<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12,
+    T13, T14, T15, T16, T17, T18, T19>(Closure f) {
+  return new Instantiation19<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12,
+      T13, T14, T15, T16, T17, T18, T19>(f);
+}
+
+Instantiation instantiate20<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12,
+    T13, T14, T15, T16, T17, T18, T19, T20>(Closure f) {
+  return new Instantiation20<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12,
+      T13, T14, T15, T16, T17, T18, T19, T20>(f);
 }
 
 bool jsHasOwnProperty(var jsObject, String property) {
@@ -3447,18 +3717,37 @@ listSuperNativeTypeCast(value, property) {
 
 extractFunctionTypeObjectFrom(o) {
   var interceptor = getInterceptor(o);
+  return extractFunctionTypeObjectFromInternal(interceptor);
+}
+
+extractFunctionTypeObjectFromInternal(o) {
   var signatureName = JS_GET_NAME(JsGetName.SIGNATURE_NAME);
-  return JS('bool', '# in #', signatureName, interceptor)
-      ? JS('', '#[#]()', interceptor, signatureName)
-      : null;
+  if (JS('bool', '# in #', signatureName, o)) {
+    var signature = JS('', '#[#]', o, signatureName);
+    if (JS('bool', 'typeof # == "number"', signature)) {
+      return getType(signature);
+    } else {
+      return JS('', '#[#]()', o, signatureName);
+    }
+  }
+  return null;
 }
 
 functionTypeTest(value, functionTypeRti) {
   if (value == null) return false;
+  if (JS('bool', 'typeof # == "function"', value)) {
+    // JavaScript functions do not have an attached type, but for convenient
+    // JS-interop, we pretend they can be any function type.
+    // TODO(sra): Tighten this up to disallow matching function types with
+    // features inaccessible from JavaScript, i.e.  optional named parameters
+    // and type parameters functions.
+    // TODO(sra): If the JavaScript function was the output of `dart:js`'s
+    // `allowInterop` then we have access to the wrapped function.
+    return true;
+  }
   var functionTypeObject = extractFunctionTypeObjectFrom(value);
-  return functionTypeObject == null
-      ? false
-      : isFunctionSubtype(functionTypeObject, functionTypeRti);
+  if (functionTypeObject == null) return false;
+  return isFunctionSubtype(functionTypeObject, functionTypeRti);
 }
 
 // Declared as 'var' to avoid assignment checks.
@@ -3520,8 +3809,8 @@ class TypeErrorImplementation extends Error implements TypeError {
 
   /// Normal type error caused by a failed subtype test.
   TypeErrorImplementation(Object value, String type)
-      : message = "TypeError: ${Error.safeToString(value)}: "
-            "type '${_typeDescription(value)}' is not a subtype of type '$type'";
+      : message = "TypeError: ${Error.safeToString(value)}: type "
+            "'${_typeDescription(value)}' is not a subtype of type '$type'";
 
   TypeErrorImplementation.fromMessage(String this.message);
 
@@ -3535,8 +3824,8 @@ class CastErrorImplementation extends Error implements CastError {
 
   /// Normal cast error caused by a failed type cast.
   CastErrorImplementation(Object value, Object type)
-      : message = "CastError: ${Error.safeToString(value)}: "
-            "type '${_typeDescription(value)}' is not a subtype of type '$type'";
+      : message = "CastError: ${Error.safeToString(value)}: type "
+            "'${_typeDescription(value)}' is not a subtype of type '$type'";
 
   String toString() => message;
 }

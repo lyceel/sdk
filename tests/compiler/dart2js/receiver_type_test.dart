@@ -5,7 +5,7 @@
 import 'dart:async';
 import 'package:async_helper/async_helper.dart';
 import 'package:compiler/src/elements/entities.dart';
-import 'package:compiler/src/types/types.dart';
+import 'package:compiler/src/inferrer/typemasks/masks.dart';
 import 'package:compiler/src/universe/selector.dart';
 import 'package:compiler/src/world.dart';
 import 'package:expect/expect.dart';
@@ -28,7 +28,7 @@ Future runTest() async {
     class C extends B {
       call() {}
     }
-    """, mainSource: """
+
     main() {
       (new A())();
       new B();
@@ -44,11 +44,11 @@ Future runTest() async {
     'C': '[exact=C]',
   };
 
-  ClosedWorld closedWorld = env.closedWorld;
+  JClosedWorld closedWorld = env.jClosedWorld;
   int closureCount = 0;
   Selector callSelector = new Selector.callClosure(0);
-  closedWorld.forEachStrictSubclassOf(closedWorld.commonElements.objectClass,
-      (ClassEntity cls) {
+  closedWorld.classHierarchy.forEachStrictSubclassOf(
+      closedWorld.commonElements.objectClass, (ClassEntity cls) {
     if (cls.library.canonicalUri.scheme != 'memory') return;
 
     TypeMask mask = new TypeMask.nonNullSubclass(cls, closedWorld);

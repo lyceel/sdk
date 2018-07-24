@@ -24,6 +24,7 @@ import 'package:compiler/src/js_backend/js_backend.dart';
 import 'package:compiler/src/library_loader.dart';
 import 'package:compiler/src/null_compiler_output.dart';
 import 'package:compiler/src/options.dart' show CompilerOptions;
+import 'package:compiler/src/types/types.dart';
 import 'package:compiler/src/universe/world_impact.dart';
 import 'package:compiler/src/world.dart';
 import 'diagnostic_reporter_helper.dart';
@@ -91,7 +92,8 @@ class TestCompiler extends apiimpl.CompilerImpl {
           break;
         case 'NoSuchMethodError':
           onTest(testMarker, testType);
-          null.foo;
+          dynamic n;
+          n.foo;
           break;
         case '':
           onTest(testMarker, testType);
@@ -112,9 +114,10 @@ class TestBackend extends JavaScriptBackend {
             useNewSourceInfo: compiler.options.useNewSourceInfo);
 
   @override
-  WorldImpact codegen(CodegenWorkItem work, ClosedWorld closedWorld) {
+  WorldImpact codegen(CodegenWorkItem work, JClosedWorld closedWorld,
+      GlobalTypeInferenceResults results) {
     compiler.test('Compiler.codegen');
-    return super.codegen(work, closedWorld);
+    return super.codegen(work, closedWorld, results);
   }
 }
 
@@ -209,7 +212,8 @@ void main() {
 
   entry.enableWriteString = false;
 
-  Map _expectedExitCode({bool beforeRun: false, bool fatalWarnings: false}) {
+  Map<String, int> _expectedExitCode(
+      {bool beforeRun: false, bool fatalWarnings: false}) {
     if (beforeRun) {
       return {
         '': 0,

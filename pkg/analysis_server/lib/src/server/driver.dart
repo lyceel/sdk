@@ -7,6 +7,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:analysis_server/src/analysis_server.dart';
+import 'package:analysis_server/src/server/dev_server.dart';
 import 'package:analysis_server/src/server/diagnostic_server.dart';
 import 'package:analysis_server/src/server/http_server.dart';
 import 'package:analysis_server/src/server/stdio_server.dart';
@@ -31,6 +32,8 @@ import 'package:telemetry/telemetry.dart' as telemetry;
 /// TODO(pquitslund): replaces with a simple [ArgParser] instance
 /// when the args package supports ignoring unrecognized
 /// options/flags (https://github.com/dart-lang/args/issues/9).
+/// TODO(devoncarew): Consider removing the ability to support unrecognized
+/// flags for the analysis server.
 class CommandLineParser {
   final List<String> _knownFlags;
   final bool _alwaysIgnoreUnrecognized;
@@ -151,7 +154,7 @@ class CommandLineParser {
     }
   }
 
-  _getNextFlagIndex(args, i) {
+  int _getNextFlagIndex(List<String> args, int i) {
     for (; i < args.length; ++i) {
       if (args[i].startsWith('--')) {
         return i;
@@ -263,6 +266,16 @@ class Driver implements ServerStarter {
   static const String USE_CFE = "use-cfe";
 
   /**
+   * Whether to enable parsing via the Fasta parser.
+   */
+  static const String USE_FASTA_PARSER = "use-fasta-parser";
+
+  /**
+   * A directory to analyze in order to train an analysis server snapshot.
+   */
+  static const String TRAIN_USING = "train-using";
+
+  /**
    * The instrumentation server that is to be used by the analysis server.
    */
   InstrumentationServer instrumentationServer;
@@ -282,8 +295,6 @@ class Driver implements ServerStarter {
   SocketServer socketServer;
 
   HttpAnalysisServer httpServer;
-
-  StdioAnalysisServer stdioServer;
 
   Driver();
 
@@ -313,6 +324,7 @@ class Driver implements ServerStarter {
       analysisServerOptions.previewDart2 = true;
     }
     analysisServerOptions.useCFE = results[USE_CFE];
+    analysisServerOptions.useFastaParser = results[USE_FASTA_PARSER];
 
     telemetry.Analytics analytics = telemetry.createAnalyticsInstance(
         'UA-26406144-29', 'analysis-server',
@@ -348,6 +360,15 @@ class Driver implements ServerStarter {
       return null;
     }
 
+    String trainDirectory = results[TRAIN_USING];
+    if (trainDirectory != null) {
+      if (!FileSystemEntity.isDirectorySync(trainDirectory)) {
+        print("Training directory '$trainDirectory' not found.\n");
+        exitCode = 1;
+        return null;
+      }
+    }
+
     int port;
     bool serve_http = false;
     if (results[PORT_OPTION] != null) {
@@ -376,8 +397,8 @@ class Driver implements ServerStarter {
     } else {
       // No path to the SDK was provided.
       // Use FolderBasedDartSdk.defaultSdkDirectory, which will make a guess.
-      defaultSdkPath = FolderBasedDartSdk
-          .defaultSdkDirectory(PhysicalResourceProvider.INSTANCE)
+      defaultSdkPath = FolderBasedDartSdk.defaultSdkDirectory(
+              PhysicalResourceProvider.INSTANCE)
           .path;
     }
     // TODO(brianwilkerson) It would be nice to avoid creating an SDK that
@@ -424,24 +445,38 @@ class Driver implements ServerStarter {
         fileResolverProvider,
         packageResolverProvider);
     httpServer = new HttpAnalysisServer(socketServer);
-    stdioServer = new StdioAnalysisServer(socketServer);
 
     diagnosticServer.httpServer = httpServer;
     if (serve_http) {
       diagnosticServer.startOnPort(port);
     }
 
-    _captureExceptions(instrumentationService, () {
-      stdioServer.serveStdio().then((_) async {
+    if (trainDirectory != null) {
+      DevAnalysisServer devServer = new DevAnalysisServer(socketServer);
+      devServer.processDirectories([trainDirectory]).then((int exitCode) async {
         if (serve_http) {
           httpServer.close();
         }
         await instrumentationService.shutdown();
-        exit(0);
+        exit(exitCode);
       });
-    },
-        print:
-            results[INTERNAL_PRINT_TO_CONSOLE] ? null : httpServer.recordPrint);
+    } else {
+      _captureExceptions(instrumentationService, () {
+        StdioAnalysisServer stdioServer = new StdioAnalysisServer(socketServer);
+        stdioServer.serveStdio().then((_) async {
+          // TODO(brianwilkerson) Determine whether this await is necessary.
+          await null;
+          if (serve_http) {
+            httpServer.close();
+          }
+          await instrumentationService.shutdown();
+          exit(0);
+        });
+      },
+          print: results[INTERNAL_PRINT_TO_CONSOLE]
+              ? null
+              : httpServer.recordPrint);
+    }
 
     return socketServer.analysisServer;
   }
@@ -505,12 +540,13 @@ class Driver implements ServerStarter {
         negatable: false);
     parser.addOption(NEW_ANALYSIS_DRIVER_LOG,
         help: "set a destination for the new analysis driver's log");
-    if (telemetry.SHOW_ANALYTICS_UI) {
-      parser.addFlag(ANALYTICS_FLAG,
-          help: 'enable or disable sending analytics information to Google');
-    }
+    parser.addFlag(ANALYTICS_FLAG,
+        help: 'enable or disable sending analytics information to Google',
+        hide: !telemetry.SHOW_ANALYTICS_UI);
     parser.addFlag(SUPPRESS_ANALYTICS_FLAG,
-        negatable: false, help: 'suppress analytics for this session');
+        negatable: false,
+        help: 'suppress analytics for this session',
+        hide: !telemetry.SHOW_ANALYTICS_UI);
     parser.addOption(PORT_OPTION,
         help: "the http diagnostic port on which the server provides"
             " status and performance information");
@@ -535,6 +571,11 @@ class Driver implements ServerStarter {
     parser.addFlag(PREVIEW_DART2, help: "Enable the Dart 2.0 preview");
     parser.addFlag(USE_CFE,
         help: "Enable the Dart 2.0 Common Front End implementation");
+    parser.addFlag(USE_FASTA_PARSER,
+        help: "Whether to enable parsing via the Fasta parser");
+    parser.addOption(TRAIN_USING,
+        help: "Pass in a directory to analyze for purposes of training an "
+            "analysis server snapshot.");
 
     return parser;
   }

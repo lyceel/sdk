@@ -17,7 +17,6 @@ import '../kernel/env.dart';
 import '../options.dart';
 import '../ssa/type_builder.dart';
 import '../universe/selector.dart';
-import '../world.dart';
 import 'elements.dart';
 import 'closure_visitors.dart';
 import 'locals.dart';
@@ -75,7 +74,7 @@ class KernelClosureAnalysis {
 // TODO(efortuna): Change inheritance hierarchy so that the
 // ClosureConversionTask doesn't inherit from ClosureTask because it's just a
 // glorified timer.
-class KernelClosureConversionTask extends ClosureConversionTask<ir.Node> {
+class KernelClosureConversionTask extends ClosureConversionTask {
   final KernelToElementMapForBuilding _elementMap;
   final GlobalLocalsMap _globalLocalsMap;
   final CompilerOptions _options;
@@ -98,16 +97,6 @@ class KernelClosureConversionTask extends ClosureConversionTask<ir.Node> {
   KernelClosureConversionTask(
       Measurer measurer, this._elementMap, this._globalLocalsMap, this._options)
       : super(measurer);
-
-  /// The combined steps of generating our intermediate representation of
-  /// closures that need to be rewritten and generating the element model.
-  /// Ultimately these two steps will be split apart with the second step
-  /// happening later in compilation just before codegen. These steps are
-  /// combined here currently to provide a consistent interface to the rest of
-  /// the compiler until we are ready to separate these phases.
-  @override
-  void convertClosures(Iterable<MemberEntity> processedEntities,
-      ClosedWorldRefiner closedWorldRefiner) {}
 
   void _updateScopeBasedOnRtiNeed(KernelScopeInfo scope, ClosureRtiNeed rtiNeed,
       MemberEntity outermostEntity) {
@@ -207,6 +196,13 @@ class KernelClosureConversionTask extends ClosureConversionTask<ir.Node> {
           case VariableUseKind.mapLiteral:
             if (rtiNeed.classNeedsTypeArguments(
                 _elementMap.commonElements.mapLiteralClass)) {
+              return true;
+            }
+            break;
+          case VariableUseKind.instantiationTypeArgument:
+            // TODO(johnniwinther): Use the static type of the expression.
+            if (rtiNeed.instantiationNeedsTypeArguments(
+                null, usage.instantiation.typeArguments.length)) {
               return true;
             }
             break;
@@ -439,6 +435,9 @@ enum VariableUseKind {
 
   /// A type variable in a field type.
   fieldType,
+
+  /// A type argument of an generic instantiation.
+  instantiationTypeArgument,
 }
 
 class VariableUse {
@@ -447,21 +446,25 @@ class VariableUse {
   final ir.TreeNode /*ir.FunctionDeclaration|ir.FunctionExpression*/
       localFunction;
   final ir.MethodInvocation invocation;
+  final ir.Instantiation instantiation;
 
   const VariableUse._simple(this.kind)
       : this.member = null,
         this.localFunction = null,
-        this.invocation = null;
+        this.invocation = null,
+        this.instantiation = null;
 
   VariableUse.memberParameter(this.member)
       : this.kind = VariableUseKind.memberParameter,
         this.localFunction = null,
-        this.invocation = null;
+        this.invocation = null,
+        this.instantiation = null;
 
   VariableUse.localParameter(this.localFunction)
       : this.kind = VariableUseKind.localParameter,
         this.member = null,
-        this.invocation = null {
+        this.invocation = null,
+        this.instantiation = null {
     assert(localFunction is ir.FunctionDeclaration ||
         localFunction is ir.FunctionExpression);
   }
@@ -469,12 +472,14 @@ class VariableUse {
   VariableUse.memberReturnType(this.member)
       : this.kind = VariableUseKind.memberReturnType,
         this.localFunction = null,
-        this.invocation = null;
+        this.invocation = null,
+        this.instantiation = null;
 
   VariableUse.localReturnType(this.localFunction)
       : this.kind = VariableUseKind.localReturnType,
         this.member = null,
-        this.invocation = null {
+        this.invocation = null,
+        this.instantiation = null {
     assert(localFunction is ir.FunctionDeclaration ||
         localFunction is ir.FunctionExpression);
   }
@@ -482,24 +487,34 @@ class VariableUse {
   VariableUse.constructorTypeArgument(this.member)
       : this.kind = VariableUseKind.constructorTypeArgument,
         this.localFunction = null,
-        this.invocation = null;
+        this.invocation = null,
+        this.instantiation = null;
 
   VariableUse.staticTypeArgument(this.member)
       : this.kind = VariableUseKind.staticTypeArgument,
         this.localFunction = null,
-        this.invocation = null;
+        this.invocation = null,
+        this.instantiation = null;
 
   VariableUse.instanceTypeArgument(this.invocation)
       : this.kind = VariableUseKind.instanceTypeArgument,
         this.member = null,
-        this.localFunction = null;
+        this.localFunction = null,
+        this.instantiation = null;
 
   VariableUse.localTypeArgument(this.localFunction, this.invocation)
       : this.kind = VariableUseKind.localTypeArgument,
-        this.member = null {
+        this.member = null,
+        this.instantiation = null {
     assert(localFunction is ir.FunctionDeclaration ||
         localFunction is ir.FunctionExpression);
   }
+
+  VariableUse.instantiationTypeArgument(this.instantiation)
+      : this.kind = VariableUseKind.instantiationTypeArgument,
+        this.member = null,
+        this.localFunction = null,
+        this.invocation = null;
 
   static const VariableUse explicit =
       const VariableUse._simple(VariableUseKind.explicit);
@@ -523,7 +538,8 @@ class VariableUse {
       kind.hashCode * 11 +
       member.hashCode * 13 +
       localFunction.hashCode * 17 +
-      invocation.hashCode * 19;
+      invocation.hashCode * 19 +
+      instantiation.hashCode * 23;
 
   bool operator ==(other) {
     if (identical(this, other)) return true;
@@ -531,11 +547,13 @@ class VariableUse {
     return kind == other.kind &&
         member == other.member &&
         localFunction == other.localFunction &&
-        invocation == other.invocation;
+        invocation == other.invocation &&
+        instantiation == other.instantiation;
   }
 
   String toString() => 'VariableUse(kind=$kind,member=$member,'
-      'localFunction=$localFunction,invocation=$invocation)';
+      'localFunction=$localFunction,invocation=$invocation,'
+      'instantiation=$instantiation)';
 }
 
 class KernelScopeInfo {
@@ -1161,4 +1179,7 @@ abstract class ClosureRtiNeed {
   bool localFunctionNeedsSignature(ir.Node node);
 
   bool selectorNeedsTypeArguments(Selector selector);
+
+  bool instantiationNeedsTypeArguments(
+      DartType functionType, int typeArgumentCount);
 }

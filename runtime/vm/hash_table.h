@@ -323,7 +323,7 @@ class HashTable : public ValueObject {
     const intptr_t num25 = NumLT25Collisions();
     const intptr_t num_more = NumGT25Collisions();
     // clang-format off
-    OS::Print("Stats for %s table :\n"
+    OS::PrintErr("Stats for %s table :\n"
               " Size of table = %" Pd ",Number of Occupied entries = %" Pd "\n"
               " Number of Grows = %" Pd "\n"
               " Number of lookups with < 5 collisions = %" Pd "\n"
@@ -543,6 +543,12 @@ class HashMap : public BaseIterTable {
       *present = (entry != -1);
     }
     return (entry == -1) ? Object::null() : BaseIterTable::GetPayload(entry, 0);
+  }
+  template <typename Key>
+  RawObject* GetOrDie(const Key& key) const {
+    intptr_t entry = BaseIterTable::FindKey(key);
+    if (entry == -1) UNREACHABLE();
+    return BaseIterTable::GetPayload(entry, 0);
   }
   bool UpdateOrInsert(const Object& key, const Object& value) const {
     EnsureCapacity();

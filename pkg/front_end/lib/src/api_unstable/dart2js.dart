@@ -47,7 +47,7 @@ InitializedCompilerState initializeCompiler(
     ..librariesSpecificationUri = librariesSpecificationUri
     ..packagesFileUri = packagesFileUri;
 
-  ProcessedOptions processedOpts = new ProcessedOptions(options, false, []);
+  ProcessedOptions processedOpts = new ProcessedOptions(options, []);
 
   return new InitializedCompilerState(options, processedOpts);
 }
@@ -78,5 +78,9 @@ Future<Component> compile(InitializedCompilerState state, bool verbose,
     return compilerResult;
   });
 
+  // Remove these parameters from [options] - they are no longer needed and
+  // retain state from the previous compile. (http://dartbug.com/33708)
+  options.onError = null;
+  options.fileSystem = null;
   return compilerResult?.component;
 }

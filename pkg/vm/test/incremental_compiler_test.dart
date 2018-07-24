@@ -103,14 +103,8 @@ main() {
         }
       });
 
-      vm.stderr
-          .transform(utf8.decoder)
-          .transform(splitter)
-          .toList()
-          .then((err) {
-        print(err.join('\n'));
-        expect(err.isEmpty, isTrue,
-            reason: "Should be no errors, but got ${err.join('\n')}");
+      vm.stderr.transform(utf8.decoder).transform(splitter).listen((String s) {
+        print("vm stderr: $s");
       });
 
       String portLine = await portLineCompleter.future;

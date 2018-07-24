@@ -30,11 +30,11 @@ class NativeTypeSet {
 
   // Abstract types that may be implemented by both native and non-native
   // classes.
-  final _extensibleTypes = new HashSet<Class>.identity();
+  final _extensibleTypes = HashSet<Class>.identity();
 
   // Concrete native types.
-  final _nativeTypes = new HashSet<Class>.identity();
-  final _pendingLibraries = new HashSet<Library>.identity();
+  final _nativeTypes = HashSet<Class>.identity();
+  final _pendingLibraries = HashSet<Library>.identity();
 
   NativeTypeSet(this.coreTypes, this.constants) {
     // First, core types:
@@ -83,7 +83,7 @@ class NativeTypeSet {
   void _addExtensionTypesForLibrary(String library, List<String> classNames) {
     var sdk = coreTypes.index;
     for (var className in classNames) {
-      _addExtensionType(sdk.getClass(library, className), true);
+      _addExtensionType(sdk.getClass(library, className));
     }
   }
 

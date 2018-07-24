@@ -113,6 +113,11 @@ namespace dart {
 //    Jump to the given target. Target is specified as offset from the PC of the
 //    jump instruction.
 //
+//  - JumpIfNoAsserts target
+//
+//    Jump to the given target if assertions are not enabled.
+//    Target is specified as offset from the PC of the jump instruction.
+//
 //  - Return R; ReturnTOS
 //
 //    Return to the caller using either a value from the given register or a
@@ -165,10 +170,10 @@ namespace dart {
 //    with arguments SP[-(1+ArgC)], ..., SP[-1].
 //    The ICData indicates whether the first argument is a type argument vector.
 //
-//  - NativeCall ArgA, ArgB, ArgC
+//  - NativeCall D
 //
-//    Invoke native function at pool[ArgB] with argc_tag at pool[ArgC] using
-//    wrapper at pool[ArgA].
+//    Invoke native function described by array at pool[D].
+//    array[0] is wrapper, array[1] is function, array[2] is argc_tag.
 //
 //  - PushPolymorphicInstanceCall ArgC, D
 //
@@ -619,9 +624,11 @@ namespace dart {
 //    arguments SP[-2] using SubtypeTestCache PP[D].
 //    If A is 1, then the instance may be a Smi.
 //
+//    Instance remains on stack. Other arguments are consumed.
+//
 //  - AssertSubtype
 //
-//    Assers that one type is a subtype of another.  Throws a TypeError
+//    Assert that one type is a subtype of another.  Throws a TypeError
 //    otherwise.  The stack has the following arguments on it:
 //
 //        SP[-4]  instantiator type args
@@ -772,6 +779,7 @@ namespace dart {
   V(DropR,                                 A, num, ___, ___)                   \
   V(Drop,                                  A, num, ___, ___)                   \
   V(Jump,                                  T, tgt, ___, ___)                   \
+  V(JumpIfNoAsserts,                       T, tgt, ___, ___)                   \
   V(Return,                                A, reg, ___, ___)                   \
   V(ReturnTOS,                             0, ___, ___, ___)                   \
   V(Move,                                A_X, reg, xeg, ___)                   \
@@ -791,7 +799,7 @@ namespace dart {
   V(InstanceCall2Opt,                    A_D, num, num, ___)                   \
   V(PushPolymorphicInstanceCall,         A_D, num, num, ___)                   \
   V(PushPolymorphicInstanceCallByRange,  A_D, num, num, ___)                   \
-  V(NativeCall,                        A_B_C, num, num, num)                   \
+  V(NativeCall,                            D, lit, ___, ___)                   \
   V(OneByteStringFromCharCode,           A_X, reg, xeg, ___)                   \
   V(StringToCharCode,                    A_X, reg, xeg, ___)                   \
   V(AddTOS,                                0, ___, ___, ___)                   \
@@ -1073,7 +1081,14 @@ class KernelBytecode {
     }
   }
 
+  static const uint8_t kNativeCallToGrowableListArgc = 2;
+
   DART_FORCE_INLINE static uint8_t DecodeArgc(KBCInstr call) {
+    if (DecodeOpcode(call) == KernelBytecode::kNativeCall) {
+      // The only NativeCall redirecting to a bytecode function is the call
+      // to new _GrowableList<E>(0).
+      return kNativeCallToGrowableListArgc;
+    }
     ASSERT(IsCallOpcode(call));
     return (call >> 8) & 0xFF;
   }

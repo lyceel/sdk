@@ -7,7 +7,6 @@ import 'package:kernel/ast.dart'
 
 import 'package:test/test.dart'
     show
-        contains,
         expect,
         greaterThan,
         group,
@@ -22,9 +21,6 @@ import 'package:test/test.dart'
 
 import 'package:front_end/src/api_prototype/front_end.dart'
     show CompilerOptions;
-
-import 'package:front_end/src/fasta/deprecated_problems.dart'
-    show deprecated_InputError;
 
 import 'package:front_end/src/fasta/fasta_codes.dart' show messageMissingMain;
 
@@ -90,22 +86,6 @@ main() {
       await compileScript('a() => print("hi");', options: options);
       expect(errors.first.message, messageMissingMain.message);
     });
-
-    // TODO(ahe): This test is wrong at least with respect to expecting that
-    // [deprecated_InputError] leaks through the API. Furthermore, the default
-    // behavior should be to recover from errors, as this is the most important
-    // use case we have.
-    test('default error handler throws on errors', () async {
-      var options = new CompilerOptions();
-      var exceptionThrown = false;
-      try {
-        await compileScript('a() => print("hi");', options: options);
-      } on deprecated_InputError catch (e) {
-        exceptionThrown = true;
-        expect('${e.error}', contains("Compilation aborted"));
-      }
-      expect(exceptionThrown, isTrue);
-    }, skip: true /* Issue 30194 */);
 
     test('generated program contains source-info', () async {
       var component = await compileScript('a() => print("hi"); main() {}',
@@ -177,26 +157,9 @@ main() {
       expect(errors, isEmpty);
     });
 
-    test('compiler by default is hermetic', () async {
+    test('compiler is not hermetic by default', () async {
       var errors = [];
       var options = new CompilerOptions()..onError = (e) => errors.add(e);
-      var sources = {
-        'a.dart': 'import "b.dart"; a() => print("hi");',
-        'b.dart': ''
-      };
-      await compileUnit(['a.dart'], sources, options: options);
-      expect(errors.first.message, contains('Invalid access'));
-      errors.clear();
-
-      await compileUnit(['a.dart', 'b.dart'], sources, options: options);
-      expect(errors, isEmpty);
-    });
-
-    test('chaseDependencies=true removes hermetic restriction', () async {
-      var errors = [];
-      var options = new CompilerOptions()
-        ..chaseDependencies = true
-        ..onError = (e) => errors.add(e);
       await compileUnit([
         'a.dart'
       ], {

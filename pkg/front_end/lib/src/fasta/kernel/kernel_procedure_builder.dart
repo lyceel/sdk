@@ -60,9 +60,9 @@ import '../source/source_library_builder.dart' show SourceLibraryBuilder;
 
 import 'kernel_builder.dart'
     show
-        Builder,
         ClassBuilder,
         ConstructorReferenceBuilder,
+        Declaration,
         FormalParameterBuilder,
         KernelFormalParameterBuilder,
         KernelLibraryBuilder,
@@ -74,7 +74,8 @@ import 'kernel_builder.dart'
         TypeVariableBuilder,
         isRedirectingGenerativeConstructorImplementation;
 
-import 'kernel_shadow_ast.dart' show ShadowProcedure, ShadowVariableDeclaration;
+import 'kernel_shadow_ast.dart'
+    show ShadowProcedure, VariableDeclarationJudgment;
 
 import 'redirecting_factory_body.dart' show RedirectingFactoryBody;
 
@@ -169,7 +170,7 @@ abstract class KernelFunctionBuilder
       // Do this after building the parameters, since the diet listener
       // assumes that parameters are built, even if illegal in number.
       VariableDeclaration parameter =
-          new ShadowVariableDeclaration("#synthetic", 0);
+          new VariableDeclarationJudgment("#synthetic", 0);
       result.positionalParameters.clear();
       result.positionalParameters.add(parameter);
       parameter.parent = result;
@@ -217,7 +218,7 @@ abstract class KernelFunctionBuilder
   Member build(SourceLibraryBuilder library);
 
   void becomeNative(Loader loader) {
-    Builder constructor = loader.getNativeAnnotation();
+    Declaration constructor = loader.getNativeAnnotation();
     Arguments arguments =
         new Arguments(<Expression>[new StringLiteral(nativeMethodName)]);
     Expression annotation;
@@ -244,7 +245,7 @@ abstract class KernelFunctionBuilder
     return true;
   }
 
-  void reportPatchMismatch(Builder patch) {
+  void reportPatchMismatch(Declaration patch) {
     library.addCompileTimeError(messagePatchDeclarationMismatch,
         patch.charOffset, noLength, patch.fileUri, context: [
       messagePatchDeclarationOrigin.withLocation(fileUri, charOffset, noLength)
@@ -270,12 +271,14 @@ class KernelProcedureBuilder extends KernelFunctionBuilder {
       List<FormalParameterBuilder> formals,
       ProcedureKind kind,
       KernelLibraryBuilder compilationUnit,
+      int startCharOffset,
       int charOffset,
       this.charOpenParenOffset,
       int charEndOffset,
       [String nativeMethodName])
       : procedure = new ShadowProcedure(null, kind, null, returnType == null,
             fileUri: compilationUnit?.fileUri)
+          ..startFileOffset = startCharOffset
           ..fileOffset = charOffset
           ..fileEndOffset = charEndOffset,
         super(metadata, modifiers, returnType, name, typeVariables, formals,
@@ -366,6 +369,7 @@ class KernelProcedureBuilder extends KernelFunctionBuilder {
     // TODO(ahe): restore file-offset once we track both origin and patch file
     // URIs. See https://github.com/dart-lang/sdk/issues/31579
     origin.procedure.fileUri = fileUri;
+    origin.procedure.startFileOffset = procedure.startFileOffset;
     origin.procedure.fileOffset = procedure.fileOffset;
     origin.procedure.fileEndOffset = procedure.fileEndOffset;
     origin.procedure.annotations
@@ -385,7 +389,7 @@ class KernelProcedureBuilder extends KernelFunctionBuilder {
   }
 
   @override
-  void applyPatch(Builder patch) {
+  void applyPatch(Declaration patch) {
     if (patch is KernelProcedureBuilder) {
       if (checkPatch(patch)) {
         patch.actualOrigin = this;
@@ -419,11 +423,13 @@ class KernelConstructorBuilder extends KernelFunctionBuilder {
       List<TypeVariableBuilder> typeVariables,
       List<FormalParameterBuilder> formals,
       KernelLibraryBuilder compilationUnit,
+      int startCharOffset,
       int charOffset,
       this.charOpenParenOffset,
       int charEndOffset,
       [String nativeMethodName])
       : constructor = new Constructor(null, fileUri: compilationUnit?.fileUri)
+          ..startFileOffset = startCharOffset
           ..fileOffset = charOffset
           ..fileEndOffset = charEndOffset,
         super(metadata, modifiers, returnType, name, typeVariables, formals,
@@ -444,15 +450,33 @@ class KernelConstructorBuilder extends KernelFunctionBuilder {
     return isRedirectingGenerativeConstructorImplementation(constructor);
   }
 
+  bool get isEligibleForTopLevelInference {
+    if (formals != null) {
+      for (var formal in formals) {
+        if (formal.type == null && formal.hasThis) return true;
+      }
+    }
+    return false;
+  }
+
   Constructor build(SourceLibraryBuilder library) {
     if (constructor.name == null) {
       constructor.function = buildFunction(library);
       constructor.function.parent = constructor;
       constructor.function.fileOffset = charOpenParenOffset;
       constructor.function.fileEndOffset = constructor.fileEndOffset;
+      constructor.function.typeParameters = const <TypeParameter>[];
       constructor.isConst = isConst;
       constructor.isExternal = isExternal;
       constructor.name = new Name(name, library.target);
+    }
+    if (!library.disableTypeInference && isEligibleForTopLevelInference) {
+      for (KernelFormalParameterBuilder formal in formals) {
+        if (formal.type == null && formal.hasThis) {
+          formal.declaration.type = null;
+        }
+      }
+      library.loader.typeInferenceEngine.toBeInferred[constructor] = library;
     }
     return constructor;
   }
@@ -536,6 +560,7 @@ class KernelConstructorBuilder extends KernelFunctionBuilder {
     // TODO(ahe): restore file-offset once we track both origin and patch file
     // URIs. See https://github.com/dart-lang/sdk/issues/31579
     origin.constructor.fileUri = fileUri;
+    origin.constructor.startFileOffset = constructor.startFileOffset;
     origin.constructor.fileOffset = constructor.fileOffset;
     origin.constructor.fileEndOffset = constructor.fileEndOffset;
     origin.constructor.annotations
@@ -556,7 +581,7 @@ class KernelConstructorBuilder extends KernelFunctionBuilder {
   }
 
   @override
-  void applyPatch(Builder patch) {
+  void applyPatch(Declaration patch) {
     if (patch is KernelConstructorBuilder) {
       if (checkPatch(patch)) {
         patch.actualOrigin = this;
@@ -579,6 +604,7 @@ class KernelRedirectingFactoryBuilder extends KernelProcedureBuilder {
       List<TypeVariableBuilder> typeVariables,
       List<FormalParameterBuilder> formals,
       KernelLibraryBuilder compilationUnit,
+      int startCharOffset,
       int charOffset,
       int charOpenParenOffset,
       int charEndOffset,
@@ -593,6 +619,7 @@ class KernelRedirectingFactoryBuilder extends KernelProcedureBuilder {
             formals,
             ProcedureKind.Factory,
             compilationUnit,
+            startCharOffset,
             charOffset,
             charOpenParenOffset,
             charEndOffset,

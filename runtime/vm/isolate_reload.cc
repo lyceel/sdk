@@ -4,11 +4,12 @@
 
 #include "vm/isolate_reload.h"
 
-#include "vm/become.h"
 #include "vm/bit_vector.h"
 #include "vm/compiler/jit/compiler.h"
 #include "vm/dart_api_impl.h"
 #include "vm/hash_table.h"
+#include "vm/heap/become.h"
+#include "vm/heap/safepoint.h"
 #include "vm/isolate.h"
 #include "vm/kernel_isolate.h"
 #include "vm/kernel_loader.h"
@@ -17,7 +18,6 @@
 #include "vm/object_store.h"
 #include "vm/parser.h"
 #include "vm/runtime_entry.h"
-#include "vm/safepoint.h"
 #include "vm/service_event.h"
 #include "vm/stack_frame.h"
 #include "vm/thread.h"
@@ -525,17 +525,14 @@ class ResourceHolder : ValueObject {
   ~ResourceHolder() { delete (resource_); }
 };
 
-static void ReleaseFetchedBytes(uint8_t* buffer) {
-  free(buffer);
-}
-
 static void AcceptCompilation(Thread* thread) {
   TransitionVMToNative transition(thread);
-  if (KernelIsolate::AcceptCompilation().status !=
-      Dart_KernelCompilationStatus_Ok) {
-    FATAL(
+  Dart_KernelCompilationResult result = KernelIsolate::AcceptCompilation();
+  if (result.status != Dart_KernelCompilationStatus_Ok) {
+    FATAL1(
         "An error occurred in the CFE while accepting the most recent"
-        " compilation results.");
+        " compilation results: %s",
+        result.error);
   }
 }
 
@@ -592,16 +589,19 @@ void IsolateReloadContext::Reload(bool force_reload,
     // compiled, so ReadKernelFromFile returns NULL.
     kernel_program.set(kernel::Program::ReadFromFile(root_script_url));
     if (kernel_program.get() == NULL) {
-      TransitionVMToNative transition(thread);
       Dart_SourceFile* modified_scripts = NULL;
       intptr_t modified_scripts_count = 0;
 
       FindModifiedSources(thread, force_reload, &modified_scripts,
                           &modified_scripts_count);
 
-      Dart_KernelCompilationResult retval = KernelIsolate::CompileToKernel(
-          root_lib_url.ToCString(), NULL, 0, modified_scripts_count,
-          modified_scripts, true, NULL);
+      Dart_KernelCompilationResult retval;
+      {
+        TransitionVMToNative transition(thread);
+        retval = KernelIsolate::CompileToKernel(root_lib_url.ToCString(), NULL,
+                                                0, modified_scripts_count,
+                                                modified_scripts, true, NULL);
+      }
 
       if (retval.status != Dart_KernelCompilationStatus_Ok) {
         TIR_Print("---- LOAD FAILED, ABORTING RELOAD\n");
@@ -614,11 +614,10 @@ void IsolateReloadContext::Reload(bool force_reload,
         return;
       }
       did_kernel_compilation = true;
-      kernel_program.set(kernel::Program::ReadFromBuffer(
-          retval.kernel, retval.kernel_size, true));
+      kernel_program.set(
+          kernel::Program::ReadFromBuffer(retval.kernel, retval.kernel_size));
     }
 
-    kernel_program.get()->set_release_buffer_callback(ReleaseFetchedBytes);
     kernel::KernelLoader::FindModifiedLibraries(kernel_program.get(), I,
                                                 modified_libs_, force_reload);
   } else {
@@ -696,6 +695,12 @@ void IsolateReloadContext::Reload(bool force_reload,
     if (!tmp.IsError()) {
       Library& lib = Library::Handle(thread->zone());
       lib ^= tmp.raw();
+      // If main method disappeared or were not there to begin with then
+      // KernelLoader will return null. In this case lookup library by
+      // URL.
+      if (lib.IsNull()) {
+        lib = Library::LookupLibrary(thread, root_lib_url);
+      }
       isolate()->object_store()->set_root_library(lib);
       FinalizeLoading();
       result = Object::null();
@@ -854,7 +859,7 @@ void IsolateReloadContext::ReportOnJSON(JSONStream* stream) {
 
 void IsolateReloadContext::EnsuredUnoptimizedCodeForStack() {
   TIMELINE_SCOPE(EnsuredUnoptimizedCodeForStack);
-  StackFrameIterator it(StackFrameIterator::kDontValidateFrames,
+  StackFrameIterator it(ValidationPolicy::kDontValidateFrames,
                         Thread::Current(),
                         StackFrameIterator::kNoCrossThreadIteration);
 
@@ -1025,7 +1030,7 @@ void IsolateReloadContext::FindModifiedSources(
     return;
   }
 
-  *modified_sources = new (zone_) Dart_SourceFile[*count];
+  *modified_sources = zone_->Alloc<Dart_SourceFile>(*count);
   for (intptr_t i = 0; i < *count; ++i) {
     (*modified_sources)[i].uri = modified_sources_uris[i];
     (*modified_sources)[i].source = NULL;

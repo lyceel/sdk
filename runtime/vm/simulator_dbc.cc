@@ -152,10 +152,6 @@ class SimulatorHelpers {
           case kMintCid:
             return (static_cast<RawMint*>(lhs)->ptr()->value_ ==
                     static_cast<RawMint*>(rhs)->ptr()->value_);
-
-          case kBigintCid:
-            return (DLRT_BigintCompare(static_cast<RawBigint*>(lhs),
-                                       static_cast<RawBigint*>(rhs)) == 0);
         }
       }
     }
@@ -1222,7 +1218,7 @@ RawObject* Simulator::Call(const Code& code,
   uint16_t rA;  // A component of the currently executing op.
 
   if (fp_ == NULL) {
-    fp_ = reinterpret_cast<RawObject**>(stack_);
+    fp_ = reinterpret_cast<RawObject**>(stack_base_);
   }
 
   // Save current VM tag and mark thread as executing Dart code.
@@ -1247,7 +1243,7 @@ RawObject* Simulator::Call(const Code& code,
   //       | arg 1       | -+
   //       | function    | -+
   //       | code        |  |
-  //       | callee PC   | ---> special fake PC marking an entry frame
+  //       | caller PC   | ---> special fake PC marking an entry frame
   //  SP > | fp_         |  |
   //  FP > | ........... |   > normal Dart frame (see stack_frame_dbc.h)
   //                        |
@@ -2671,7 +2667,7 @@ RawObject* Simulator::Call(const Code& code,
   }
 
   {
-    BYTECODE(StoreFieldTOS, A_D);
+    BYTECODE(StoreFieldTOS, __D);
     const uint16_t offset_in_words = rD;
     RawInstance* instance = reinterpret_cast<RawInstance*>(SP[-1]);
     RawObject* value = reinterpret_cast<RawObject*>(SP[0]);
@@ -3060,8 +3056,9 @@ RawObject* Simulator::Call(const Code& code,
       SP[4] = args[2];  // function type args
       SP[5] = args[4];  // name
       SP[6] = cache;
-      Exit(thread, FP, SP + 7, pc);
-      NativeArguments native_args(thread, 6, SP + 1, SP - 4);
+      SP[7] = Smi::New(kTypeCheckFromInline);
+      Exit(thread, FP, SP + 8, pc);
+      NativeArguments native_args(thread, 7, SP + 1, SP - 4);
       INVOKE_RUNTIME(DRT_TypeCheck, native_args);
     }
 
@@ -3950,6 +3947,8 @@ void Simulator::JumpToFrame(uword pc, uword sp, uword fp, Thread* thread) {
     RawObject* raw_exception = thread->active_exception();
     RawObject* raw_stacktrace = thread->active_stacktrace();
     ASSERT(raw_exception != Object::null());
+    thread->set_active_exception(Object::null_object());
+    thread->set_active_stacktrace(Object::null_object());
     special_[kExceptionSpecialIndex] = raw_exception;
     special_[kStackTraceSpecialIndex] = raw_stacktrace;
     pc_ = thread->resume_pc();

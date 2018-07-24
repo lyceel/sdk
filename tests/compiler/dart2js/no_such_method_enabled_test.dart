@@ -3,6 +3,7 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import 'package:async_helper/async_helper.dart';
+import 'package:compiler/src/commandline_options.dart';
 import 'package:compiler/src/common_elements.dart';
 import 'package:compiler/src/compiler.dart';
 import 'package:compiler/src/elements/entities.dart';
@@ -209,8 +210,9 @@ main() {
     for (NoSuchMethodTest test in TESTS) {
       print('---- testing -------------------------------------------------');
       print(test.code);
-      CompilationResult result =
-          await runCompiler(memorySourceFiles: {'main.dart': test.code});
+      CompilationResult result = await runCompiler(
+          memorySourceFiles: {'main.dart': test.code},
+          options: [Flags.noPreviewDart2]);
       Compiler compiler = result.compiler;
       checkTest(compiler, test);
     }
@@ -229,7 +231,7 @@ checkTest(Compiler compiler, NoSuchMethodTest test) {
   NoSuchMethodResolver resolver = registry.internalResolverForTesting;
   FunctionEntity ObjectNSM = frontendEnvironment.lookupClassMember(
       compiler.frontendStrategy.commonElements.objectClass, 'noSuchMethod');
-  ClosedWorld backendClosedWorld = compiler.backendClosedWorldForTesting;
+  JClosedWorld backendClosedWorld = compiler.backendClosedWorldForTesting;
   ElementEnvironment backendEnvironment = backendClosedWorld.elementEnvironment;
   NoSuchMethodDataImpl data = backendClosedWorld.noSuchMethodData;
 

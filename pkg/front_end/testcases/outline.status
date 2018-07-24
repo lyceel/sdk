@@ -247,9 +247,11 @@ inference/unsafe_block_closure_inference_method_call_implicit_type_param: Fail
 inference/unsafe_block_closure_inference_method_call_no_type_param: Fail
 inference/void_return_type_subtypes_dynamic: Fail
 
-rasta/issue_000032: Fail
 rasta/issue_000045: Fail
 rasta/issue_000046: Fail
 rasta/issue_000047: Fail
 rasta/native_is_illegal: Pass # Issue 29763
 rasta/type_with_parse_error: Fail
+
+instantiate_to_bound/body_typedef_super_bounded_type: Fail # Issue 33444
+instantiate_to_bound/typedef_super_bounded_type: Fail # Issue 33444

@@ -5,11 +5,13 @@
 /**
  * Defines the element model. The element model describes the semantic (as
  * opposed to syntactic) structure of Dart code. The syntactic structure of the
- * code is modeled by the [AST structure](../ast/ast.dart).
+ * code is modeled by the [AST
+ * structure](../analyzer.dart.ast.ast/analyzer.dart.ast.ast-library.html).
  *
  * The element model consists of two closely related kinds of objects: elements
  * (instances of a subclass of [Element]) and types. This library defines the
- * elements, the types are defined in [type.dart](type.dart).
+ * elements, the types are defined in
+ * [type.dart](../dart_element_type/dart_element_type-library.html).
  *
  * Generally speaking, an element represents something that is declared in the
  * code, such as a class, method, or variable. Elements are organized in a tree
@@ -1367,6 +1369,17 @@ abstract class FunctionTypeAliasElement
 
   @override
   TypeAlias computeNode();
+
+  /// Produces the function type resulting from instantiating this typedef with
+  /// the given type arguments.
+  ///
+  /// Note that for a generic typedef, this instantiates the typedef, not the
+  /// generic function type associated with it.  So, for example, if the typedef
+  /// is:
+  ///     typedef F<T> = void Function<U>(T, U);
+  /// then a single type argument should be provided, and it will be substituted
+  /// for T.
+  FunctionType instantiate(List<DartType> argumentTypes);
 }
 
 /**
@@ -1956,6 +1969,7 @@ abstract class PropertyInducingElement implements VariableElement {
    * Return the propagated type of this variable, or `null` if type propagation
    * has not been performed, for example because the variable is not final.
    */
+  @deprecated
   DartType get propagatedType;
 
   /**

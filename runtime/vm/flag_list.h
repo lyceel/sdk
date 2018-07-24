@@ -26,6 +26,12 @@
 #define USING_PRODUCT false
 #endif
 
+#if defined(DART_PRECOMPILED_RUNTIME)
+constexpr bool kDartPrecompiledRuntime = true;
+#else
+constexpr bool kDartPrecompiledRuntime = false;
+#endif
+
 // List of all flags in the VM.
 // Flags can be one of three categories:
 // * P roduct flags: Can be set in any of the deployment modes, including in
@@ -83,9 +89,6 @@
     "Report error for bad overrides. Ignored in strong mode.")                 \
   R(error_on_bad_type, false, bool, false,                                     \
     "Report error for malformed types.")                                       \
-  P(external_max_size, int, (kWordSize <= 4) ? 512 : 1024,                     \
-    "Max total size of external allocations in MB, or 0 for unlimited,"        \
-    "e.g: --external_max_size=1024 allows up to 1024MB of externals")          \
   P(fields_may_be_reset, bool, false,                                          \
     "Don't optimize away static field initialization")                         \
   C(force_clone_compiler_objects, false, false, bool, false,                   \
@@ -104,7 +107,6 @@
   P(interpret_irregexp, bool, USING_DBC, "Use irregexp bytecode interpreter")  \
   P(lazy_dispatchers, bool, true, "Generate dispatchers lazily")               \
   P(link_natives_lazily, bool, false, "Link native calls lazily")              \
-  P(limit_ints_to_64_bits, bool, true, "Truncate integers to 64 bits")         \
   C(load_deferred_eagerly, true, true, bool, false,                            \
     "Load deferred libraries eagerly.")                                        \
   R(log_marker_tasks, false, bool, false,                                      \
@@ -116,10 +118,11 @@
     "Maximum number of polymorphic check, otherwise it is megamorphic.")       \
   P(max_equality_polymorphic_checks, int, 32,                                  \
     "Maximum number of polymorphic checks in equality operator,")              \
-  P(new_gen_ext_limit, int, 64,                                                \
-    "maximum total external size (MB) in new gen before triggering GC")        \
-  P(new_gen_semi_max_size, int, (kWordSize <= 4) ? 16 : 32,                    \
+  P(new_gen_semi_max_size, int, (kWordSize <= 4) ? 8 : 16,                     \
     "Max size of new gen semi space in MB")                                    \
+  P(new_gen_semi_initial_size, int, (kWordSize <= 4) ? 1 : 2,                  \
+    "Initial size of new gen semi space in MB")                                \
+  P(omit_strong_type_checks, bool, false, "Omit strong mode type checks.")     \
   P(optimization_counter_threshold, int, 30000,                                \
     "Function's usage-counter value before it is optimized, -1 means never")   \
   P(old_gen_heap_size, int, kDefaultMaxOldGenHeapSize,                         \
@@ -195,6 +198,9 @@
     "Enables heap verification before GC.")                                    \
   D(verify_gc_contains, bool, false,                                           \
     "Enables verification of address contains during GC.")                     \
-  D(verify_on_transition, bool, false, "Verify on dart <==> VM.")
+  D(verify_on_transition, bool, false, "Verify on dart <==> VM.")              \
+  P(enable_slow_path_sharing, bool, true, "Enable sharing of slow-path code.") \
+  P(shared_slow_path_triggers_gc, bool, false,                                 \
+    "TESTING: slow-path triggers a GC.")
 
 #endif  // RUNTIME_VM_FLAG_LIST_H_

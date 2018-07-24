@@ -2,14 +2,13 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-#include <set>
-
 #include "vm/compiler/aot/precompiler.h"
 #include "vm/compiler/frontend/kernel_to_il.h"
 
 #include "vm/compiler/backend/il.h"
 #include "vm/compiler/backend/il_printer.h"
 #include "vm/compiler/frontend/kernel_binary_flowgraph.h"
+#include "vm/compiler/frontend/kernel_translation_helper.h"
 #include "vm/compiler/frontend/prologue_builder.h"
 #include "vm/compiler/jit/compiler.h"
 #include "vm/kernel_loader.h"
@@ -28,67 +27,6 @@ namespace kernel {
 #define H (translation_helper_)
 #define T (type_translator_)
 #define I Isolate::Current()
-
-ActiveTypeParametersScope::ActiveTypeParametersScope(ActiveClass* active_class,
-                                                     const Function& innermost,
-                                                     Zone* Z)
-    : active_class_(active_class), saved_(*active_class) {
-  active_class_->enclosing = &innermost;
-
-  intptr_t num_params = 0;
-
-  Function& f = Function::Handle(Z);
-  TypeArguments& f_params = TypeArguments::Handle(Z);
-  for (f = innermost.raw(); f.parent_function() != Object::null();
-       f = f.parent_function()) {
-    f_params = f.type_parameters();
-    num_params += f_params.Length();
-  }
-  if (num_params == 0) return;
-
-  TypeArguments& params =
-      TypeArguments::Handle(Z, TypeArguments::New(num_params));
-
-  intptr_t index = num_params;
-  for (f = innermost.raw(); f.parent_function() != Object::null();
-       f = f.parent_function()) {
-    f_params = f.type_parameters();
-    for (intptr_t j = f_params.Length() - 1; j >= 0; --j) {
-      params.SetTypeAt(--index, AbstractType::Handle(Z, f_params.TypeAt(j)));
-    }
-  }
-
-  active_class_->local_type_parameters = &params;
-}
-
-ActiveTypeParametersScope::ActiveTypeParametersScope(
-    ActiveClass* active_class,
-    const Function* function,
-    const TypeArguments& new_params,
-    Zone* Z)
-    : active_class_(active_class), saved_(*active_class) {
-  active_class_->enclosing = function;
-
-  if (new_params.IsNull()) return;
-
-  const TypeArguments* old_params = active_class->local_type_parameters;
-  const intptr_t old_param_count =
-      old_params == NULL ? 0 : old_params->Length();
-  const TypeArguments& extended_params = TypeArguments::Handle(
-      Z, TypeArguments::New(old_param_count + new_params.Length()));
-
-  intptr_t index = 0;
-  for (intptr_t i = 0; i < old_param_count; ++i) {
-    extended_params.SetTypeAt(
-        index++, AbstractType::ZoneHandle(Z, old_params->TypeAt(i)));
-  }
-  for (intptr_t i = 0; i < new_params.Length(); ++i) {
-    extended_params.SetTypeAt(
-        index++, AbstractType::ZoneHandle(Z, new_params.TypeAt(i)));
-  }
-
-  active_class_->local_type_parameters = &extended_params;
-}
 
 Fragment& Fragment::operator+=(const Fragment& other) {
   if (entry == NULL) {
@@ -137,679 +75,7 @@ Fragment operator<<(const Fragment& fragment, Instruction* next) {
   return result;
 }
 
-intptr_t ActiveClass::MemberTypeParameterCount(Zone* zone) {
-  ASSERT(member != NULL);
-  if (member->IsFactory()) {
-    TypeArguments& class_types =
-        TypeArguments::Handle(zone, klass->type_parameters());
-    return class_types.Length();
-  } else if (member->IsMethodExtractor()) {
-    Function& extracted =
-        Function::Handle(zone, member->extracted_method_closure());
-    TypeArguments& function_types =
-        TypeArguments::Handle(zone, extracted.type_parameters());
-    return function_types.Length();
-  } else {
-    TypeArguments& function_types =
-        TypeArguments::Handle(zone, member->type_parameters());
-    return function_types.Length();
-  }
-}
-
-TranslationHelper::TranslationHelper(Thread* thread)
-    : thread_(thread),
-      zone_(thread->zone()),
-      isolate_(thread->isolate()),
-      allocation_space_(thread->IsMutatorThread() ? Heap::kNew : Heap::kOld),
-      string_offsets_(TypedData::Handle(Z)),
-      string_data_(TypedData::Handle(Z)),
-      canonical_names_(TypedData::Handle(Z)),
-      metadata_payloads_(TypedData::Handle(Z)),
-      metadata_mappings_(TypedData::Handle(Z)),
-      constants_(Array::Handle(Z)) {}
-
-void TranslationHelper::Reset() {
-  string_offsets_ = TypedData::null();
-  string_data_ = TypedData::null();
-  canonical_names_ = TypedData::null();
-  metadata_payloads_ = TypedData::null();
-  metadata_mappings_ = TypedData::null();
-  constants_ = Array::null();
-}
-
-void TranslationHelper::InitFromScript(const Script& script) {
-  const KernelProgramInfo& info =
-      KernelProgramInfo::Handle(Z, script.kernel_program_info());
-  if (info.IsNull()) {
-    // If there is no kernel data associated with the script, then
-    // do not bother initializing!.
-    // This can happen with few special functions like
-    // NoSuchMethodDispatcher and InvokeFieldDispatcher.
-    return;
-  }
-  InitFromKernelProgramInfo(info);
-}
-
-void TranslationHelper::InitFromKernelProgramInfo(
-    const KernelProgramInfo& info) {
-  SetStringOffsets(TypedData::Handle(Z, info.string_offsets()));
-  SetStringData(TypedData::Handle(Z, info.string_data()));
-  SetCanonicalNames(TypedData::Handle(Z, info.canonical_names()));
-  SetMetadataPayloads(TypedData::Handle(Z, info.metadata_payloads()));
-  SetMetadataMappings(TypedData::Handle(Z, info.metadata_mappings()));
-  SetConstants(Array::Handle(Z, info.constants()));
-}
-
-void TranslationHelper::SetStringOffsets(const TypedData& string_offsets) {
-  ASSERT(string_offsets_.IsNull());
-  string_offsets_ = string_offsets.raw();
-}
-
-void TranslationHelper::SetStringData(const TypedData& string_data) {
-  ASSERT(string_data_.IsNull());
-  string_data_ = string_data.raw();
-}
-
-void TranslationHelper::SetCanonicalNames(const TypedData& canonical_names) {
-  ASSERT(canonical_names_.IsNull());
-  canonical_names_ = canonical_names.raw();
-}
-
-void TranslationHelper::SetMetadataPayloads(
-    const TypedData& metadata_payloads) {
-  ASSERT(metadata_payloads_.IsNull());
-  metadata_payloads_ = metadata_payloads.raw();
-}
-
-void TranslationHelper::SetMetadataMappings(
-    const TypedData& metadata_mappings) {
-  ASSERT(metadata_mappings_.IsNull());
-  metadata_mappings_ = metadata_mappings.raw();
-}
-
-void TranslationHelper::SetConstants(const Array& constants) {
-  ASSERT(constants_.IsNull());
-  constants_ = constants.raw();
-}
-
-intptr_t TranslationHelper::StringOffset(StringIndex index) const {
-  return string_offsets_.GetUint32(index << 2);
-}
-
-intptr_t TranslationHelper::StringSize(StringIndex index) const {
-  return StringOffset(StringIndex(index + 1)) - StringOffset(index);
-}
-
-uint8_t TranslationHelper::CharacterAt(StringIndex string_index,
-                                       intptr_t index) {
-  ASSERT(index < StringSize(string_index));
-  return string_data_.GetUint8(StringOffset(string_index) + index);
-}
-
-uint8_t* TranslationHelper::StringBuffer(StringIndex string_index) const {
-  // Though this implementation appears like it could be replaced by
-  // string_data_.DataAddr(StringOffset(string_index)), it can't quite.  If the
-  // last string in the string table is a zero length string, then the latter
-  // expression will try to return the address that is one past the backing
-  // store of the string_data_ table.  Though this is safe in C++ as long as the
-  // address is not dereferenced, it will trigger the assert in
-  // TypedData::DataAddr.
-  ASSERT(Thread::Current()->no_safepoint_scope_depth() > 0);
-  return reinterpret_cast<uint8_t*>(string_data_.DataAddr(0)) +
-         StringOffset(string_index);
-}
-
-bool TranslationHelper::StringEquals(StringIndex string_index,
-                                     const char* other) {
-  intptr_t length = strlen(other);
-  if (length != StringSize(string_index)) return false;
-
-  NoSafepointScope no_safepoint;
-  return memcmp(StringBuffer(string_index), other, length) == 0;
-}
-
-NameIndex TranslationHelper::CanonicalNameParent(NameIndex name) {
-  // Canonical names are pairs of 4-byte parent and string indexes, so the size
-  // of an entry is 8 bytes.  The parent is biased: 0 represents the root name
-  // and N+1 represents the name with index N.
-  return NameIndex(static_cast<intptr_t>(canonical_names_.GetUint32(8 * name)) -
-                   1);
-}
-
-StringIndex TranslationHelper::CanonicalNameString(NameIndex name) {
-  return StringIndex(canonical_names_.GetUint32((8 * name) + 4));
-}
-
-bool TranslationHelper::IsAdministrative(NameIndex name) {
-  // Administrative names start with '@'.
-  StringIndex name_string = CanonicalNameString(name);
-  return (StringSize(name_string) > 0) && (CharacterAt(name_string, 0) == '@');
-}
-
-bool TranslationHelper::IsPrivate(NameIndex name) {
-  // Private names start with '_'.
-  StringIndex name_string = CanonicalNameString(name);
-  return (StringSize(name_string) > 0) && (CharacterAt(name_string, 0) == '_');
-}
-
-bool TranslationHelper::IsRoot(NameIndex name) {
-  return name == -1;
-}
-
-bool TranslationHelper::IsLibrary(NameIndex name) {
-  // Libraries are the only canonical names with the root as their parent.
-  return !IsRoot(name) && IsRoot(CanonicalNameParent(name));
-}
-
-bool TranslationHelper::IsClass(NameIndex name) {
-  // Classes have the library as their parent and are not an administrative
-  // name starting with @.
-  return !IsAdministrative(name) && !IsRoot(name) &&
-         IsLibrary(CanonicalNameParent(name));
-}
-
-bool TranslationHelper::IsMember(NameIndex name) {
-  return IsConstructor(name) || IsField(name) || IsProcedure(name);
-}
-
-bool TranslationHelper::IsField(NameIndex name) {
-  // Fields with private names have the import URI of the library where they are
-  // visible as the parent and the string "@fields" as the parent's parent.
-  // Fields with non-private names have the string "@fields' as the parent.
-  if (IsRoot(name)) {
-    return false;
-  }
-  NameIndex kind = CanonicalNameParent(name);
-  if (IsPrivate(name)) {
-    kind = CanonicalNameParent(kind);
-  }
-  return StringEquals(CanonicalNameString(kind), "@fields");
-}
-
-bool TranslationHelper::IsConstructor(NameIndex name) {
-  // Constructors with private names have the import URI of the library where
-  // they are visible as the parent and the string "@constructors" as the
-  // parent's parent.  Constructors with non-private names have the string
-  // "@constructors" as the parent.
-  if (IsRoot(name)) {
-    return false;
-  }
-  NameIndex kind = CanonicalNameParent(name);
-  if (IsPrivate(name)) {
-    kind = CanonicalNameParent(kind);
-  }
-  return StringEquals(CanonicalNameString(kind), "@constructors");
-}
-
-bool TranslationHelper::IsProcedure(NameIndex name) {
-  return IsMethod(name) || IsGetter(name) || IsSetter(name) || IsFactory(name);
-}
-
-bool TranslationHelper::IsMethod(NameIndex name) {
-  // Methods with private names have the import URI of the library where they
-  // are visible as the parent and the string "@methods" as the parent's parent.
-  // Methods with non-private names have the string "@methods" as the parent.
-  if (IsRoot(name)) {
-    return false;
-  }
-  NameIndex kind = CanonicalNameParent(name);
-  if (IsPrivate(name)) {
-    kind = CanonicalNameParent(kind);
-  }
-  return StringEquals(CanonicalNameString(kind), "@methods");
-}
-
-bool TranslationHelper::IsGetter(NameIndex name) {
-  // Getters with private names have the import URI of the library where they
-  // are visible as the parent and the string "@getters" as the parent's parent.
-  // Getters with non-private names have the string "@getters" as the parent.
-  if (IsRoot(name)) {
-    return false;
-  }
-  NameIndex kind = CanonicalNameParent(name);
-  if (IsPrivate(name)) {
-    kind = CanonicalNameParent(kind);
-  }
-  return StringEquals(CanonicalNameString(kind), "@getters");
-}
-
-bool TranslationHelper::IsSetter(NameIndex name) {
-  // Setters with private names have the import URI of the library where they
-  // are visible as the parent and the string "@setters" as the parent's parent.
-  // Setters with non-private names have the string "@setters" as the parent.
-  if (IsRoot(name)) {
-    return false;
-  }
-  NameIndex kind = CanonicalNameParent(name);
-  if (IsPrivate(name)) {
-    kind = CanonicalNameParent(kind);
-  }
-  return StringEquals(CanonicalNameString(kind), "@setters");
-}
-
-bool TranslationHelper::IsFactory(NameIndex name) {
-  // Factories with private names have the import URI of the library where they
-  // are visible as the parent and the string "@factories" as the parent's
-  // parent.  Factories with non-private names have the string "@factories" as
-  // the parent.
-  if (IsRoot(name)) {
-    return false;
-  }
-  NameIndex kind = CanonicalNameParent(name);
-  if (IsPrivate(name)) {
-    kind = CanonicalNameParent(kind);
-  }
-  return StringEquals(CanonicalNameString(kind), "@factories");
-}
-
-NameIndex TranslationHelper::EnclosingName(NameIndex name) {
-  ASSERT(IsField(name) || IsConstructor(name) || IsProcedure(name));
-  NameIndex enclosing = CanonicalNameParent(CanonicalNameParent(name));
-  if (IsPrivate(name)) {
-    enclosing = CanonicalNameParent(enclosing);
-  }
-  ASSERT(IsLibrary(enclosing) || IsClass(enclosing));
-  return enclosing;
-}
-
-RawInstance* TranslationHelper::Canonicalize(const Instance& instance) {
-  if (instance.IsNull()) return instance.raw();
-
-  const char* error_str = NULL;
-  RawInstance* result = instance.CheckAndCanonicalize(thread(), &error_str);
-  if (result == Object::null()) {
-    ReportError("Invalid const object %s", error_str);
-  }
-  return result;
-}
-
-const String& TranslationHelper::DartString(const char* content,
-                                            Heap::Space space) {
-  return String::ZoneHandle(Z, String::New(content, space));
-}
-
-String& TranslationHelper::DartString(StringIndex string_index,
-                                      Heap::Space space) {
-  intptr_t length = StringSize(string_index);
-  uint8_t* buffer = Z->Alloc<uint8_t>(length);
-  {
-    NoSafepointScope no_safepoint;
-    memmove(buffer, StringBuffer(string_index), length);
-  }
-  return String::ZoneHandle(Z, String::FromUTF8(buffer, length, space));
-}
-
-String& TranslationHelper::DartString(const uint8_t* utf8_array,
-                                      intptr_t len,
-                                      Heap::Space space) {
-  return String::ZoneHandle(Z, String::FromUTF8(utf8_array, len, space));
-}
-
-const String& TranslationHelper::DartSymbolPlain(const char* content) const {
-  return String::ZoneHandle(Z, Symbols::New(thread_, content));
-}
-
-String& TranslationHelper::DartSymbolPlain(StringIndex string_index) const {
-  intptr_t length = StringSize(string_index);
-  uint8_t* buffer = Z->Alloc<uint8_t>(length);
-  {
-    NoSafepointScope no_safepoint;
-    memmove(buffer, StringBuffer(string_index), length);
-  }
-  String& result =
-      String::ZoneHandle(Z, Symbols::FromUTF8(thread_, buffer, length));
-  return result;
-}
-
-const String& TranslationHelper::DartSymbolObfuscate(
-    const char* content) const {
-  String& result = String::ZoneHandle(Z, Symbols::New(thread_, content));
-  if (I->obfuscate()) {
-    Obfuscator obfuscator(thread_, String::Handle(Z));
-    result = obfuscator.Rename(result, true);
-  }
-  return result;
-}
-
-String& TranslationHelper::DartSymbolObfuscate(StringIndex string_index) const {
-  intptr_t length = StringSize(string_index);
-  uint8_t* buffer = Z->Alloc<uint8_t>(length);
-  {
-    NoSafepointScope no_safepoint;
-    memmove(buffer, StringBuffer(string_index), length);
-  }
-  String& result =
-      String::ZoneHandle(Z, Symbols::FromUTF8(thread_, buffer, length));
-  if (I->obfuscate()) {
-    Obfuscator obfuscator(thread_, String::Handle(Z));
-    result = obfuscator.Rename(result, true);
-  }
-  return result;
-}
-
-const String& TranslationHelper::DartClassName(NameIndex kernel_class) {
-  ASSERT(IsClass(kernel_class));
-  String& name = DartString(CanonicalNameString(kernel_class));
-  return ManglePrivateName(CanonicalNameParent(kernel_class), &name);
-}
-
-const String& TranslationHelper::DartConstructorName(NameIndex constructor) {
-  ASSERT(IsConstructor(constructor));
-  return DartFactoryName(constructor);
-}
-
-const String& TranslationHelper::DartProcedureName(NameIndex procedure) {
-  ASSERT(IsProcedure(procedure));
-  if (IsSetter(procedure)) {
-    return DartSetterName(procedure);
-  } else if (IsGetter(procedure)) {
-    return DartGetterName(procedure);
-  } else if (IsFactory(procedure)) {
-    return DartFactoryName(procedure);
-  } else {
-    return DartMethodName(procedure);
-  }
-}
-
-const String& TranslationHelper::DartSetterName(NameIndex setter) {
-  return DartSetterName(CanonicalNameParent(setter),
-                        CanonicalNameString(setter));
-}
-
-const String& TranslationHelper::DartSetterName(NameIndex parent,
-                                                StringIndex setter) {
-  // The names flowing into [setter] are coming from the Kernel file:
-  //   * user-defined setters: `fieldname=`
-  //   * property-set expressions:  `fieldname`
-  //
-  // The VM uses `get:fieldname` and `set:fieldname`.
-  //
-  // => In order to be consistent, we remove the `=` always and adopt the VM
-  //    conventions.
-  intptr_t size = StringSize(setter);
-  ASSERT(size > 0);
-  if (CharacterAt(setter, size - 1) == '=') {
-    --size;
-  }
-  uint8_t* buffer = Z->Alloc<uint8_t>(size);
-  {
-    NoSafepointScope no_safepoint;
-    memmove(buffer, StringBuffer(setter), size);
-  }
-  String& name =
-      String::ZoneHandle(Z, String::FromUTF8(buffer, size, allocation_space_));
-  ManglePrivateName(parent, &name);
-  name = Field::SetterSymbol(name);
-  return name;
-}
-
-const String& TranslationHelper::DartGetterName(NameIndex getter) {
-  return DartGetterName(CanonicalNameParent(getter),
-                        CanonicalNameString(getter));
-}
-
-const String& TranslationHelper::DartGetterName(NameIndex parent,
-                                                StringIndex getter) {
-  String& name = DartString(getter);
-  ManglePrivateName(parent, &name);
-  name = Field::GetterSymbol(name);
-  return name;
-}
-
-const String& TranslationHelper::DartFieldName(NameIndex field) {
-  return DartFieldName(CanonicalNameParent(field), CanonicalNameString(field));
-}
-
-const String& TranslationHelper::DartFieldName(NameIndex parent,
-                                               StringIndex field) {
-  String& name = DartString(field);
-  return ManglePrivateName(parent, &name);
-}
-
-const String& TranslationHelper::DartMethodName(NameIndex method) {
-  return DartMethodName(CanonicalNameParent(method),
-                        CanonicalNameString(method));
-}
-
-const String& TranslationHelper::DartMethodName(NameIndex parent,
-                                                StringIndex method) {
-  String& name = DartString(method);
-  return ManglePrivateName(parent, &name);
-}
-
-const String& TranslationHelper::DartFactoryName(NameIndex factory) {
-  ASSERT(IsConstructor(factory) || IsFactory(factory));
-  GrowableHandlePtrArray<const String> pieces(Z, 3);
-  pieces.Add(DartClassName(EnclosingName(factory)));
-  pieces.Add(Symbols::Dot());
-  // [DartMethodName] will mangle the name.
-  pieces.Add(DartMethodName(factory));
-  return String::ZoneHandle(Z, Symbols::FromConcatAll(thread_, pieces));
-}
-
-RawLibrary* TranslationHelper::LookupLibraryByKernelLibrary(
-    NameIndex kernel_library) {
-  // We only use the string and don't rely on having any particular parent.
-  // This ASSERT is just a sanity check.
-  ASSERT(IsLibrary(kernel_library) ||
-         IsAdministrative(CanonicalNameParent(kernel_library)));
-  const String& library_name =
-      DartSymbolPlain(CanonicalNameString(kernel_library));
-  ASSERT(!library_name.IsNull());
-  RawLibrary* library = Library::LookupLibrary(thread_, library_name);
-  ASSERT(library != Object::null());
-  return library;
-}
-
-RawClass* TranslationHelper::LookupClassByKernelClass(NameIndex kernel_class) {
-  ASSERT(IsClass(kernel_class));
-  const String& class_name = DartClassName(kernel_class);
-  NameIndex kernel_library = CanonicalNameParent(kernel_class);
-  Library& library =
-      Library::Handle(Z, LookupLibraryByKernelLibrary(kernel_library));
-  RawClass* klass = library.LookupClassAllowPrivate(class_name);
-
-  ASSERT(klass != Object::null());
-  return klass;
-}
-
-RawField* TranslationHelper::LookupFieldByKernelField(NameIndex kernel_field) {
-  ASSERT(IsField(kernel_field));
-  NameIndex enclosing = EnclosingName(kernel_field);
-
-  Class& klass = Class::Handle(Z);
-  if (IsLibrary(enclosing)) {
-    Library& library =
-        Library::Handle(Z, LookupLibraryByKernelLibrary(enclosing));
-    klass = library.toplevel_class();
-  } else {
-    ASSERT(IsClass(enclosing));
-    klass = LookupClassByKernelClass(enclosing);
-  }
-  RawField* field = klass.LookupFieldAllowPrivate(
-      DartSymbolObfuscate(CanonicalNameString(kernel_field)));
-  ASSERT(field != Object::null());
-  return field;
-}
-
-RawFunction* TranslationHelper::LookupStaticMethodByKernelProcedure(
-    NameIndex procedure) {
-  const String& procedure_name = DartProcedureName(procedure);
-
-  // The parent is either a library or a class (in which case the procedure is a
-  // static method).
-  NameIndex enclosing = EnclosingName(procedure);
-  if (IsLibrary(enclosing)) {
-    Library& library =
-        Library::Handle(Z, LookupLibraryByKernelLibrary(enclosing));
-    RawFunction* function = library.LookupFunctionAllowPrivate(procedure_name);
-    ASSERT(function != Object::null());
-    return function;
-  } else {
-    ASSERT(IsClass(enclosing));
-    Class& klass = Class::Handle(Z, LookupClassByKernelClass(enclosing));
-    Function& function = Function::ZoneHandle(
-        Z, klass.LookupFunctionAllowPrivate(procedure_name));
-    ASSERT(!function.IsNull());
-
-    // TODO(27590): We can probably get rid of this after no longer using
-    // core libraries from the source.
-    if (function.IsRedirectingFactory()) {
-      ClassFinalizer::ResolveRedirectingFactory(klass, function);
-      function = function.RedirectionTarget();
-    }
-    return function.raw();
-  }
-}
-
-RawFunction* TranslationHelper::LookupConstructorByKernelConstructor(
-    NameIndex constructor) {
-  ASSERT(IsConstructor(constructor));
-  Class& klass =
-      Class::Handle(Z, LookupClassByKernelClass(EnclosingName(constructor)));
-  return LookupConstructorByKernelConstructor(klass, constructor);
-}
-
-RawFunction* TranslationHelper::LookupConstructorByKernelConstructor(
-    const Class& owner,
-    NameIndex constructor) {
-  ASSERT(IsConstructor(constructor));
-  RawFunction* function =
-      owner.LookupConstructorAllowPrivate(DartConstructorName(constructor));
-  ASSERT(function != Object::null());
-  return function;
-}
-
-RawFunction* TranslationHelper::LookupConstructorByKernelConstructor(
-    const Class& owner,
-    StringIndex constructor_name) {
-  GrowableHandlePtrArray<const String> pieces(Z, 3);
-  pieces.Add(DartString(String::Handle(owner.Name()).ToCString(), Heap::kOld));
-  pieces.Add(Symbols::Dot());
-  String& name = DartString(constructor_name);
-  pieces.Add(ManglePrivateName(Library::Handle(owner.library()), &name));
-
-  String& new_name =
-      String::ZoneHandle(Z, Symbols::FromConcatAll(thread_, pieces));
-  RawFunction* function = owner.LookupConstructorAllowPrivate(new_name);
-  ASSERT(function != Object::null());
-  return function;
-}
-
-Type& TranslationHelper::GetCanonicalType(const Class& klass) {
-  ASSERT(!klass.IsNull());
-  // Note that if cls is _Closure, the returned type will be _Closure,
-  // and not the signature type.
-  Type& type = Type::ZoneHandle(Z, klass.CanonicalType());
-  if (!type.IsNull()) {
-    return type;
-  }
-  type = Type::New(klass, TypeArguments::Handle(Z, klass.type_parameters()),
-                   klass.token_pos());
-  if (klass.is_type_finalized()) {
-    type ^= ClassFinalizer::FinalizeType(klass, type);
-    // Note that the receiver type may now be a malbounded type.
-    klass.SetCanonicalType(type);
-  }
-  return type;
-}
-
-void TranslationHelper::ReportError(const char* format, ...) {
-  const Script& null_script = Script::Handle(Z);
-
-  va_list args;
-  va_start(args, format);
-  Report::MessageV(Report::kError, null_script, TokenPosition::kNoSource,
-                   Report::AtLocation, format, args);
-  va_end(args);
-  UNREACHABLE();
-}
-
-void TranslationHelper::ReportError(const Script& script,
-                                    const TokenPosition position,
-                                    const char* format,
-                                    ...) {
-  va_list args;
-  va_start(args, format);
-  Report::MessageV(Report::kError, script, position, Report::AtLocation, format,
-                   args);
-  va_end(args);
-  UNREACHABLE();
-}
-
-void TranslationHelper::ReportError(const Error& prev_error,
-                                    const char* format,
-                                    ...) {
-  const Script& null_script = Script::Handle(Z);
-
-  va_list args;
-  va_start(args, format);
-  Report::LongJumpV(prev_error, null_script, TokenPosition::kNoSource, format,
-                    args);
-  va_end(args);
-  UNREACHABLE();
-}
-
-void TranslationHelper::ReportError(const Error& prev_error,
-                                    const Script& script,
-                                    const TokenPosition position,
-                                    const char* format,
-                                    ...) {
-  va_list args;
-  va_start(args, format);
-  Report::LongJumpV(prev_error, script, position, format, args);
-  va_end(args);
-  UNREACHABLE();
-}
-
-String& TranslationHelper::ManglePrivateName(NameIndex parent,
-                                             String* name_to_modify,
-                                             bool symbolize,
-                                             bool obfuscate) {
-  if (name_to_modify->Length() >= 1 && name_to_modify->CharAt(0) == '_') {
-    const Library& library =
-        Library::Handle(Z, LookupLibraryByKernelLibrary(parent));
-    *name_to_modify = library.PrivateName(*name_to_modify);
-    if (obfuscate && I->obfuscate()) {
-      const String& library_key = String::Handle(library.private_key());
-      Obfuscator obfuscator(thread_, library_key);
-      *name_to_modify = obfuscator.Rename(*name_to_modify);
-    }
-  } else if (symbolize) {
-    *name_to_modify = Symbols::New(thread_, *name_to_modify);
-    if (obfuscate && I->obfuscate()) {
-      const String& library_key = String::Handle();
-      Obfuscator obfuscator(thread_, library_key);
-      *name_to_modify = obfuscator.Rename(*name_to_modify);
-    }
-  }
-  return *name_to_modify;
-}
-
-String& TranslationHelper::ManglePrivateName(const Library& library,
-                                             String* name_to_modify,
-                                             bool symbolize,
-                                             bool obfuscate) {
-  if (name_to_modify->Length() >= 1 && name_to_modify->CharAt(0) == '_') {
-    *name_to_modify = library.PrivateName(*name_to_modify);
-    if (obfuscate && I->obfuscate()) {
-      const String& library_key = String::Handle(library.private_key());
-      Obfuscator obfuscator(thread_, library_key);
-      *name_to_modify = obfuscator.Rename(*name_to_modify);
-    }
-  } else if (symbolize) {
-    *name_to_modify = Symbols::New(thread_, *name_to_modify);
-    if (obfuscate && I->obfuscate()) {
-      const String& library_key = String::Handle();
-      Obfuscator obfuscator(thread_, library_key);
-      *name_to_modify = obfuscator.Rename(*name_to_modify);
-    }
-  }
-  return *name_to_modify;
-}
-
 FlowGraphBuilder::FlowGraphBuilder(
-    intptr_t kernel_offset,
     ParsedFunction* parsed_function,
     const ZoneGrowableArray<const ICData*>& ic_data_array,
     ZoneGrowableArray<intptr_t>* context_level_array,
@@ -823,7 +89,6 @@ FlowGraphBuilder::FlowGraphBuilder(
       translation_helper_(Thread::Current()),
       thread_(translation_helper_.thread()),
       zone_(translation_helper_.zone()),
-      kernel_offset_(kernel_offset),
       parsed_function_(parsed_function),
       optimizing_(optimizing),
       osr_id_(osr_id),
@@ -839,74 +104,13 @@ FlowGraphBuilder::FlowGraphBuilder(
       breakable_block_(NULL),
       switch_block_(NULL),
       try_finally_block_(NULL),
-      catch_block_(NULL),
-      streaming_flow_graph_builder_(NULL) {
+      catch_block_(NULL) {
   const Script& script =
       Script::Handle(Z, parsed_function->function().script());
   H.InitFromScript(script);
 }
 
 FlowGraphBuilder::~FlowGraphBuilder() {}
-
-Fragment FlowGraphBuilder::TranslateFinallyFinalizers(
-    TryFinallyBlock* outer_finally,
-    intptr_t target_context_depth) {
-  TryFinallyBlock* const saved_block = try_finally_block_;
-  TryCatchBlock* const saved_try_catch_block = try_catch_block_;
-  const intptr_t saved_depth = context_depth_;
-  const intptr_t saved_try_depth = try_depth_;
-
-  Fragment instructions;
-
-  // While translating the body of a finalizer we need to set the try-finally
-  // block which is active when translating the body.
-  while (try_finally_block_ != outer_finally) {
-    // Set correct try depth (in case there are nested try statements).
-    try_depth_ = try_finally_block_->try_depth();
-
-    // Potentially restore the context to what is expected for the finally
-    // block.
-    instructions += AdjustContextTo(try_finally_block_->context_depth());
-
-    // The to-be-translated finalizer has to have the correct try-index (namely
-    // the one outside the try-finally block).
-    bool changed_try_index = false;
-    intptr_t target_try_index = try_finally_block_->try_index();
-    while (CurrentTryIndex() != target_try_index) {
-      try_catch_block_ = try_catch_block_->outer();
-      changed_try_index = true;
-    }
-    if (changed_try_index) {
-      JoinEntryInstr* entry = BuildJoinEntry();
-      instructions += Goto(entry);
-      instructions = Fragment(instructions.entry, entry);
-    }
-
-    intptr_t finalizer_kernel_offset =
-        try_finally_block_->finalizer_kernel_offset();
-    try_finally_block_ = try_finally_block_->outer();
-    instructions += streaming_flow_graph_builder_->BuildStatementAt(
-        finalizer_kernel_offset);
-
-    // We only need to make sure that if the finalizer ended normally, we
-    // continue towards the next outer try-finally.
-    if (!instructions.is_open()) break;
-  }
-
-  if (instructions.is_open() && target_context_depth != -1) {
-    // A target context depth of -1 indicates that the code after this
-    // will not care about the context chain so we can leave it any way we
-    // want after the last finalizer.  That is used when returning.
-    instructions += AdjustContextTo(target_context_depth);
-  }
-
-  try_finally_block_ = saved_block;
-  try_catch_block_ = saved_try_catch_block;
-  context_depth_ = saved_depth;
-  try_depth_ = saved_try_depth;
-
-  return instructions;
-}
 
 Fragment FlowGraphBuilder::EnterScope(intptr_t kernel_offset,
                                       intptr_t* num_context_variables) {
@@ -990,12 +194,9 @@ Fragment FlowGraphBuilder::LoadInstantiatorTypeArguments() {
   } else if (scopes_->this_variable != NULL &&
              active_class_.ClassNumTypeArguments() > 0) {
     ASSERT(!parsed_function_->function().IsFactory());
-    intptr_t type_arguments_field_offset =
-        active_class_.klass->type_arguments_field_offset();
-    ASSERT(type_arguments_field_offset != Class::kNoTypeArguments);
-
     instructions += LoadLocal(scopes_->this_variable);
-    instructions += LoadField(type_arguments_field_offset);
+    instructions += LoadNativeField(
+        NativeFieldDesc::GetTypeArgumentsFieldFor(Z, *active_class_.klass));
   } else {
     instructions += NullConstant();
   }
@@ -1178,18 +379,53 @@ Fragment FlowGraphBuilder::CatchBlockEntry(const Array& handler_types,
                                            intptr_t handler_index,
                                            bool needs_stacktrace,
                                            bool is_synthesized) {
-  ASSERT(CurrentException()->is_captured() ==
-         CurrentStackTrace()->is_captured());
-  const bool should_restore_closure_context =
-      CurrentException()->is_captured() || CurrentCatchContext()->is_captured();
+  LocalVariable* exception_var = CurrentException();
+  LocalVariable* stacktrace_var = CurrentStackTrace();
+  LocalVariable* raw_exception_var = CurrentRawException();
+  LocalVariable* raw_stacktrace_var = CurrentRawStackTrace();
+
   CatchBlockEntryInstr* entry = new (Z) CatchBlockEntryInstr(
       TokenPosition::kNoSource,  // Token position of catch block.
       is_synthesized,  // whether catch block was synthesized by FE compiler
       AllocateBlockId(), CurrentTryIndex(), graph_entry_, handler_types,
-      handler_index, *CurrentException(), *CurrentStackTrace(),
-      needs_stacktrace, GetNextDeoptId(), should_restore_closure_context);
+      handler_index, *exception_var, *stacktrace_var, needs_stacktrace,
+      GetNextDeoptId(), raw_exception_var, raw_stacktrace_var);
   graph_entry_->AddCatchEntry(entry);
+
   Fragment instructions(entry);
+
+  // Auxiliary variables introduced by the try catch can be captured if we are
+  // inside a function with yield/resume points. In this case we first need
+  // to restore the context to match the context at entry into the closure.
+  const bool should_restore_closure_context =
+      CurrentException()->is_captured() || CurrentCatchContext()->is_captured();
+  LocalVariable* context_variable = parsed_function_->current_context_var();
+  if (should_restore_closure_context) {
+    ASSERT(parsed_function_->function().IsClosureFunction());
+    LocalScope* scope = parsed_function_->node_sequence()->scope();
+
+    LocalVariable* closure_parameter = scope->VariableAt(0);
+    ASSERT(!closure_parameter->is_captured());
+    instructions += LoadLocal(closure_parameter);
+    instructions += LoadField(Closure::context_offset());
+    instructions += StoreLocal(TokenPosition::kNoSource, context_variable);
+    instructions += Drop();
+  }
+
+  if (exception_var->is_captured()) {
+    instructions += LoadLocal(context_variable);
+    instructions += LoadLocal(raw_exception_var);
+    instructions += StoreInstanceField(
+        TokenPosition::kNoSource,
+        Context::variable_offset(exception_var->index().value()));
+  }
+  if (stacktrace_var->is_captured()) {
+    instructions += LoadLocal(context_variable);
+    instructions += LoadLocal(raw_stacktrace_var);
+    instructions += StoreInstanceField(
+        TokenPosition::kNoSource,
+        Context::variable_offset(stacktrace_var->index().value()));
+  }
 
   // :saved_try_context_var can be captured in the context of
   // of the closure, in this case CatchBlockEntryInstr restores
@@ -1334,7 +570,6 @@ Fragment BaseFlowGraphBuilder::ThrowException(TokenPosition position) {
 }
 
 Fragment BaseFlowGraphBuilder::TailCall(const Code& code) {
-  Fragment instructions;
   Value* arg_desc = Pop();
   return Fragment(new (Z) TailCallInstr(code, arg_desc));
 }
@@ -1348,7 +583,7 @@ Fragment BaseFlowGraphBuilder::TestTypeArgsLen(Fragment eq_branch,
   TargetEntryInstr* neq_entry;
 
   test += LoadArgDescriptor();
-  test += LoadField(ArgumentsDescriptor::type_args_len_offset());
+  test += LoadNativeField(NativeFieldDesc::ArgumentsDescriptor_type_args_len());
   test += IntConstant(num_type_args);
   test += BranchIfEqual(&eq_entry, &neq_entry);
 
@@ -1385,16 +620,25 @@ Fragment BaseFlowGraphBuilder::TestDelayedTypeArgs(LocalVariable* closure,
   return Fragment(test.entry, join);
 }
 
-Fragment BaseFlowGraphBuilder::TestAnyTypeArgs(
-    std::function<Fragment()> present,
-    Fragment absent) {
+Fragment BaseFlowGraphBuilder::TestAnyTypeArgs(Fragment present,
+                                               Fragment absent) {
   if (parsed_function_->function().IsClosureFunction()) {
     LocalVariable* closure =
         parsed_function_->node_sequence()->scope()->VariableAt(0);
-    return TestTypeArgsLen(TestDelayedTypeArgs(closure, present(), absent),
-                           present(), 0);
+
+    JoinEntryInstr* complete = BuildJoinEntry();
+    JoinEntryInstr* present_entry = BuildJoinEntry();
+
+    Fragment test = TestTypeArgsLen(
+        TestDelayedTypeArgs(closure, Goto(present_entry), absent),
+        Goto(present_entry), 0);
+    test += Goto(complete);
+
+    Fragment(present_entry) + present + Goto(complete);
+
+    return Fragment(test.entry, complete);
   } else {
-    return TestTypeArgsLen(absent, present(), 0);
+    return TestTypeArgsLen(absent, present, 0);
   }
 }
 
@@ -1463,16 +707,10 @@ Fragment BaseFlowGraphBuilder::LoadIndexed(intptr_t index_scale) {
   return Fragment(instr);
 }
 
-Fragment FlowGraphBuilder::LoadNativeField(MethodRecognizer::Kind kind,
-                                           intptr_t offset,
-                                           const Type& type,
-                                           intptr_t class_id,
-                                           bool is_immutable) {
+Fragment BaseFlowGraphBuilder::LoadNativeField(
+    const NativeFieldDesc* native_field) {
   LoadFieldInstr* load =
-      new (Z) LoadFieldInstr(Pop(), offset, type, TokenPosition::kNoSource);
-  load->set_recognized_kind(kind);
-  load->set_result_cid(class_id);
-  load->set_is_immutable(is_immutable);
+      new (Z) LoadFieldInstr(Pop(), native_field, TokenPosition::kNoSource);
   Push(load);
   return Fragment(load);
 }
@@ -1488,7 +726,8 @@ Fragment FlowGraphBuilder::LoadLocal(LocalVariable* variable) {
   if (variable->is_captured()) {
     Fragment instructions;
     instructions += LoadContextAt(variable->owner()->context_level());
-    instructions += LoadField(Context::variable_offset(variable->index()));
+    instructions +=
+        LoadField(Context::variable_offset(variable->index().value()));
     return instructions;
   } else {
     return BaseFlowGraphBuilder::LoadLocal(variable);
@@ -1756,7 +995,7 @@ Fragment BaseFlowGraphBuilder::StoreLocal(TokenPosition position,
     instructions += LoadContextAt(variable->owner()->context_level());
     instructions += LoadLocal(value);
     instructions += StoreInstanceField(
-        position, Context::variable_offset(variable->index()));
+        position, Context::variable_offset(variable->index().value()));
     return instructions;
   }
   return StoreLocalRaw(position, variable);
@@ -1891,22 +1130,6 @@ Fragment FlowGraphBuilder::ThrowNoSuchMethodError() {
   return instructions;
 }
 
-RawFunction* FlowGraphBuilder::LookupMethodByMember(NameIndex target,
-                                                    const String& method_name) {
-  NameIndex kernel_class = H.EnclosingName(target);
-  Class& klass = Class::Handle(Z, H.LookupClassByKernelClass(kernel_class));
-
-  RawFunction* function = klass.LookupFunctionAllowPrivate(method_name);
-#ifdef DEBUG
-  if (function == Object::null()) {
-    THR_Print("Unable to find \'%s\' in %s\n", method_name.ToCString(),
-              klass.ToCString());
-  }
-#endif
-  ASSERT(function != Object::null());
-  return function;
-}
-
 LocalVariable* BaseFlowGraphBuilder::MakeTemporary() {
   char name[64];
   intptr_t index = stack_->definition()->temp_index();
@@ -1918,9 +1141,8 @@ LocalVariable* BaseFlowGraphBuilder::MakeTemporary() {
                             symbol_name, Object::dynamic_type());
   // Set the index relative to the base of the expression stack including
   // outgoing arguments.
-  variable->set_index(kFirstLocalSlotFromFp -
-                      parsed_function_->num_stack_locals() -
-                      pending_argument_count_ - index);
+  variable->set_index(VariableIndex(-parsed_function_->num_stack_locals() -
+                                    pending_argument_count_ - index));
 
   // The value has uses as if it were a local variable.  Mark the definition
   // as used so that its temp index will not be cleared (causing it to never
@@ -1996,6 +1218,12 @@ Fragment BaseFlowGraphBuilder::DropTempsPreserveTop(
   return Fragment(drop_temps);
 }
 
+Fragment BaseFlowGraphBuilder::MakeTemp() {
+  MakeTempInstr* make_temp = new (Z) MakeTempInstr(Z);
+  Push(make_temp);
+  return Fragment(make_temp);
+}
+
 void FlowGraphBuilder::InlineBailout(const char* reason) {
   bool is_inlining = exit_collector_ != NULL;
   if (is_inlining) {
@@ -2020,13 +1248,9 @@ FlowGraph* FlowGraphBuilder::BuildGraph() {
 #endif
 
   StreamingFlowGraphBuilder streaming_flow_graph_builder(
-      this, TypedData::Handle(Z, function.KernelData()),
+      this, ExternalTypedData::Handle(Z, function.KernelData()),
       function.KernelDataProgramOffset());
-  streaming_flow_graph_builder_ = &streaming_flow_graph_builder;
-  FlowGraph* result =
-      streaming_flow_graph_builder_->BuildGraph(function.kernel_offset());
-  streaming_flow_graph_builder_ = NULL;
-  return result;
+  return streaming_flow_graph_builder.BuildGraph();
 }
 
 Fragment FlowGraphBuilder::NativeFunctionBody(intptr_t first_positional_offset,
@@ -2047,10 +1271,7 @@ Fragment FlowGraphBuilder::NativeFunctionBody(intptr_t first_positional_offset,
     case MethodRecognizer::kStringBaseLength:
     case MethodRecognizer::kStringBaseIsEmpty:
       body += LoadLocal(scopes_->this_variable);
-      body += LoadNativeField(MethodRecognizer::kStringBaseLength,
-                              String::length_offset(),
-                              Type::ZoneHandle(Z, Type::SmiType()), kSmiCid,
-                              /* is_immutable = */ true);
+      body += LoadNativeField(NativeFieldDesc::String_length());
       if (kind == MethodRecognizer::kStringBaseIsEmpty) {
         body += IntConstant(0);
         body += StrictCompare(Token::kEQ_STRICT);
@@ -2058,21 +1279,16 @@ Fragment FlowGraphBuilder::NativeFunctionBody(intptr_t first_positional_offset,
       break;
     case MethodRecognizer::kGrowableArrayLength:
       body += LoadLocal(scopes_->this_variable);
-      body += LoadNativeField(kind, GrowableObjectArray::length_offset(),
-                              Type::ZoneHandle(Z, Type::SmiType()), kSmiCid);
+      body += LoadNativeField(NativeFieldDesc::GrowableObjectArray_length());
       break;
     case MethodRecognizer::kObjectArrayLength:
     case MethodRecognizer::kImmutableArrayLength:
       body += LoadLocal(scopes_->this_variable);
-      body +=
-          LoadNativeField(kind, Array::length_offset(),
-                          Type::ZoneHandle(Z, Type::SmiType()), kSmiCid, true);
+      body += LoadNativeField(NativeFieldDesc::Array_length());
       break;
     case MethodRecognizer::kTypedDataLength:
       body += LoadLocal(scopes_->this_variable);
-      body +=
-          LoadNativeField(kind, TypedData::length_offset(),
-                          Type::ZoneHandle(Z, Type::SmiType()), kSmiCid, true);
+      body += LoadNativeField(NativeFieldDesc::TypedData_length());
       break;
     case MethodRecognizer::kClassIDgetID:
       body += LoadLocal(LookupVariable(first_positional_offset));
@@ -2081,29 +1297,81 @@ Fragment FlowGraphBuilder::NativeFunctionBody(intptr_t first_positional_offset,
     case MethodRecognizer::kGrowableArrayCapacity:
       body += LoadLocal(scopes_->this_variable);
       body += LoadField(GrowableObjectArray::data_offset(), kArrayCid);
-      body += LoadNativeField(MethodRecognizer::kObjectArrayLength,
-                              Array::length_offset(),
-                              Type::ZoneHandle(Z, Type::SmiType()), kSmiCid);
+      body += LoadNativeField(NativeFieldDesc::Array_length());
       break;
+    case MethodRecognizer::kListFactory: {
+      // factory List<E>([int length]) {
+      //   return (:arg_desc.positional_count == 2) ? new _List<E>(length)
+      //                                            : new _GrowableList<E>(0);
+      // }
+      const Library& core_lib = Library::Handle(Z, Library::CoreLibrary());
+
+      TargetEntryInstr *allocate_non_growable, *allocate_growable;
+
+      body += LoadArgDescriptor();
+      body +=
+          LoadField(ArgumentsDescriptor::positional_count_offset(), kSmiCid);
+      body += IntConstant(2);
+      body += BranchIfStrictEqual(&allocate_non_growable, &allocate_growable);
+
+      JoinEntryInstr* join = BuildJoinEntry();
+
+      {
+        const Class& cls = Class::Handle(
+            Z, core_lib.LookupClass(
+                   Library::PrivateCoreLibName(Symbols::_List())));
+        ASSERT(!cls.IsNull());
+        const Function& func = Function::ZoneHandle(
+            Z, cls.LookupFactoryAllowPrivate(Symbols::_ListFactory()));
+        ASSERT(!func.IsNull());
+
+        Fragment allocate(allocate_non_growable);
+        allocate += LoadLocal(scopes_->type_arguments_variable);
+        allocate += PushArgument();
+        allocate += LoadLocal(LookupVariable(first_positional_offset));
+        allocate += PushArgument();
+        allocate +=
+            StaticCall(TokenPosition::kNoSource, func, 2, ICData::kStatic);
+        allocate += StoreLocal(TokenPosition::kNoSource,
+                               parsed_function_->expression_temp_var());
+        allocate += Drop();
+        allocate += Goto(join);
+      }
+
+      {
+        const Class& cls = Class::Handle(
+            Z, core_lib.LookupClass(
+                   Library::PrivateCoreLibName(Symbols::_GrowableList())));
+        ASSERT(!cls.IsNull());
+        const Function& func = Function::ZoneHandle(
+            Z, cls.LookupFactoryAllowPrivate(Symbols::_GrowableListFactory()));
+        ASSERT(!func.IsNull());
+
+        Fragment allocate(allocate_growable);
+        allocate += LoadLocal(scopes_->type_arguments_variable);
+        allocate += PushArgument();
+        allocate += IntConstant(0);
+        allocate += PushArgument();
+        allocate +=
+            StaticCall(TokenPosition::kNoSource, func, 2, ICData::kStatic);
+        allocate += StoreLocal(TokenPosition::kNoSource,
+                               parsed_function_->expression_temp_var());
+        allocate += Drop();
+        allocate += Goto(join);
+      }
+
+      body = Fragment(body.entry, join);
+      body += LoadLocal(parsed_function_->expression_temp_var());
+      break;
+    }
     case MethodRecognizer::kObjectArrayAllocate:
       body += LoadLocal(scopes_->type_arguments_variable);
       body += LoadLocal(LookupVariable(first_positional_offset));
       body += CreateArray();
       break;
-    case MethodRecognizer::kBigint_getDigits:
-      body += LoadLocal(scopes_->this_variable);
-      body += LoadNativeField(kind, Bigint::digits_offset(),
-                              Object::dynamic_type(), kTypedDataUint32ArrayCid);
-      break;
-    case MethodRecognizer::kBigint_getUsed:
-      body += LoadLocal(scopes_->this_variable);
-      body += LoadNativeField(kind, Bigint::used_offset(),
-                              Type::ZoneHandle(Z, Type::SmiType()), kSmiCid);
-      break;
     case MethodRecognizer::kLinkedHashMap_getIndex:
       body += LoadLocal(scopes_->this_variable);
-      body += LoadNativeField(kind, LinkedHashMap::index_offset(),
-                              Object::dynamic_type(), kTypedDataUint32ArrayCid);
+      body += LoadNativeField(NativeFieldDesc::LinkedHashMap_index());
       break;
     case MethodRecognizer::kLinkedHashMap_setIndex:
       body += LoadLocal(scopes_->this_variable);
@@ -2114,8 +1382,7 @@ Fragment FlowGraphBuilder::NativeFunctionBody(intptr_t first_positional_offset,
       break;
     case MethodRecognizer::kLinkedHashMap_getData:
       body += LoadLocal(scopes_->this_variable);
-      body += LoadNativeField(kind, LinkedHashMap::data_offset(),
-                              Object::dynamic_type(), kArrayCid);
+      body += LoadNativeField(NativeFieldDesc::LinkedHashMap_data());
       break;
     case MethodRecognizer::kLinkedHashMap_setData:
       body += LoadLocal(scopes_->this_variable);
@@ -2126,8 +1393,7 @@ Fragment FlowGraphBuilder::NativeFunctionBody(intptr_t first_positional_offset,
       break;
     case MethodRecognizer::kLinkedHashMap_getHashMask:
       body += LoadLocal(scopes_->this_variable);
-      body += LoadNativeField(kind, LinkedHashMap::hash_mask_offset(),
-                              Type::ZoneHandle(Z, Type::SmiType()), kSmiCid);
+      body += LoadNativeField(NativeFieldDesc::LinkedHashMap_hash_mask());
       break;
     case MethodRecognizer::kLinkedHashMap_setHashMask:
       body += LoadLocal(scopes_->this_variable);
@@ -2139,8 +1405,7 @@ Fragment FlowGraphBuilder::NativeFunctionBody(intptr_t first_positional_offset,
       break;
     case MethodRecognizer::kLinkedHashMap_getUsedData:
       body += LoadLocal(scopes_->this_variable);
-      body += LoadNativeField(kind, LinkedHashMap::used_data_offset(),
-                              Type::ZoneHandle(Z, Type::SmiType()), kSmiCid);
+      body += LoadNativeField(NativeFieldDesc::LinkedHashMap_used_data());
       break;
     case MethodRecognizer::kLinkedHashMap_setUsedData:
       body += LoadLocal(scopes_->this_variable);
@@ -2152,8 +1417,7 @@ Fragment FlowGraphBuilder::NativeFunctionBody(intptr_t first_positional_offset,
       break;
     case MethodRecognizer::kLinkedHashMap_getDeletedKeys:
       body += LoadLocal(scopes_->this_variable);
-      body += LoadNativeField(kind, LinkedHashMap::deleted_keys_offset(),
-                              Type::ZoneHandle(Z, Type::SmiType()), kSmiCid);
+      body += LoadNativeField(NativeFieldDesc::LinkedHashMap_deleted_keys());
       break;
     case MethodRecognizer::kLinkedHashMap_setDeletedKeys:
       body += LoadLocal(scopes_->this_variable);
@@ -2162,11 +1426,6 @@ Fragment FlowGraphBuilder::NativeFunctionBody(intptr_t first_positional_offset,
                                  LinkedHashMap::deleted_keys_offset(),
                                  kNoStoreBarrier);
       body += NullConstant();
-      break;
-    case MethodRecognizer::kBigint_getNeg:
-      body += LoadLocal(scopes_->this_variable);
-      body += LoadNativeField(kind, Bigint::neg_offset(),
-                              Type::ZoneHandle(Z, Type::BoolType()), kBoolCid);
       break;
     default: {
       String& name = String::ZoneHandle(Z, function.native_name());
@@ -2294,12 +1553,12 @@ Fragment FlowGraphBuilder::EvaluateAssertion() {
                     ICData::kStatic);
 }
 
-Fragment FlowGraphBuilder::CheckBoolean() {
+Fragment FlowGraphBuilder::CheckBoolean(TokenPosition position) {
   Fragment instructions;
   if (I->strong() || I->type_checks() || I->asserts()) {
     LocalVariable* top_of_stack = MakeTemporary();
     instructions += LoadLocal(top_of_stack);
-    instructions += AssertBool();
+    instructions += AssertBool(position);
     instructions += Drop();
   }
   return instructions;
@@ -2312,6 +1571,9 @@ Fragment FlowGraphBuilder::CheckAssignable(const AbstractType& dst_type,
   if (dst_type.IsMalformed()) {
     return ThrowTypeError();
   }
+  if (FLAG_omit_strong_type_checks) {
+    return Fragment();
+  }
   if (!dst_type.IsDynamicType() && !dst_type.IsObjectType() &&
       !dst_type.IsVoidType()) {
     LocalVariable* top_of_stack = MakeTemporary();
@@ -2323,10 +1585,13 @@ Fragment FlowGraphBuilder::CheckAssignable(const AbstractType& dst_type,
   return instructions;
 }
 
-Fragment FlowGraphBuilder::AssertBool() {
+Fragment FlowGraphBuilder::AssertBool(TokenPosition position) {
+  if (FLAG_omit_strong_type_checks) {
+    return Fragment();
+  }
   Value* value = Pop();
-  AssertBooleanInstr* instr = new (Z)
-      AssertBooleanInstr(TokenPosition::kNoSource, value, GetNextDeoptId());
+  AssertBooleanInstr* instr =
+      new (Z) AssertBooleanInstr(position, value, GetNextDeoptId());
   Push(instr);
   return Fragment(instr);
 }
@@ -2335,6 +1600,10 @@ Fragment FlowGraphBuilder::AssertAssignable(TokenPosition position,
                                             const AbstractType& dst_type,
                                             const String& dst_name,
                                             AssertAssignableInstr::Kind kind) {
+  if (FLAG_omit_strong_type_checks) {
+    return Fragment();
+  }
+
   Fragment instructions;
   Value* value = Pop();
 
@@ -2711,231 +1980,6 @@ JoinEntryInstr* BaseFlowGraphBuilder::BuildThrowNoSuchMethod() {
   failing += TailCall(nsm_handler);
 
   return nsm;
-}
-
-RawObject* EvaluateMetadata(const Field& metadata_field) {
-  LongJumpScope jump;
-  if (setjmp(*jump.Set()) == 0) {
-    Thread* thread = Thread::Current();
-    Zone* zone_ = thread->zone();
-    TranslationHelper helper(thread);
-    Script& script = Script::Handle(Z, metadata_field.Script());
-    helper.InitFromScript(script);
-
-    StreamingFlowGraphBuilder streaming_flow_graph_builder(
-        &helper, Script::Handle(Z, metadata_field.Script()), Z,
-        TypedData::Handle(Z, metadata_field.KernelData()),
-        metadata_field.KernelDataProgramOffset());
-    return streaming_flow_graph_builder.EvaluateMetadata(
-        metadata_field.kernel_offset());
-  } else {
-    Thread* thread = Thread::Current();
-    Error& error = Error::Handle();
-    error = thread->sticky_error();
-    thread->clear_sticky_error();
-    return error.raw();
-  }
-}
-
-RawObject* BuildParameterDescriptor(const Function& function) {
-  LongJumpScope jump;
-  if (setjmp(*jump.Set()) == 0) {
-    Thread* thread = Thread::Current();
-    Zone* zone_ = thread->zone();
-    TranslationHelper helper(thread);
-    Script& script = Script::Handle(Z, function.script());
-    helper.InitFromScript(script);
-
-    StreamingFlowGraphBuilder streaming_flow_graph_builder(
-        &helper, Script::Handle(Z, function.script()), Z,
-        TypedData::Handle(Z, function.KernelData()),
-        function.KernelDataProgramOffset());
-    return streaming_flow_graph_builder.BuildParameterDescriptor(
-        function.kernel_offset());
-  } else {
-    Thread* thread = Thread::Current();
-    Error& error = Error::Handle();
-    error = thread->sticky_error();
-    thread->clear_sticky_error();
-    return error.raw();
-  }
-}
-
-static int LowestFirst(const intptr_t* a, const intptr_t* b) {
-  return *a - *b;
-}
-
-/**
- * If index exists as sublist in list, sort the sublist from lowest to highest,
- * then copy it, as Smis and without duplicates,
- * to a new Array in Heap::kOld which is returned.
- * Note that the source list is both sorted and de-duplicated as well, but will
- * possibly contain duplicate and unsorted data at the end.
- * Otherwise (when sublist doesn't exist in list) return new empty array.
- */
-static RawArray* AsSortedDuplicateFreeArray(GrowableArray<intptr_t>* source) {
-  intptr_t size = source->length();
-  if (size == 0) {
-    return Object::empty_array().raw();
-  }
-
-  source->Sort(LowestFirst);
-
-  intptr_t last = 0;
-  for (intptr_t current = 1; current < size; ++current) {
-    if (source->At(last) != source->At(current)) {
-      (*source)[++last] = source->At(current);
-    }
-  }
-  Array& array_object = Array::Handle();
-  array_object = Array::New(last + 1, Heap::kOld);
-  Smi& smi_value = Smi::Handle();
-  for (intptr_t i = 0; i <= last; ++i) {
-    smi_value = Smi::New(source->At(i));
-    array_object.SetAt(i, smi_value);
-  }
-  return array_object.raw();
-}
-
-static void ProcessTokenPositionsEntry(
-    const TypedData& kernel_data,
-    const Script& script,
-    const Script& entry_script,
-    intptr_t kernel_offset,
-    intptr_t data_kernel_offset,
-    Zone* zone_,
-    TranslationHelper* helper,
-    GrowableArray<intptr_t>* token_positions,
-    GrowableArray<intptr_t>* yield_positions) {
-  if (kernel_data.IsNull()) {
-    return;
-  }
-
-  StreamingFlowGraphBuilder streaming_flow_graph_builder(
-      helper, script, zone_, kernel_data, data_kernel_offset);
-  streaming_flow_graph_builder.CollectTokenPositionsFor(
-      script.kernel_script_index(), entry_script.kernel_script_index(),
-      kernel_offset, token_positions, yield_positions);
-}
-
-void CollectTokenPositionsFor(const Script& interesting_script) {
-  Thread* thread = Thread::Current();
-  Zone* zone_ = thread->zone();
-  TranslationHelper helper(thread);
-  helper.InitFromScript(interesting_script);
-
-  GrowableArray<intptr_t> token_positions(10);
-  GrowableArray<intptr_t> yield_positions(1);
-
-  Isolate* isolate = thread->isolate();
-  const GrowableObjectArray& libs =
-      GrowableObjectArray::Handle(Z, isolate->object_store()->libraries());
-  Library& lib = Library::Handle(Z);
-  Object& entry = Object::Handle(Z);
-  Script& entry_script = Script::Handle(Z);
-  TypedData& data = TypedData::Handle(Z);
-
-  auto& temp_array = Array::Handle(Z);
-  auto& temp_field = Field::Handle(Z);
-  auto& temp_function = Function::Handle(Z);
-  for (intptr_t i = 0; i < libs.Length(); i++) {
-    lib ^= libs.At(i);
-    DictionaryIterator it(lib);
-    while (it.HasNext()) {
-      entry = it.GetNext();
-      data = TypedData::null();
-      if (entry.IsClass()) {
-        const Class& klass = Class::Cast(entry);
-        if (klass.script() == interesting_script.raw()) {
-          token_positions.Add(klass.token_pos().value());
-        }
-        if (klass.is_finalized()) {
-          temp_array = klass.fields();
-          for (intptr_t i = 0; i < temp_array.Length(); ++i) {
-            temp_field ^= temp_array.At(i);
-            if (temp_field.kernel_offset() <= 0) {
-              // Skip artificially injected fields.
-              continue;
-            }
-            entry_script = temp_field.Script();
-            if (entry_script.raw() != interesting_script.raw()) {
-              continue;
-            }
-            data = temp_field.KernelData();
-            ProcessTokenPositionsEntry(data, interesting_script, entry_script,
-                                       temp_field.kernel_offset(),
-                                       temp_field.KernelDataProgramOffset(), Z,
-                                       &helper, &token_positions,
-                                       &yield_positions);
-          }
-          temp_array = klass.functions();
-          for (intptr_t i = 0; i < temp_array.Length(); ++i) {
-            temp_function ^= temp_array.At(i);
-            entry_script = temp_function.script();
-            if (entry_script.raw() != interesting_script.raw()) {
-              continue;
-            }
-            data = temp_function.KernelData();
-            ProcessTokenPositionsEntry(data, interesting_script, entry_script,
-                                       temp_function.kernel_offset(),
-                                       temp_function.KernelDataProgramOffset(),
-                                       Z, &helper, &token_positions,
-                                       &yield_positions);
-          }
-        } else {
-          // Class isn't finalized yet: read the data attached to it.
-          ASSERT(klass.kernel_offset() > 0);
-          data = lib.kernel_data();
-          ASSERT(!data.IsNull());
-          const intptr_t library_kernel_offset = lib.kernel_offset();
-          ASSERT(library_kernel_offset > 0);
-          const intptr_t class_offset = klass.kernel_offset();
-
-          entry_script = klass.script();
-          if (entry_script.raw() != interesting_script.raw()) {
-            continue;
-          }
-          ProcessTokenPositionsEntry(data, interesting_script, entry_script,
-                                     class_offset, library_kernel_offset, Z,
-                                     &helper, &token_positions,
-                                     &yield_positions);
-        }
-      } else if (entry.IsFunction()) {
-        temp_function ^= entry.raw();
-        entry_script = temp_function.script();
-        if (entry_script.raw() != interesting_script.raw()) {
-          continue;
-        }
-        data = temp_function.KernelData();
-        ProcessTokenPositionsEntry(data, interesting_script, entry_script,
-                                   temp_function.kernel_offset(),
-                                   temp_function.KernelDataProgramOffset(), Z,
-                                   &helper, &token_positions, &yield_positions);
-      } else if (entry.IsField()) {
-        const Field& field = Field::Cast(entry);
-        if (field.kernel_offset() <= 0) {
-          // Skip artificially injected fields.
-          continue;
-        }
-        entry_script = field.Script();
-        if (entry_script.raw() != interesting_script.raw()) {
-          continue;
-        }
-        data = field.KernelData();
-        ProcessTokenPositionsEntry(data, interesting_script, entry_script,
-                                   field.kernel_offset(),
-                                   field.KernelDataProgramOffset(), Z, &helper,
-                                   &token_positions, &yield_positions);
-      }
-    }
-  }
-
-  Script& script = Script::Handle(Z, interesting_script.raw());
-  Array& array_object = Array::Handle(Z);
-  array_object = AsSortedDuplicateFreeArray(&token_positions);
-  script.set_debug_positions(array_object);
-  array_object = AsSortedDuplicateFreeArray(&yield_positions);
-  script.set_yield_positions(array_object);
 }
 
 }  // namespace kernel

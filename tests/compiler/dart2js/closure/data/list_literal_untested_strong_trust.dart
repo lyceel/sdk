@@ -6,7 +6,10 @@ import 'package:expect/expect.dart';
 
 @NoInline()
 method<T>() {
-  /**/ dynamic local() => <T>[];
+  /*kernel.*/
+  /*omit.*/
+  /*strong.fields=[T],free=[T]*/
+  dynamic local() => <T>[];
   return local;
 }
 

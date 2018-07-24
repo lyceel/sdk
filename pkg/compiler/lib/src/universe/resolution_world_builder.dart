@@ -54,7 +54,7 @@ abstract class ResolutionWorldBuilder implements WorldBuilder, OpenWorld {
   /// The closed world computed by this world builder.
   ///
   /// This is only available after the world builder has been closed.
-  ClosedWorld get closedWorldForTesting;
+  KClosedWorld get closedWorldForTesting;
 
   void registerClass(ClassEntity cls);
 }
@@ -76,9 +76,7 @@ abstract class ResolutionEnqueuerWorldBuilder extends ResolutionWorldBuilder {
   // TODO(johnniwinther): Support unknown type arguments for generic types.
   void registerTypeInstantiation(
       InterfaceType type, ClassUsedCallback classUsed,
-      {ConstructorEntity constructor,
-      bool byMirrors: false,
-      bool isRedirection: false});
+      {ConstructorEntity constructor, bool isRedirection: false});
 
   /// Computes usage for all members declared by [cls]. Calls [membersUsed] with
   /// the usage changes for each member.
@@ -267,8 +265,8 @@ class InstantiationInfo {
   }
 }
 
-/// Base implementation of [ResolutionEnqueuerWorldBuilder].
-abstract class ResolutionWorldBuilderBase extends WorldBuilderBase
+/// Implementation of [ResolutionEnqueuerWorldBuilder].
+class ResolutionWorldBuilderImpl extends WorldBuilderBase
     implements ResolutionEnqueuerWorldBuilder {
   /// Instantiation information for all classes with instantiated types.
   ///
@@ -363,28 +361,26 @@ abstract class ResolutionWorldBuilderBase extends WorldBuilderBase
   final ElementEnvironment _elementEnvironment;
   final DartTypes _dartTypes;
   final CommonElements _commonElements;
-  final ConstantSystem _constantSystem;
 
   final NativeBasicData _nativeBasicData;
   final NativeDataBuilder _nativeDataBuilder;
   final InterceptorDataBuilder _interceptorDataBuilder;
   final BackendUsageBuilder _backendUsageBuilder;
   final RuntimeTypesNeedBuilder _rtiNeedBuilder;
+  final KAllocatorAnalysis _allocatorAnalysis;
   final NativeResolutionEnqueuer _nativeResolutionEnqueuer;
   final NoSuchMethodRegistry _noSuchMethodRegistry;
 
-  final SelectorConstraintsStrategy selectorConstraintsStrategy;
-  final ClassHierarchyBuilder classHierarchyBuilder;
-  final ClassQueries classQueries;
+  final SelectorConstraintsStrategy _selectorConstraintsStrategy;
+  final ClassHierarchyBuilder _classHierarchyBuilder;
+  final ClassQueries _classQueries;
 
   bool hasRuntimeTypeSupport = false;
   bool hasFunctionApplySupport = false;
 
   bool _closed = false;
-  ClosedWorld _closedWorldCache;
+  KClosedWorld _closedWorldCache;
   final Set<MemberEntity> _liveInstanceMembers = new Set<MemberEntity>();
-
-  final Set<TypedefEntity> _allTypedefs = new Set<TypedefEntity>();
 
   final Set<ConstantValue> _constantValues = new Set<ConstantValue>();
 
@@ -394,22 +390,25 @@ abstract class ResolutionWorldBuilderBase extends WorldBuilderBase
 
   bool get isClosed => _closed;
 
-  ResolutionWorldBuilderBase(
+  final KernelToElementMapForImpactImpl _elementMap;
+
+  ResolutionWorldBuilderImpl(
       this._options,
+      this._elementMap,
       this._elementEnvironment,
       this._dartTypes,
       this._commonElements,
-      this._constantSystem,
       this._nativeBasicData,
       this._nativeDataBuilder,
       this._interceptorDataBuilder,
       this._backendUsageBuilder,
       this._rtiNeedBuilder,
+      this._allocatorAnalysis,
       this._nativeResolutionEnqueuer,
       this._noSuchMethodRegistry,
-      this.selectorConstraintsStrategy,
-      this.classHierarchyBuilder,
-      this.classQueries);
+      this._selectorConstraintsStrategy,
+      this._classHierarchyBuilder,
+      this._classQueries);
 
   Iterable<ClassEntity> get processedClasses => _processedClasses.keys
       .where((cls) => _processedClasses[cls].isInstantiated);
@@ -448,7 +447,7 @@ abstract class ResolutionWorldBuilderBase extends WorldBuilderBase
 
   Iterable<MemberEntity> get processedMembers => _processedMembers;
 
-  ClosedWorld get closedWorldForTesting {
+  KClosedWorld get closedWorldForTesting {
     if (!_closed) {
       failedAt(
           NO_LOCATION_SPANNABLE, "The world builder has not yet been closed.");
@@ -509,25 +508,18 @@ abstract class ResolutionWorldBuilderBase extends WorldBuilderBase
   // TODO(johnniwinther): Support unknown type arguments for generic types.
   void registerTypeInstantiation(
       InterfaceType type, ClassUsedCallback classUsed,
-      {ConstructorEntity constructor,
-      bool byMirrors: false,
-      bool isRedirection: false}) {
+      {ConstructorEntity constructor, bool isRedirection: false}) {
     ClassEntity cls = type.element;
     InstantiationInfo info =
         _instantiationInfo.putIfAbsent(cls, () => new InstantiationInfo());
     Instantiation kind = Instantiation.UNINSTANTIATED;
     bool isNative = _nativeBasicData.isNativeClass(cls);
-    if (!cls.isAbstract ||
-        // We can't use the closed-world assumption with native abstract
-        // classes; a native abstract class may have non-abstract subclasses
-        // not declared to the program.  Instances of these classes are
-        // indistinguishable from the abstract class.
-        isNative ||
-        // Likewise, if this registration comes from the mirror system,
-        // all bets are off.
-        // TODO(herhut): Track classes required by mirrors seperately.
-        byMirrors) {
-      if (isNative || byMirrors) {
+    // We can't use the closed-world assumption with native abstract
+    // classes; a native abstract class may have non-abstract subclasses
+    // not declared to the program.  Instances of these classes are
+    // indistinguishable from the abstract class.
+    if (!cls.isAbstract || isNative) {
+      if (isNative) {
         kind = Instantiation.ABSTRACTLY_INSTANTIATED;
       } else {
         kind = Instantiation.DIRECTLY_INSTANTIATED;
@@ -537,7 +529,7 @@ abstract class ResolutionWorldBuilderBase extends WorldBuilderBase
         isRedirection: isRedirection);
     if (kind != Instantiation.UNINSTANTIATED) {
       if (_options.strongMode) {
-        classHierarchyBuilder.updateClassHierarchyNodeForClass(cls,
+        _classHierarchyBuilder.updateClassHierarchyNodeForClass(cls,
             directlyInstantiated: info.isDirectlyInstantiated,
             abstractlyInstantiated: info.isAbstractlyInstantiated);
       }
@@ -602,7 +594,8 @@ abstract class ResolutionWorldBuilderBase extends WorldBuilderBase
     void _process(Map<String, Set<_MemberUsage>> memberMap,
         EnumSet<MemberUse> action(_MemberUsage usage)) {
       _processSet(memberMap, methodName, (_MemberUsage usage) {
-        if (dynamicUse.appliesUnnamed(usage.entity, this)) {
+        if (_selectorConstraintsStrategy.appliedUnnamed(
+            dynamicUse, usage.entity, this)) {
           memberUsed(usage.entity, action(usage));
           return true;
         }
@@ -636,12 +629,12 @@ abstract class ResolutionWorldBuilderBase extends WorldBuilderBase
       Map<String, Map<Selector, SelectorConstraints>> selectorMap) {
     Selector selector = dynamicUse.selector;
     String name = selector.name;
-    ReceiverConstraint constraint = dynamicUse.mask;
+    Object constraint = dynamicUse.receiverConstraint;
     Map<Selector, SelectorConstraints> selectors = selectorMap.putIfAbsent(
         name, () => new Maplet<Selector, SelectorConstraints>());
     UniverseSelectorConstraints constraints =
         selectors.putIfAbsent(selector, () {
-      return selectorConstraintsStrategy.createSelectorConstraints(selector);
+      return _selectorConstraintsStrategy.createSelectorConstraints(selector);
     });
     return constraints.addReceiverConstraint(constraint);
   }
@@ -719,7 +712,6 @@ abstract class ResolutionWorldBuilderBase extends WorldBuilderBase
       case StaticUseKind.SET:
         useSet.addAll(usage.write());
         break;
-      case StaticUseKind.DIRECT_USE:
       case StaticUseKind.REFLECT:
         useSet.addAll(usage.fullyUse());
         break;
@@ -884,23 +876,14 @@ abstract class ResolutionWorldBuilderBase extends WorldBuilderBase
 
   /// Returns an iterable over all mixin applications that mixin [cls].
   Iterable<ClassEntity> allMixinUsesOf(ClassEntity cls) {
-    Iterable<ClassEntity> uses = classHierarchyBuilder.mixinUses[cls];
+    Iterable<ClassEntity> uses = _classHierarchyBuilder.mixinUses[cls];
     return uses != null ? uses : const <ClassEntity>[];
-  }
-
-  void registerTypedef(TypedefEntity typdef) {
-    _allTypedefs.add(typdef);
   }
 
   void registerUsedElement(MemberEntity element) {
     if (element.isInstanceMember && !element.isAbstract) {
       _liveInstanceMembers.add(element);
     }
-  }
-
-  ClosedWorld get closedWorldCache {
-    assert(isClosed);
-    return _closedWorldCache;
   }
 
   @override
@@ -919,26 +902,21 @@ abstract class ResolutionWorldBuilderBase extends WorldBuilderBase
       if (!info.hasInstantiation) {
         return;
       }
-      assert(classQueries.checkClass(cls));
-      if (!classQueries.validateClass(cls)) {
-        failedAt(cls, 'Class "${cls.name}" is not resolved.');
-      }
-
-      classHierarchyBuilder.updateClassHierarchyNodeForClass(cls,
+      _classHierarchyBuilder.updateClassHierarchyNodeForClass(cls,
           directlyInstantiated: info.isDirectlyInstantiated,
           abstractlyInstantiated: info.isAbstractlyInstantiated);
 
       // Walk through the superclasses, and record the types
       // implemented by that type on the superclasses.
-      ClassEntity superclass = classQueries.getSuperClass(cls);
+      ClassEntity superclass = _classQueries.getSuperClass(cls);
       while (superclass != null) {
         Set<ClassEntity> typesImplementedBySubclassesOfCls =
             typesImplementedBySubclasses.putIfAbsent(
                 superclass, () => new Set<ClassEntity>());
-        for (InterfaceType current in classQueries.getSupertypes(cls)) {
+        for (InterfaceType current in _classQueries.getSupertypes(cls)) {
           typesImplementedBySubclassesOfCls.add(current.element);
         }
-        superclass = classQueries.getSuperClass(superclass);
+        superclass = _classQueries.getSuperClass(superclass);
       }
     }
 
@@ -963,15 +941,15 @@ abstract class ResolutionWorldBuilderBase extends WorldBuilderBase
   }
 
   void registerClass(ClassEntity cls) {
-    classHierarchyBuilder.registerClass(cls);
+    _classHierarchyBuilder.registerClass(cls);
   }
 
   bool isInheritedInSubtypeOf(MemberEntity member, ClassEntity type) {
     // TODO(johnniwinther): Use the [member] itself to avoid enqueueing members
     // that are overridden.
-    classHierarchyBuilder.registerClass(member.enclosingClass);
-    classHierarchyBuilder.registerClass(type);
-    return classHierarchyBuilder.isInheritedInSubtypeOf(
+    _classHierarchyBuilder.registerClass(member.enclosingClass);
+    _classHierarchyBuilder.registerClass(type);
+    return _classHierarchyBuilder.isInheritedInSubtypeOf(
         member.enclosingClass, type);
   }
 
@@ -990,63 +968,26 @@ abstract class ResolutionWorldBuilderBase extends WorldBuilderBase
     _memberUsage.forEach(processMemberUse);
     return functions;
   }
-}
-
-abstract class KernelResolutionWorldBuilderBase
-    extends ResolutionWorldBuilderBase {
-  KernelToElementMapForImpactImpl get elementMap;
-
-  KernelResolutionWorldBuilderBase(
-      CompilerOptions options,
-      ElementEnvironment elementEnvironment,
-      DartTypes dartTypes,
-      CommonElements commonElements,
-      ConstantSystem constantSystem,
-      NativeBasicData nativeBasicData,
-      NativeDataBuilder nativeDataBuilder,
-      InterceptorDataBuilder interceptorDataBuilder,
-      BackendUsageBuilder backendUsageBuilder,
-      RuntimeTypesNeedBuilder rtiNeedBuilder,
-      NativeResolutionEnqueuer nativeResolutionEnqueuer,
-      NoSuchMethodRegistry noSuchMethodRegistry,
-      SelectorConstraintsStrategy selectorConstraintsStrategy,
-      ClassHierarchyBuilder classHierarchyBuilder,
-      ClassQueries classQueries)
-      : super(
-            options,
-            elementEnvironment,
-            dartTypes,
-            commonElements,
-            constantSystem,
-            nativeBasicData,
-            nativeDataBuilder,
-            interceptorDataBuilder,
-            backendUsageBuilder,
-            rtiNeedBuilder,
-            nativeResolutionEnqueuer,
-            noSuchMethodRegistry,
-            selectorConstraintsStrategy,
-            classHierarchyBuilder,
-            classQueries);
 
   @override
-  ClosedWorld closeWorld() {
+  KClosedWorld closeWorld() {
     Map<ClassEntity, Set<ClassEntity>> typesImplementedBySubclasses =
         populateHierarchyNodes();
 
     var backendUsage = _backendUsageBuilder.close();
-    backendUsage.helperClassesUsed.forEach(classHierarchyBuilder.registerClass);
+    backendUsage.helperClassesUsed
+        .forEach(_classHierarchyBuilder.registerClass);
     _nativeResolutionEnqueuer.liveNativeClasses
-        .forEach(classHierarchyBuilder.registerClass);
+        .forEach(_classHierarchyBuilder.registerClass);
 
     _closed = true;
     assert(
-        classHierarchyBuilder.classHierarchyNodes.length ==
-            classHierarchyBuilder.classSets.length,
+        _classHierarchyBuilder.classHierarchyNodes.length ==
+            _classHierarchyBuilder.classSets.length,
         "ClassHierarchyNode/ClassSet mismatch: "
-        "${classHierarchyBuilder.classHierarchyNodes} vs "
-        "${classHierarchyBuilder.classSets}");
-    return _closedWorldCache = new KernelClosedWorld(elementMap,
+        "${_classHierarchyBuilder.classHierarchyNodes} vs "
+        "${_classHierarchyBuilder.classSets}");
+    return _closedWorldCache = new KClosedWorldImpl(_elementMap,
         options: _options,
         elementEnvironment: _elementEnvironment,
         dartTypes: _dartTypes,
@@ -1057,16 +998,22 @@ abstract class KernelResolutionWorldBuilderBase
         noSuchMethodData: _noSuchMethodRegistry.close(),
         resolutionWorldBuilder: this,
         rtiNeedBuilder: _rtiNeedBuilder,
-        constantSystem: _constantSystem,
+        allocatorAnalysis: _allocatorAnalysis,
         implementedClasses: _implementedClasses,
         liveNativeClasses: _nativeResolutionEnqueuer.liveNativeClasses,
         liveInstanceMembers: _liveInstanceMembers,
         assignedInstanceMembers: computeAssignedInstanceMembers(),
         processedMembers: _processedMembers,
-        allTypedefs: _allTypedefs,
-        mixinUses: classHierarchyBuilder.mixinUses,
+        mixinUses: _classHierarchyBuilder.mixinUses,
         typesImplementedBySubclasses: typesImplementedBySubclasses,
-        classHierarchyNodes: classHierarchyBuilder.classHierarchyNodes,
-        classSets: classHierarchyBuilder.classSets);
+        classHierarchyNodes: _classHierarchyBuilder.classHierarchyNodes,
+        classSets: _classHierarchyBuilder.classSets);
+  }
+
+  @override
+  void forEachLocalFunction(void f(MemberEntity member, Local localFunction)) {
+    for (KLocalFunction local in localFunctions) {
+      f(local.memberContext, local);
+    }
   }
 }

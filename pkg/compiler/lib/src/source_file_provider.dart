@@ -25,8 +25,9 @@ abstract class SourceFileProvider implements CompilerInput {
   Map<Uri, api.Input> binarySourceFiles = <Uri, api.Input>{};
   int dartCharactersRead = 0;
 
-  Future<api.Input> readBytesFromUri(Uri resourceUri, api.InputKind inputKind) {
-    api.Input input;
+  Future<api.Input<List<int>>> readBytesFromUri(
+      Uri resourceUri, api.InputKind inputKind) {
+    api.Input<List<int>> input;
     switch (inputKind) {
       case api.InputKind.UTF8:
         input = utf8SourceFiles[resourceUri];
@@ -84,8 +85,9 @@ abstract class SourceFileProvider implements CompilerInput {
     return null;
   }
 
-  Future<api.Input> _readFromFile(Uri resourceUri, api.InputKind inputKind) {
-    api.Input input;
+  Future<api.Input<List<int>>> _readFromFile(
+      Uri resourceUri, api.InputKind inputKind) {
+    api.Input<List<int>> input;
     try {
       input = _readFromFileSync(resourceUri, inputKind);
     } catch (e) {
@@ -94,7 +96,8 @@ abstract class SourceFileProvider implements CompilerInput {
     return new Future.value(input);
   }
 
-  Future<api.Input> _readFromHttp(Uri resourceUri, api.InputKind inputKind) {
+  Future<api.Input<List<int>>> _readFromHttp(
+      Uri resourceUri, api.InputKind inputKind) {
     assert(resourceUri.scheme == 'http');
     HttpClient client = new HttpClient();
     return client
@@ -118,7 +121,7 @@ abstract class SourceFileProvider implements CompilerInput {
         offset += contentPart.length;
       }
       dartCharactersRead += totalLength;
-      api.Input input;
+      api.Input<List<int>> input;
       switch (inputKind) {
         case api.InputKind.UTF8:
           input = utf8SourceFiles[resourceUri] = new CachingUtf8BytesSourceFile(
@@ -141,7 +144,7 @@ abstract class SourceFileProvider implements CompilerInput {
 
   relativizeUri(Uri uri) => relativize(cwd, uri, isWindows);
 
-  SourceFile getUtf8SourceFile(Uri resourceUri) {
+  SourceFile<List<int>> getUtf8SourceFile(Uri resourceUri) {
     return utf8SourceFiles[resourceUri];
   }
 
@@ -267,7 +270,7 @@ class FormattingDiagnosticHandler implements CompilerDiagnostics {
       throw 'Unknown kind: $kind (${kind.ordinal})';
     }
     if (!enableColors) {
-      color = (x) => x;
+      color = (String x) => x;
     }
     if (uri == null) {
       print('${color(message)}');
@@ -462,10 +465,10 @@ class BazelInputProvider extends SourceFileProvider {
   BazelInputProvider(List<String> searchPaths)
       : dirs = searchPaths.map(_resolve).toList();
 
-  static _resolve(String path) => currentDirectory.resolve(path);
+  static Uri _resolve(String path) => currentDirectory.resolve(path);
 
   @override
-  Future<api.Input> readFromUri(Uri uri,
+  Future<api.Input<List<int>>> readFromUri(Uri uri,
       {InputKind inputKind: InputKind.UTF8}) async {
     var resolvedUri = uri;
     var path = uri.path;
@@ -479,7 +482,8 @@ class BazelInputProvider extends SourceFileProvider {
         }
       }
     }
-    api.Input result = await readBytesFromUri(resolvedUri, inputKind);
+    api.Input<List<int>> result =
+        await readBytesFromUri(resolvedUri, inputKind);
     switch (inputKind) {
       case InputKind.UTF8:
         utf8SourceFiles[uri] = utf8SourceFiles[resolvedUri];

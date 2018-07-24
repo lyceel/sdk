@@ -57,12 +57,16 @@ const Map<String, List<String>> expectedIsChecksMap =
 
 main() {
   runTest() async {
-    CompilationResult result = await runCompiler(
-        memorySourceFiles: {'main.dart': code},
-        options: [Flags.disableRtiOptimization, Flags.disableInlining]);
+    CompilationResult result = await runCompiler(memorySourceFiles: {
+      'main.dart': code
+    }, options: [
+      Flags.noPreviewDart2,
+      Flags.disableRtiOptimization,
+      Flags.disableInlining
+    ]);
     Expect.isTrue(result.isSuccess);
     Compiler compiler = result.compiler;
-    ClosedWorld closedWorld = compiler.backendClosedWorldForTesting;
+    JClosedWorld closedWorld = compiler.backendClosedWorldForTesting;
     ElementEnvironment elementEnvironment = closedWorld.elementEnvironment;
     RuntimeTypesNeed rtiNeed = closedWorld.rtiNeed;
     ProgramLookup programLookup = new ProgramLookup(compiler);
