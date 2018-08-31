@@ -10,9 +10,8 @@ import 'package:kernel/binary/ast_from_binary.dart' show BinaryBuilder;
 
 import 'package:kernel/kernel.dart' show CanonicalName, Component, Location;
 
-import 'package:kernel/target/targets.dart' show Target, TargetFlags;
-
-import 'package:kernel/target/vm.dart' show VmTarget;
+import 'package:kernel/target/targets.dart'
+    show NoneTarget, Target, TargetFlags;
 
 import 'package:package_config/packages.dart' show Packages;
 
@@ -321,9 +320,12 @@ class ProcessedOptions {
   /// Whether to interpret Dart sources in strong-mode.
   bool get strongMode => _raw.strongMode;
 
+  /// Whether to generate bytecode.
+  bool get bytecode => _raw.bytecode;
+
   Target _target;
   Target get target => _target ??=
-      _raw.target ?? new VmTarget(new TargetFlags(strongMode: strongMode));
+      _raw.target ?? new NoneTarget(new TargetFlags(strongMode: strongMode));
 
   /// Get an outline component that summarizes the SDK, if any.
   // TODO(sigmund): move, this doesn't feel like an "option".
@@ -376,7 +378,8 @@ class ProcessedOptions {
 
   /// Helper to load a .dill file from [uri] using the existing [nameRoot].
   Component loadComponent(List<int> bytes, CanonicalName nameRoot) {
-    Component component = new Component(nameRoot: nameRoot);
+    Component component =
+        target.configureComponent(new Component(nameRoot: nameRoot));
     // TODO(ahe): Pass file name to BinaryBuilder.
     // TODO(ahe): Control lazy loading via an option.
     new BinaryBuilder(bytes, filename: null, disableLazyReading: false)
@@ -568,7 +571,7 @@ class ProcessedOptions {
       // Infer based on the sdkRoot, but only when `compileSdk` is false,
       // otherwise the default intent was to compile the sdk from sources and
       // not to load an sdk summary file.
-      _sdkSummary = root?.resolve("vm_platform.dill");
+      _sdkSummary = root?.resolve("vm_platform_strong.dill");
     }
 
     if (_raw.librariesSpecificationUri != null) {
@@ -686,15 +689,17 @@ class _CompilationMessage implements CompilationMessage {
 
   String get analyzerCode => _original.code.analyzerCode;
 
-  String get dart2jsCode => _original.code.dart2jsCode;
-
   SourceSpan get span {
-    if (_original.charOffset == -1) {
-      if (_original.uri == null) return null;
-      return new SourceLocation(0, sourceUrl: _original.uri).pointSpan();
+    var uri = _original.uri;
+    var offset = _original.charOffset;
+    if (offset == -1) {
+      if (uri == null) return null;
+      return new SourceLocation(0, sourceUrl: uri).pointSpan();
     }
-    return new SourceLocation(_original.charOffset, sourceUrl: _original.uri)
-        .pointSpan();
+    return new SourceSpan(
+        new SourceLocation(offset, sourceUrl: uri),
+        new SourceLocation(offset + _original.length, sourceUrl: uri),
+        'X' * _original.length);
   }
 
   _CompilationMessage(this._original, this.severity);

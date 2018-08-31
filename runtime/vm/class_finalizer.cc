@@ -95,6 +95,60 @@ static void CollectFinalizedSuperClasses(
   }
 }
 
+class InterfaceFinder {
+ public:
+  InterfaceFinder(Zone* zone,
+                  ClassTable* class_table,
+                  GrowableArray<intptr_t>* cids)
+      : class_table_(class_table),
+        array_handles_(zone),
+        class_handles_(zone),
+        type_handles_(zone),
+        cids_(cids) {}
+
+  void FindAllInterfaces(const Class& klass) {
+    // The class is implementing it's own interface.
+    cids_->Add(klass.id());
+
+    ScopedHandle<Array> array(&array_handles_);
+    ScopedHandle<Class> interface_class(&class_handles_);
+    ScopedHandle<Class> current_class(&class_handles_);
+    ScopedHandle<AbstractType> type(&type_handles_);
+
+    *current_class = klass.raw();
+    while (true) {
+      // We don't care about top types.
+      const intptr_t cid = current_class->id();
+      if (cid == kObjectCid || cid == kDynamicCid || cid == kVoidCid) {
+        break;
+      }
+
+      // The class is implementing it's directly declared implemented
+      // interfaces.
+      *array = klass.interfaces();
+      if (!array->IsNull()) {
+        for (intptr_t i = 0; i < array->Length(); ++i) {
+          *type ^= array->At(i);
+          *interface_class ^= class_table_->At(type->type_class_id());
+          FindAllInterfaces(*interface_class);
+        }
+      }
+
+      // The class is implementing it's super type's interfaces.
+      *type = current_class->super_type();
+      if (type->IsNull()) break;
+      *current_class = class_table_->At(type->type_class_id());
+    }
+  }
+
+ private:
+  ClassTable* class_table_;
+  ReusableHandleStack<Array> array_handles_;
+  ReusableHandleStack<Class> class_handles_;
+  ReusableHandleStack<AbstractType> type_handles_;
+  GrowableArray<intptr_t>* cids_;
+};
+
 static void CollectImmediateSuperInterfaces(const Class& cls,
                                             GrowableArray<intptr_t>* cids) {
   const Array& interfaces = Array::Handle(cls.interfaces());
@@ -1528,6 +1582,25 @@ void ClassFinalizer::FinalizeUpperBounds(const Class& cls,
   }
 }
 
+#if defined(TARGET_ARCH_X64)
+static bool IsPotentialExactGeneric(const AbstractType& type) {
+  // TODO(dartbug.com/34170) Investigate supporting this for fields with types
+  // that depend on type parameters of the enclosing class.
+  if (type.IsType() && !type.IsFunctionType() && !type.IsDartFunctionType() &&
+      type.IsInstantiated()) {
+    const Class& cls = Class::Handle(type.type_class());
+    return cls.IsGeneric() && !cls.IsFutureOrClass();
+  }
+
+  return false;
+}
+#else
+// TODO(dartbug.com/34170) Support other architectures.
+static bool IsPotentialExactGeneric(const AbstractType& type) {
+  return false;
+}
+#endif
+
 void ClassFinalizer::ResolveAndFinalizeMemberTypes(const Class& cls) {
   // Note that getters and setters are explicitly listed as such in the list of
   // functions of a class, so we do not need to consider fields as implicitly
@@ -1551,6 +1624,7 @@ void ClassFinalizer::ResolveAndFinalizeMemberTypes(const Class& cls) {
   //   instance method.
 
   // Resolve type of fields and check for conflicts in super classes.
+  Isolate* isolate = Isolate::Current();
   Zone* zone = Thread::Current()->zone();
   Array& array = Array::Handle(zone, cls.fields());
   Field& field = Field::Handle(zone);
@@ -1560,11 +1634,16 @@ void ClassFinalizer::ResolveAndFinalizeMemberTypes(const Class& cls) {
   String& other_name = String::Handle(zone);
   Class& super_class = Class::Handle(zone);
   const intptr_t num_fields = array.Length();
+  const bool track_exactness = isolate->strong() && isolate->use_field_guards();
   for (intptr_t i = 0; i < num_fields; i++) {
     field ^= array.At(i);
     type = field.type();
     type = FinalizeType(cls, type);
     field.SetFieldType(type);
+    if (track_exactness && IsPotentialExactGeneric(type)) {
+      field.set_static_type_exactness_state(
+          StaticTypeExactnessState::Unitialized());
+    }
     name = field.name();
     if (field.is_static()) {
       getter_name = Field::GetterSymbol(name);
@@ -1622,7 +1701,7 @@ void ClassFinalizer::ResolveAndFinalizeMemberTypes(const Class& cls) {
           (!type.IsDynamicType() &&
            !const_value.IsInstanceOf(type, Object::null_type_arguments(),
                                      Object::null_type_arguments(), &error))) {
-        if (Isolate::Current()->error_on_bad_type()) {
+        if (isolate->error_on_bad_type()) {
           const AbstractType& const_value_type =
               AbstractType::Handle(zone, const_value.GetType(Heap::kNew));
           const String& const_value_type_name =
@@ -1664,7 +1743,6 @@ void ClassFinalizer::ResolveAndFinalizeMemberTypes(const Class& cls) {
   // If we check for bad overrides, collect interfaces, super interfaces, and
   // super classes of this class.
   GrowableArray<const Class*> interfaces(zone, 4);
-  Isolate* isolate = Isolate::Current();
   if (isolate->error_on_bad_override() && !isolate->strong()) {
     CollectInterfaces(cls, &interfaces);
     // Include superclasses in list of interfaces and super interfaces.
@@ -2609,12 +2687,37 @@ void ClassFinalizer::FinalizeTypesInClass(const Class& cls) {
   // Mark as type finalized before resolving type parameter upper bounds
   // in order to break cycles.
   cls.set_is_type_finalized();
+
   // Add this class to the direct subclasses of the superclass, unless the
   // superclass is Object.
   if (!super_type.IsNull() && !super_type.IsObjectType()) {
     ASSERT(!super_class.IsNull());
     super_class.AddDirectSubclass(cls);
   }
+
+  // Add this class as an implementor to the implemented interface's type
+  // classes.
+  Zone* zone = thread->zone();
+  auto& interface_class = Class::Handle(zone);
+  for (intptr_t i = 0; i < interface_types.Length(); ++i) {
+    interface_type ^= interface_types.At(i);
+    interface_class = interface_type.type_class();
+    interface_class.AddDirectImplementor(cls);
+  }
+
+  if (FLAG_use_cha_deopt) {
+    // Invalidate all CHA code which depends on knowing the implementors of any
+    // of the interfaces implemented by this new class.
+    ClassTable* class_table = thread->isolate()->class_table();
+    GrowableArray<intptr_t> cids;
+    InterfaceFinder finder(zone, class_table, &cids);
+    finder.FindAllInterfaces(cls);
+    for (intptr_t j = 0; j < cids.length(); ++j) {
+      interface_class = class_table->At(cids[j]);
+      interface_class.DisableCHAImplementorUsers();
+    }
+  }
+
   // A top level class is parsed eagerly so just finalize it.
   if (cls.IsTopLevel()) {
     FinalizeClass(cls);
@@ -2655,6 +2758,11 @@ void ClassFinalizer::FinalizeClass(const Class& cls) {
   if (FLAG_trace_class_finalization) {
     THR_Print("Finalize %s\n", cls.ToCString());
   }
+
+#if !defined(PRODUCT)
+  TimelineDurationScope tds(thread, Timeline::GetCompilerStream(),
+                            "ClassFinalizer::FinalizeClass");
+#endif  // !defined(PRODUCT)
 
 #if !defined(DART_PRECOMPILED_RUNTIME)
   // If loading from a kernel, make sure that the class is fully loaded.

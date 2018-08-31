@@ -123,7 +123,7 @@ class ExtractMethodRefactoringImpl extends RefactoringImpl
 
   ExtractMethodRefactoringImpl(this.searchEngine, this.astProvider, this.unit,
       this.selectionOffset, this.selectionLength) {
-    unitElement = unit.element;
+    unitElement = unit.declaredElement;
     libraryElement = unitElement.library;
     session = astProvider.driver.currentSession;
     selectionRange = new SourceRange(selectionOffset, selectionLength);
@@ -457,7 +457,7 @@ class ExtractMethodRefactoringImpl extends RefactoringImpl
     }
     // method of class
     if (parent is ClassDeclaration) {
-      ClassElement classElement = parent.element;
+      ClassElement classElement = parent.declaredElement;
       return validateCreateMethod(
           searchEngine, astProvider, classElement, name);
     }
@@ -782,7 +782,7 @@ class ExtractMethodRefactoringImpl extends RefactoringImpl
     return result;
   }
 
-  Future<Null> _initializeReturnType() async {
+  Future<void> _initializeReturnType() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     TypeProvider typeProvider = await session.typeProvider;

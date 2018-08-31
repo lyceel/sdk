@@ -18,13 +18,16 @@ main() {
 
 @reflectiveTest
 class ErrorSuppressionTest extends ResolverTestCase {
-  String get ignoredCode => useCFE
-      ? 'not_constant_expression'
-      : 'const_initialized_with_non_constant_value';
+  String get ignoredCode => 'const_initialized_with_non_constant_value';
 
-  ErrorCode get reportedCode => useCFE
-      ? CompileTimeErrorCode.NOT_CONSTANT_EXPRESSION
-      : CompileTimeErrorCode.CONST_INITIALIZED_WITH_NON_CONSTANT_VALUE;
+  List<ErrorCode> get reportedCodes => [
+        CompileTimeErrorCode.CONST_INITIALIZED_WITH_NON_CONSTANT_VALUE,
+      ];
+
+  List<ErrorCode> get reportedCodesWithAssignment => [
+        StaticTypeWarningCode.INVALID_ASSIGNMENT,
+        CompileTimeErrorCode.CONST_INITIALIZED_WITH_NON_CONSTANT_VALUE,
+      ];
 
   test_error_code_mismatch() async {
     Source source = addSource('''
@@ -33,8 +36,7 @@ int x = '';
 const y = x; //CONST_INITIALIZED_WITH_NON_CONSTANT_VALUE
 ''');
     await computeAnalysisResult(source);
-    assertErrors(
-        source, [StaticTypeWarningCode.INVALID_ASSIGNMENT, reportedCode]);
+    assertErrors(source, reportedCodesWithAssignment);
   }
 
   test_ignore_first() async {
@@ -45,7 +47,7 @@ int x = '';
 const y = x; //CONST_INITIALIZED_WITH_NON_CONSTANT_VALUE
 ''');
     await computeAnalysisResult(source);
-    assertErrors(source, [reportedCode]);
+    assertErrors(source, reportedCodes);
   }
 
   test_ignore_first_trailing() async {
@@ -55,7 +57,7 @@ int x = ''; // ignore: invalid_assignment
 const y = x; //CONST_INITIALIZED_WITH_NON_CONSTANT_VALUE
 ''');
     await computeAnalysisResult(source);
-    assertErrors(source, [reportedCode]);
+    assertErrors(source, reportedCodes);
   }
 
   test_ignore_for_file() async {
@@ -65,7 +67,7 @@ const y = x; //CONST_INITIALIZED_WITH_NON_CONSTANT_VALUE
 // ignore_for_file: invalid_assignment
 ''');
     await computeAnalysisResult(source);
-    assertErrors(source, [reportedCode]);
+    assertErrors(source, reportedCodes);
   }
 
   test_ignore_for_file_whitespace_variant() async {
@@ -122,8 +124,7 @@ int x = '';
 const y = x; //CONST_INITIALIZED_WITH_NON_CONSTANT_VALUE
 ''');
     await computeAnalysisResult(source);
-    assertErrors(
-        source, [StaticTypeWarningCode.INVALID_ASSIGNMENT, reportedCode]);
+    assertErrors(source, reportedCodesWithAssignment);
   }
 
   test_missing_error_codes() async {
@@ -133,8 +134,7 @@ const y = x; //CONST_INITIALIZED_WITH_NON_CONSTANT_VALUE
 const String y = x; //INVALID_ASSIGNMENT, CONST_INITIALIZED_WITH_NON_CONSTANT_VALUE
 ''');
     await computeAnalysisResult(source);
-    assertErrors(
-        source, [StaticTypeWarningCode.INVALID_ASSIGNMENT, reportedCode]);
+    assertErrors(source, reportedCodesWithAssignment);
   }
 
   test_missing_metadata_suffix() async {
@@ -176,7 +176,7 @@ const String y = x; //INVALID_ASSIGNMENT, CONST_INITIALIZED_WITH_NON_CONSTANT_VA
     assertErrors(source, []);
   }
 
-  test_multiple_ignores_traling() async {
+  test_multiple_ignores_trailing() async {
     Source source = addSource('''
 int x = 3;
 const String y = x; // ignore: invalid_assignment, $ignoredCode
@@ -221,8 +221,7 @@ int x = '';  //INVALID_ASSIGNMENT
 const y = x; //CONST_INITIALIZED_WITH_NON_CONSTANT_VALUE
 ''');
     await computeAnalysisResult(source);
-    assertErrors(
-        source, [StaticTypeWarningCode.INVALID_ASSIGNMENT, reportedCode]);
+    assertErrors(source, reportedCodesWithAssignment);
   }
 
   test_trailing_not_above() async {

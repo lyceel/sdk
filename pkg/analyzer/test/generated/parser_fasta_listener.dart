@@ -108,9 +108,9 @@ class ForwardingTestListener extends ForwardingListener {
   }
 
   @override
-  void beginClassBody(Token token) {
-    super.beginClassBody(token);
-    begin('ClassBody');
+  void beginClassOrMixinBody(Token token) {
+    super.beginClassOrMixinBody(token);
+    begin('ClassOrMixinBody');
   }
 
   @override
@@ -360,7 +360,7 @@ class ForwardingTestListener extends ForwardingListener {
 
   @override
   void beginMember() {
-    expectIn('ClassBody');
+    expectIn('ClassOrMixinBody');
     super.beginMember();
     begin('Member');
   }
@@ -390,6 +390,12 @@ class ForwardingTestListener extends ForwardingListener {
   void beginMixinApplication(Token token) {
     super.beginMixinApplication(token);
     begin('MixinApplication');
+  }
+
+  @override
+  void beginMixinDeclaration(Token mixinKeyword, Token name) {
+    super.beginMixinDeclaration(mixinKeyword, name);
+    begin('MixinDeclaration');
   }
 
   @override
@@ -600,9 +606,9 @@ class ForwardingTestListener extends ForwardingListener {
   }
 
   @override
-  void endClassBody(int memberCount, Token beginToken, Token endToken) {
-    end('ClassBody');
-    super.endClassBody(memberCount, beginToken, endToken);
+  void endClassOrMixinBody(int memberCount, Token beginToken, Token endToken) {
+    end('ClassOrMixinBody');
+    super.endClassOrMixinBody(memberCount, beginToken, endToken);
   }
 
   @override
@@ -782,9 +788,9 @@ class ForwardingTestListener extends ForwardingListener {
   }
 
   @override
-  void endFunctionType(Token functionToken, Token endToken) {
+  void endFunctionType(Token functionToken) {
     end('FunctionType');
-    super.endFunctionType(functionToken, endToken);
+    super.endFunctionType(functionToken);
   }
 
   @override
@@ -895,6 +901,12 @@ class ForwardingTestListener extends ForwardingListener {
   void endMixinApplication(Token withKeyword) {
     end('MixinApplication');
     super.endMixinApplication(withKeyword);
+  }
+
+  @override
+  void endMixinDeclaration(Token token) {
+    end('MixinDeclaration');
+    super.endMixinDeclaration(token);
   }
 
   @override
@@ -1091,9 +1103,10 @@ class ForwardingTestListener extends ForwardingListener {
   }
 
   @override
-  void handleClassImplements(Token implementsKeyword, int interfacesCount) {
-    expectIn('ClassDeclaration');
-    listener.handleClassImplements(implementsKeyword, interfacesCount);
+  void handleClassOrMixinImplements(
+      Token implementsKeyword, int interfacesCount) {
+    expectInOneOf(['ClassDeclaration', 'MixinDeclaration']);
+    listener.handleClassOrMixinImplements(implementsKeyword, interfacesCount);
   }
 
   @override
@@ -1118,6 +1131,12 @@ class ForwardingTestListener extends ForwardingListener {
   void handleRecoverImport(Token semicolon) {
     expectIn('CompilationUnit');
     listener.handleRecoverImport(semicolon);
+  }
+
+  @override
+  void handleRecoverMixinHeader() {
+    expectIn('MixinDeclaration');
+    listener.handleRecoverMixinHeader();
   }
 
   @override

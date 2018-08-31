@@ -352,7 +352,7 @@ void CallSpecializer::AddCheckNull(Value* to_check,
                                    intptr_t deopt_id,
                                    Environment* deopt_environment,
                                    Instruction* insert_before) {
-  ASSERT(I->strong() && FLAG_use_strong_mode_types);
+  ASSERT(I->can_use_strong_mode_types());
   if (to_check->Type()->is_nullable()) {
     CheckNullInstr* check_null =
         new (Z) CheckNullInstr(to_check->CopyWithType(Z), function_name,
@@ -960,7 +960,6 @@ bool CallSpecializer::TryInlineInstanceSetter(InstanceCallInstr* instr,
 
   if (I->use_field_guards()) {
     if (field.guarded_cid() != kDynamicCid) {
-      ASSERT(I->use_field_guards());
       InsertBefore(instr,
                    new (Z)
                        GuardFieldClassInstr(new (Z) Value(instr->ArgumentAt(1)),
@@ -969,12 +968,19 @@ bool CallSpecializer::TryInlineInstanceSetter(InstanceCallInstr* instr,
     }
 
     if (field.needs_length_check()) {
-      ASSERT(I->use_field_guards());
       InsertBefore(
           instr,
           new (Z) GuardFieldLengthInstr(new (Z) Value(instr->ArgumentAt(1)),
                                         field, instr->deopt_id()),
           instr->env(), FlowGraph::kEffect);
+    }
+
+    if (field.static_type_exactness_state().NeedsFieldGuard()) {
+      InsertBefore(instr,
+                   new (Z)
+                       GuardFieldTypeInstr(new (Z) Value(instr->ArgumentAt(1)),
+                                           field, instr->deopt_id()),
+                   instr->env(), FlowGraph::kEffect);
     }
   }
 
@@ -1320,7 +1326,7 @@ bool CallSpecializer::TryReplaceInstanceOfWithRangeCheck(
 bool CallSpecializer::TryOptimizeInstanceOfUsingStaticTypes(
     InstanceCallInstr* call,
     const AbstractType& type) {
-  ASSERT(I->strong() && FLAG_use_strong_mode_types);
+  ASSERT(I->can_use_strong_mode_types());
   ASSERT(Token::IsTypeTestOperator(call->token_kind()));
 
   if (type.IsDynamicType() || type.IsObjectType() || !type.IsInstantiated()) {
@@ -1368,7 +1374,7 @@ void CallSpecializer::ReplaceWithInstanceOf(InstanceCallInstr* call) {
     type = AbstractType::Cast(call->ArgumentAt(3)->AsConstant()->value()).raw();
   }
 
-  if (I->strong() && FLAG_use_strong_mode_types &&
+  if (I->can_use_strong_mode_types() &&
       TryOptimizeInstanceOfUsingStaticTypes(call, type)) {
     return;
   }
@@ -1620,7 +1626,7 @@ void CallSpecializer::VisitStaticCall(StaticCallInstr* call) {
     }
   }
 
-  if (I->strong() && FLAG_use_strong_mode_types &&
+  if (I->can_use_strong_mode_types() &&
       TryOptimizeStaticCallUsingStaticTypes(call)) {
     return;
   }

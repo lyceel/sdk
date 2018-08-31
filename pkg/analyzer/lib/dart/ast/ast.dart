@@ -448,6 +448,7 @@ abstract class AstNode implements SyntacticEntity {
   /**
    * An empty list of AST nodes.
    */
+  @deprecated
   static const List<AstNode> EMPTY_LIST = const <AstNode>[];
 
   /**
@@ -716,6 +717,8 @@ abstract class AstVisitor<R> {
 
   R visitMethodInvocation(MethodInvocation node);
 
+  R visitMixinDeclaration(MixinDeclaration node);
+
   R visitNamedExpression(NamedExpression node);
 
   R visitNativeClause(NativeClause node);
@@ -723,6 +726,8 @@ abstract class AstVisitor<R> {
   R visitNativeFunctionBody(NativeFunctionBody node);
 
   R visitNullLiteral(NullLiteral node);
+
+  R visitOnClause(OnClause node);
 
   R visitParenthesizedExpression(ParenthesizedExpression node);
 
@@ -1201,6 +1206,10 @@ abstract class ClassDeclaration extends NamedCompilationUnitMember {
   void set classKeyword(Token token);
 
   @override
+  ClassElement get declaredElement;
+
+  @deprecated
+  @override
   ClassElement get element;
 
   /**
@@ -1537,6 +1546,12 @@ abstract class CompilationUnit extends AstNode {
   NodeList<CompilationUnitMember> get declarations;
 
   /**
+   * Return the element associated with this compilation unit, or `null` if the
+   * AST structure has not been resolved.
+   */
+  CompilationUnitElement get declaredElement;
+
+  /**
    * Return the directives contained in this compilation unit.
    */
   NodeList<Directive> get directives;
@@ -1545,6 +1560,7 @@ abstract class CompilationUnit extends AstNode {
    * Return the element associated with this compilation unit, or `null` if the
    * AST structure has not been resolved.
    */
+  @deprecated
   CompilationUnitElement get element;
 
   /**
@@ -1837,6 +1853,10 @@ abstract class ConstructorDeclaration extends ClassMember {
   void set constKeyword(Token token);
 
   @override
+  ConstructorElement get declaredElement;
+
+  @override
+  @deprecated
   ConstructorElement get element;
 
   /**
@@ -2153,6 +2173,14 @@ abstract class Declaration extends AnnotatedNode {
    * this node corresponds to a list of declarations or if the AST structure has
    * not been resolved.
    */
+  Element get declaredElement;
+
+  /**
+   * Return the element associated with this declaration, or `null` if either
+   * this node corresponds to a list of declarations or if the AST structure has
+   * not been resolved.
+   */
+  @deprecated
   Element get element;
 }
 
@@ -2165,6 +2193,10 @@ abstract class Declaration extends AnnotatedNode {
  * Clients may not extend, implement or mix-in this class.
  */
 abstract class DeclaredIdentifier extends Declaration {
+  @override
+  LocalVariableElement get declaredElement;
+
+  @deprecated
   @override
   LocalVariableElement get element;
 
@@ -2505,6 +2537,10 @@ abstract class EnumDeclaration extends NamedCompilationUnitMember {
   NodeList<EnumConstantDeclaration> get constants;
 
   @override
+  ClassElement get declaredElement;
+
+  @deprecated
+  @override
   ClassElement get element;
 
   /**
@@ -2562,6 +2598,7 @@ abstract class Expression extends AstNode {
   /**
    * An empty list of expressions.
    */
+  @deprecated
   static const List<Expression> EMPTY_LIST = const <Expression>[];
 
   /**
@@ -3038,6 +3075,13 @@ abstract class FormalParameter extends AstNode {
    * Return the element representing this parameter, or `null` if this parameter
    * has not been resolved.
    */
+  ParameterElement get declaredElement;
+
+  /**
+   * Return the element representing this parameter, or `null` if this parameter
+   * has not been resolved.
+   */
+  @deprecated
   ParameterElement get element;
 
   /**
@@ -3388,6 +3432,10 @@ abstract class FunctionBody extends AstNode {
  */
 abstract class FunctionDeclaration extends NamedCompilationUnitMember {
   @override
+  ExecutableElement get declaredElement;
+
+  @deprecated
+  @override
   ExecutableElement get element;
 
   /**
@@ -3486,6 +3534,13 @@ abstract class FunctionExpression extends Expression {
    * Return the element associated with the function, or `null` if the AST
    * structure has not been resolved.
    */
+  ExecutableElement get declaredElement;
+
+  /**
+   * Return the element associated with the function, or `null` if the AST
+   * structure has not been resolved.
+   */
+  @deprecated
   ExecutableElement get element;
 
   /**
@@ -4861,6 +4916,10 @@ abstract class MethodDeclaration extends ClassMember {
   void set body(FunctionBody functionBody);
 
   @override
+  ExecutableElement get declaredElement;
+
+  @deprecated
+  @override
   ExecutableElement get element;
 
   /**
@@ -5114,6 +5173,70 @@ abstract class MethodReferenceExpression {
    * given [element].
    */
   void set staticElement(MethodElement element);
+}
+
+/**
+ * The declaration of a mixin.
+ *
+ *    mixinDeclaration ::=
+ *        metadata? 'mixin' [SimpleIdentifier] [TypeParameterList]?
+ *        [OnClause]? [ImplementsClause]? '{' [ClassMember]* '}'
+ *
+ * Clients may not extend, implement or mix-in this class.
+ */
+abstract class MixinDeclaration extends NamedCompilationUnitMember {
+  @override
+  ClassElement get declaredElement;
+
+  /**
+   * Return the implements clause for the mixin, or `null` if the mixin does not
+   * implement any interfaces.
+   */
+  ImplementsClause get implementsClause;
+
+  /**
+   * Return the left curly bracket.
+   */
+  Token get leftBracket;
+
+  /**
+   * Return the members defined by the mixin.
+   */
+  NodeList<ClassMember> get members;
+
+  /**
+   * Return the token representing the 'mixin' keyword.
+   */
+  Token get mixinKeyword;
+
+  /**
+   * Return the on clause for the mixin, or `null` if the mixin does not have
+   * any superclass constraints.
+   */
+  OnClause get onClause;
+
+  /**
+   * Return the right curly bracket.
+   */
+  Token get rightBracket;
+
+  /**
+   * Return the type parameters for the mixin, or `null` if the mixin does not
+   * have any type parameters.
+   */
+  TypeParameterList get typeParameters;
+
+  /**
+   * Return the field declared in the mixin with the given [name], or `null` if
+   * there is no such field.
+   */
+  VariableDeclaration getField(String name);
+
+  /**
+   * Return the method declared in the mixin with the given [name], or `null` if
+   * there is no such method.
+   */
+  MethodDeclaration getMethod(String name);
 }
 
 /**
@@ -5473,6 +5596,26 @@ abstract class NullLiteral extends Literal {
    * Set the token representing the literal to the given [token].
    */
   void set literal(Token token);
+}
+
+/**
+ * The "on" clause in a mixin declaration.
+ *
+ *    onClause ::=
+ *        'on' [TypeName] (',' [TypeName])*
+ *
+ * Clients may not extend, implement or mix-in this class.
+ */
+abstract class OnClause extends AstNode {
+  /**
+   * Return the token representing the 'on' keyword.
+   */
+  Token get onKeyword;
+
+  /**
+   * Return the list of the classes are superclass constraints for the mixin.
+   */
+  NodeList<TypeName> get superclassConstraints;
 }
 
 /**
@@ -6893,6 +7036,10 @@ abstract class UriBasedDirective extends Directive {
  * Clients may not extend, implement or mix-in this class.
  */
 abstract class VariableDeclaration extends Declaration {
+  @override
+  VariableElement get declaredElement;
+
+  @deprecated
   @override
   VariableElement get element;
 

@@ -34,6 +34,7 @@ class CodeIndexTable;
 class CompilerStats;
 class Debugger;
 class DeoptContext;
+class ExternalTypedData;
 class HandleScope;
 class HandleVisitor;
 class Heap;
@@ -149,7 +150,10 @@ typedef FixedCache<intptr_t, CatchEntryState, 16> CatchEntryStateCache;
   V(NONPRODUCT, use_field_guards, UseFieldGuards, use_field_guards,            \
     FLAG_use_field_guards)                                                     \
   V(NONPRODUCT, use_osr, UseOsr, use_osr, FLAG_use_osr)                        \
-  V(PRECOMPILER, obfuscate, Obfuscate, obfuscate, false_by_default)
+  V(PRECOMPILER, obfuscate, Obfuscate, obfuscate, false_by_default)            \
+  V(PRODUCT, unsafe_trust_strong_mode_types, UnsafeTrustStrongModeTypes,       \
+    unsafe_trust_strong_mode_types,                                            \
+    FLAG_experimental_unsafe_mode_use_at_your_own_risk)
 
 class Isolate : public BaseIsolate {
  public:
@@ -600,6 +604,8 @@ class Isolate : public BaseIsolate {
   RawError* sticky_error() const { return sticky_error_; }
   void clear_sticky_error();
 
+  void RetainKernelBlob(const ExternalTypedData& kernel_blob);
+
   bool compilation_allowed() const {
     return CompilationAllowedBit::decode(isolate_flags_);
   }
@@ -694,6 +700,11 @@ class Isolate : public BaseIsolate {
     isolate_flags_ = IsKernelIsolateBit::update(value, isolate_flags_);
   }
 
+  bool can_use_strong_mode_types() const {
+    return strong() && FLAG_use_strong_mode_types &&
+           !unsafe_trust_strong_mode_types();
+  }
+
   bool should_load_vmservice() const {
     return ShouldLoadVmServiceBit::decode(isolate_flags_);
   }
@@ -749,8 +760,12 @@ class Isolate : public BaseIsolate {
 
   // Convenience flag tester indicating whether incoming function arguments
   // should be type checked.
-  bool argument_type_checks() {
-    return (strong() && !FLAG_omit_strong_type_checks) || type_checks();
+  bool argument_type_checks() const {
+    return should_emit_strong_mode_checks() || type_checks();
+  }
+
+  bool should_emit_strong_mode_checks() const {
+    return strong() && !unsafe_trust_strong_mode_types();
   }
 
   static void KillAllIsolates(LibMsgId msg_id);
@@ -759,7 +774,7 @@ class Isolate : public BaseIsolate {
   static void DisableIsolateCreation();
   static void EnableIsolateCreation();
   static bool IsolateCreationEnabled();
-  static bool IsVMInternalIsolate(Isolate* isolate);
+  static bool IsVMInternalIsolate(const Isolate* isolate);
 
 #if !defined(PRODUCT)
   intptr_t reload_every_n_stack_overflow_checks() const {
@@ -872,7 +887,8 @@ class Isolate : public BaseIsolate {
   V(UseOsr)                                                                    \
   V(Obfuscate)                                                                 \
   V(CompactionInProgress)                                                      \
-  V(ShouldLoadVmService)
+  V(ShouldLoadVmService)                                                       \
+  V(UnsafeTrustStrongModeTypes)
 
   // Isolate specific flags.
   enum FlagBits {
@@ -975,6 +991,12 @@ class Isolate : public BaseIsolate {
   RawGrowableObjectArray* deoptimized_code_array_;
 
   RawError* sticky_error_;
+
+  // Issue(dartbug.com/33973): We keep a reference to [ExternalTypedData]s with
+  // finalizers to ensure we keep the hot-reloaded kernel blobs alive.
+  //
+  // -> We should get rid of this field once Issue 33973 is fixed.
+  RawGrowableObjectArray* reloaded_kernel_blobs_;
 
   // Isolate list next pointer.
   Isolate* next_;

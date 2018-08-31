@@ -50,7 +50,7 @@ class ProcessedOptionsTest {
       ..sdkRoot = Uri.parse('org-dartlang-test:///sdk/dir/')
       ..compileSdk = false;
     expect(new ProcessedOptions(raw).sdkSummary,
-        Uri.parse('org-dartlang-test:///sdk/dir/vm_platform.dill'));
+        Uri.parse('org-dartlang-test:///sdk/dir/vm_platform_strong.dill'));
 
     // But it is left null when compile-sdk is true
     raw = new CompilerOptions()
@@ -112,7 +112,7 @@ class ProcessedOptionsTest {
         .writeAsStringSync('');
     fileSystem
         .entityForUri(Uri.parse('org-dartlang-test:///libraries.json'))
-        .writeAsStringSync('{"vm":{"libraries":{"foo":{"uri":"bar.dart"}}}}');
+        .writeAsStringSync('{"none":{"libraries":{"foo":{"uri":"bar.dart"}}}}');
     var raw = new CompilerOptions()
       ..packagesFileUri = Uri.parse('org-dartlang-test:///.packages')
       ..fileSystem = fileSystem
@@ -131,7 +131,7 @@ class ProcessedOptionsTest {
     fileSystem
         .entityForUri(
             Uri.parse('org-dartlang-test:///mysdk/lib/libraries.json'))
-        .writeAsStringSync('{"vm":{"libraries":{"foo":{"uri":"bar.dart"}}}}');
+        .writeAsStringSync('{"none":{"libraries":{"foo":{"uri":"bar.dart"}}}}');
     var raw = new CompilerOptions()
       ..fileSystem = fileSystem
       ..packagesFileUri = Uri.parse('org-dartlang-test:///.packages')
@@ -150,7 +150,7 @@ class ProcessedOptionsTest {
     fileSystem
         .entityForUri(
             Uri.parse('org-dartlang-test:///mysdk/lib/libraries.json'))
-        .writeAsStringSync('{"vm":{"libraries":{"foo":{"uri":"bar.dart"}}}}');
+        .writeAsStringSync('{"none":{"libraries":{"foo":{"uri":"bar.dart"}}}}');
     var raw = new CompilerOptions()
       ..fileSystem = fileSystem
       ..packagesFileUri = Uri.parse('org-dartlang-test:///.packages')
@@ -357,7 +357,7 @@ class ProcessedOptionsTest {
         .entityForUri(sdkRoot)
         .writeAsStringSync('\n');
     fileSystem
-        .entityForUri(sdkRoot.resolve('vm_platform.dill'))
+        .entityForUri(sdkRoot.resolve('vm_platform_strong.dill'))
         .writeAsStringSync('\n');
     fileSystem
         .entityForUri(Uri.parse('org-dartlang-test:///foo.dart'))
@@ -428,7 +428,7 @@ class ProcessedOptionsTest {
   test_validateOptions_inferred_summary_exists() async {
     var sdkRoot = Uri.parse('org-dartlang-test:///sdk/root/');
     var sdkSummary =
-        Uri.parse('org-dartlang-test:///sdk/root/vm_platform.dill');
+        Uri.parse('org-dartlang-test:///sdk/root/vm_platform_strong.dill');
     fileSystem.entityForUri(sdkRoot).writeAsStringSync('\n');
     fileSystem.entityForUri(sdkSummary).writeAsStringSync('\n');
     fileSystem

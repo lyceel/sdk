@@ -603,6 +603,32 @@ class ApiElementBuilder extends _BaseElementBuilder {
   }
 
   @override
+  Object visitMixinDeclaration(MixinDeclaration node) {
+    ElementHolder holder = new ElementHolder();
+    ElementHolder previousHolder = _currentHolder;
+    _currentHolder = holder;
+    try {
+      node.visitChildren(this);
+    } finally {
+      _currentHolder = previousHolder;
+    }
+
+    SimpleIdentifier nameNode = node.name;
+    MixinElementImpl element = new MixinElementImpl.forNode(nameNode);
+    _setCodeRange(element, node);
+    element.metadata = _createElementAnnotations(node.metadata);
+    element.typeParameters = holder.typeParameters;
+    setElementDocumentationComment(element, node);
+    element.accessors = holder.accessors;
+    element.fields = holder.fields;
+    element.methods = holder.methods;
+    _currentHolder.addMixin(element);
+    nameNode.staticElement = element;
+    holder.validate();
+    return null;
+  }
+
+  @override
   Object visitPartDirective(PartDirective node) {
     List<ElementAnnotation> annotations =
         _createElementAnnotations(node.metadata);
@@ -690,6 +716,7 @@ class ApiElementBuilder extends _BaseElementBuilder {
       elementAnnotations = _createElementAnnotations(node.metadata);
     }
     _setVariableDeclarationListAnnotations(node, elementAnnotations);
+    _setVariableDeclarationListCodeRanges(node);
     return null;
   }
 
@@ -782,6 +809,7 @@ class CompilationUnitBuilder {
       element.functions = holder.functions;
       element.source = source;
       element.librarySource = librarySource;
+      element.mixins = holder.mixins;
       element.typeAliases = holder.typeAliases;
       element.types = holder.types;
       element.topLevelVariables = holder.topLevelVariables;
@@ -1010,7 +1038,7 @@ class DirectiveElementBuilder extends SimpleAstVisitor<Object> {
   List<ElementAnnotation> _getElementAnnotations(
       NodeList<Annotation> metadata) {
     if (metadata.isEmpty) {
-      return ElementAnnotation.EMPTY_LIST;
+      return const <ElementAnnotation>[];
     }
     return metadata.map((Annotation a) => a.elementAnnotation).toList();
   }
@@ -1054,7 +1082,7 @@ class ElementBuilder extends ApiElementBuilder {
   Object visitDefaultFormalParameter(DefaultFormalParameter node) {
     super.visitDefaultFormalParameter(node);
     buildParameterInitializer(
-        node.element as ParameterElementImpl, node.defaultValue);
+        node.declaredElement as ParameterElementImpl, node.defaultValue);
     return null;
   }
 
@@ -1067,7 +1095,7 @@ class ElementBuilder extends ApiElementBuilder {
   @override
   Object visitVariableDeclaration(VariableDeclaration node) {
     super.visitVariableDeclaration(node);
-    VariableElementImpl element = node.element as VariableElementImpl;
+    VariableElementImpl element = node.declaredElement as VariableElementImpl;
     buildVariableInitializer(element, node.initializer);
     return null;
   }
@@ -1167,7 +1195,7 @@ class LocalElementBuilder extends _BaseElementBuilder {
   Object visitDefaultFormalParameter(DefaultFormalParameter node) {
     super.visitDefaultFormalParameter(node);
     buildParameterInitializer(
-        node.element as ParameterElementImpl, node.defaultValue);
+        node.declaredElement as ParameterElementImpl, node.defaultValue);
     return null;
   }
 
@@ -1312,6 +1340,7 @@ class LocalElementBuilder extends _BaseElementBuilder {
     List<ElementAnnotation> elementAnnotations =
         _createElementAnnotations(node.metadata);
     _setVariableDeclarationListAnnotations(node, elementAnnotations);
+    _setVariableDeclarationListCodeRanges(node);
     return null;
   }
 
@@ -1418,7 +1447,7 @@ abstract class _BaseElementBuilder extends RecursiveAstVisitor<Object> {
     }
     _currentHolder.addParameter(parameter);
     if (normalParameter is SimpleFormalParameterImpl) {
-      normalParameter.element = parameter;
+      normalParameter.declaredElement = parameter;
     }
     parameterName?.staticElement = parameter;
     normalParameter.accept(this);
@@ -1447,7 +1476,7 @@ abstract class _BaseElementBuilder extends RecursiveAstVisitor<Object> {
     //
     ElementHolder holder = new ElementHolder();
     _visitChildren(holder, node);
-    ParameterElementImpl element = node.element;
+    ParameterElementImpl element = node.declaredElement;
     element.metadata = _createElementAnnotations(node.metadata);
     if (node.parameters != null) {
       _createGenericFunctionType(element, holder);
@@ -1478,7 +1507,7 @@ abstract class _BaseElementBuilder extends RecursiveAstVisitor<Object> {
     //
     ElementHolder holder = new ElementHolder();
     _visitChildren(holder, node);
-    ParameterElementImpl element = node.element;
+    ParameterElementImpl element = node.declaredElement;
     element.metadata = _createElementAnnotations(node.metadata);
     _createGenericFunctionType(element, holder);
     holder.validate();
@@ -1518,11 +1547,11 @@ abstract class _BaseElementBuilder extends RecursiveAstVisitor<Object> {
         parameter.hasImplicitType = true;
       }
       _currentHolder.addParameter(parameter);
-      (node as SimpleFormalParameterImpl).element = parameter;
+      (node as SimpleFormalParameterImpl).declaredElement = parameter;
       parameterName?.staticElement = parameter;
     }
     super.visitSimpleFormalParameter(node);
-    parameter ??= node.element;
+    parameter ??= node.declaredElement;
     parameter?.metadata = _createElementAnnotations(node.metadata);
     return null;
   }
@@ -1549,7 +1578,7 @@ abstract class _BaseElementBuilder extends RecursiveAstVisitor<Object> {
   List<ElementAnnotation> _createElementAnnotations(
       NodeList<Annotation> annotations) {
     if (annotations.isEmpty) {
-      return ElementAnnotation.EMPTY_LIST;
+      return const <ElementAnnotation>[];
     }
     return annotations.map((Annotation a) {
       ElementAnnotationImpl elementAnnotation =
@@ -1612,9 +1641,19 @@ abstract class _BaseElementBuilder extends RecursiveAstVisitor<Object> {
   void _setVariableDeclarationListAnnotations(VariableDeclarationList node,
       List<ElementAnnotation> elementAnnotations) {
     for (VariableDeclaration variableDeclaration in node.variables) {
-      ElementImpl element = variableDeclaration.element as ElementImpl;
-      _setCodeRange(element, node.parent);
+      ElementImpl element = variableDeclaration.declaredElement as ElementImpl;
       element.metadata = elementAnnotations;
+    }
+  }
+
+  void _setVariableDeclarationListCodeRanges(VariableDeclarationList node) {
+    List<VariableDeclaration> variables = node.variables;
+    for (var i = 0; i < variables.length; i++) {
+      var variable = variables[i];
+      var offset = (i == 0 ? node.parent : variable).offset;
+      var length = variable.end - offset;
+      var element = variable.declaredElement as ElementImpl;
+      element.setCodeRange(offset, length);
     }
   }
 

@@ -52,7 +52,7 @@ final TEST_SUITE_DIRECTORIES = [
 // This file is created by gclient runhooks.
 final VS_TOOLCHAIN_FILE = new Path("build/win_toolchain.json");
 
-Future testConfigurations(List<Configuration> configurations) async {
+Future testConfigurations(List<TestConfiguration> configurations) async {
   var startTime = new DateTime.now();
   // Extract global options from first configuration.
   var firstConf = configurations[0];
@@ -85,26 +85,13 @@ Future testConfigurations(List<Configuration> configurations) async {
 
   // Print the configurations being run by this execution of
   // test.dart. However, don't do it if the silent progress indicator
-  // is used. This is only needed because of the junit tests.
+  // is used.
   if (progressIndicator != Progress.silent) {
-    var outputWords = configurations.length > 1
-        ? ['Test configurations:']
-        : ['Test configuration:'];
-
+    print('Test configuration${configurations.length > 1 ? 's' : ''}:');
     for (var configuration in configurations) {
-      var settings = [
-        configuration.compiler.name,
-        configuration.runtime.name,
-        configuration.mode.name,
-        configuration.architecture.name
-      ];
-      if (configuration.isChecked) settings.add('checked');
-      if (configuration.noPreviewDart2) settings.add('no-preview-dart-2');
-      if (configuration.useFastStartup) settings.add('fast-startup');
-      if (configuration.useEnableAsserts) settings.add('enable-asserts');
-      outputWords.add(settings.join('_'));
+      print("    ${configuration.configuration}");
+      print("Suites tested: ${configuration.selectors.keys.join(", ")}");
     }
-    print(outputWords.join(' '));
   }
 
   var runningBrowserTests =
@@ -145,12 +132,6 @@ Future testConfigurations(List<Configuration> configurations) async {
       // Issue: https://github.com/dart-lang/sdk/issues/23891
       // This change does not fix the problem.
       maxBrowserProcesses = math.max(1, maxBrowserProcesses ~/ 2);
-    } else if (configuration.runtime != Runtime.drt) {
-      // Even on machines with more than 16 processors, don't open more
-      // than 15 browser instances, to avoid overloading the machine.
-      // This is especially important when running locally on powerful
-      // desktops.
-      maxBrowserProcesses = math.min(maxBrowserProcesses, 15);
     }
 
     // If we specifically pass in a suite only run that.

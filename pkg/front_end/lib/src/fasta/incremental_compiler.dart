@@ -188,16 +188,17 @@ class IncrementalCompiler implements IncrementalKernelGenerator {
       for (Uri uri in new Set<Uri>.from(dillLoadedData.loader.builders.keys)
         ..removeAll(reusedLibraryUris)) {
         dillLoadedData.loader.builders.remove(uri);
+        dillLoadedDataUriToSource.remove(uri);
         userBuilders?.remove(uri);
       }
 
       if (hierarchy != null) {
-        List<Class> removedClasses = new List<Class>();
+        List<Library> removedLibraries = new List<Library>();
         for (LibraryBuilder builder in notReusedLibraries) {
           Library lib = builder.target;
-          removedClasses.addAll(lib.classes);
+          removedLibraries.add(lib);
         }
-        hierarchy.applyTreeChanges(removedClasses, const []);
+        hierarchy.applyTreeChanges(removedLibraries, const []);
       }
 
       if (userCode != null) {
@@ -221,6 +222,9 @@ class IncrementalCompiler implements IncrementalKernelGenerator {
 
       for (LibraryBuilder library in reusedLibraries) {
         userCode.loader.builders[library.uri] = library;
+        if (entryPoint == library.uri) {
+          userCode.loader.first = library;
+        }
         if (library.uri.scheme == "dart" && library.uri.path == "core") {
           userCode.loader.coreLibrary = library;
         }
@@ -245,8 +249,8 @@ class IncrementalCompiler implements IncrementalKernelGenerator {
         }
         userCode.loader.builders.clear();
         userCode = userCodeOld;
-        return new Component(
-            libraries: compiledLibraries, uriToSource: <Uri, Source>{});
+        return context.options.target.configureComponent(new Component(
+            libraries: compiledLibraries, uriToSource: <Uri, Source>{}));
       }
       if (componentWithDill != null) {
         this.invalidatedUris.clear();
@@ -281,7 +285,8 @@ class IncrementalCompiler implements IncrementalKernelGenerator {
       }
 
       // This is the incremental component.
-      return new Component(libraries: outputLibraries, uriToSource: uriToSource)
+      return context.options.target.configureComponent(
+          new Component(libraries: outputLibraries, uriToSource: uriToSource))
         ..mainMethod = mainMethod;
     });
   }
@@ -327,16 +332,19 @@ class IncrementalCompiler implements IncrementalKernelGenerator {
       }
     }
 
-    List<Class> removedClasses = new List<Class>();
+    List<Library> removedLibraries = new List<Library>();
     for (Uri uri in potentiallyReferencedLibraries.keys) {
       if (uri.scheme == "package") continue;
       LibraryBuilder builder = userCode.loader.builders.remove(uri);
       if (builder != null) {
         Library lib = builder.target;
-        removedClasses.addAll(lib.classes);
+        removedLibraries.add(lib);
+        dillLoadedData.loader.builders.remove(uri);
+        dillLoadedDataUriToSource.remove(uri);
+        userBuilders?.remove(uri);
       }
     }
-    hierarchy?.applyTreeChanges(removedClasses, const []);
+    hierarchy?.applyTreeChanges(removedLibraries, const []);
 
     return result;
   }
@@ -348,7 +356,7 @@ class IncrementalCompiler implements IncrementalKernelGenerator {
 
     if (summaryBytes != null) {
       ticker.logMs("Read ${c.options.sdkSummary}");
-      data.component = new Component();
+      data.component = c.options.target.configureComponent(new Component());
       new BinaryBuilder(summaryBytes, disableLazyReading: false)
           .readComponent(data.component);
       ticker.logMs("Deserialized ${c.options.sdkSummary}");
@@ -464,10 +472,10 @@ class IncrementalCompiler implements IncrementalKernelGenerator {
             combinators ??= <Combinator>[];
 
             combinators.add(combinator.isShow
-                ? new Combinator.show(
-                    combinator.names, combinator.fileOffset, library.fileUri)
-                : new Combinator.hide(
-                    combinator.names, combinator.fileOffset, library.fileUri));
+                ? new Combinator.show(null, combinator.names,
+                    combinator.fileOffset, library.fileUri)
+                : new Combinator.hide(null, combinator.names,
+                    combinator.fileOffset, library.fileUri));
           }
 
           debugLibrary.addImport(

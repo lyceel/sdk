@@ -477,11 +477,14 @@ static void GenerateDeoptimizationSequence(Assembler* assembler,
   // The code in this frame may not cause GC. kDeoptimizeCopyFrameRuntimeEntry
   // and kDeoptimizeFillFrameRuntimeEntry are leaf runtime calls.
   const intptr_t saved_result_slot_from_fp =
-      kFirstLocalSlotFromFp + 1 - (kNumberOfCpuRegisters - RAX);
+      compiler_frame_layout.first_local_from_fp + 1 -
+      (kNumberOfCpuRegisters - RAX);
   const intptr_t saved_exception_slot_from_fp =
-      kFirstLocalSlotFromFp + 1 - (kNumberOfCpuRegisters - RAX);
+      compiler_frame_layout.first_local_from_fp + 1 -
+      (kNumberOfCpuRegisters - RAX);
   const intptr_t saved_stacktrace_slot_from_fp =
-      kFirstLocalSlotFromFp + 1 - (kNumberOfCpuRegisters - RDX);
+      compiler_frame_layout.first_local_from_fp + 1 -
+      (kNumberOfCpuRegisters - RDX);
   // Result in RAX is preserved as part of pushing all registers below.
 
   // Push registers in their enumeration order: lowest register number at
@@ -546,12 +549,15 @@ static void GenerateDeoptimizationSequence(Assembler* assembler,
   __ CallRuntime(kDeoptimizeFillFrameRuntimeEntry, 1);
   if (kind == kLazyDeoptFromReturn) {
     // Restore result into RBX.
-    __ movq(RBX, Address(RBP, kFirstLocalSlotFromFp * kWordSize));
+    __ movq(RBX, Address(RBP, compiler_frame_layout.first_local_from_fp *
+                                  kWordSize));
   } else if (kind == kLazyDeoptFromThrow) {
     // Restore exception into RBX.
-    __ movq(RBX, Address(RBP, kFirstLocalSlotFromFp * kWordSize));
+    __ movq(RBX, Address(RBP, compiler_frame_layout.first_local_from_fp *
+                                  kWordSize));
     // Restore stacktrace into RDX.
-    __ movq(RDX, Address(RBP, (kFirstLocalSlotFromFp - 1) * kWordSize));
+    __ movq(RDX, Address(RBP, (compiler_frame_layout.first_local_from_fp - 1) *
+                                  kWordSize));
   }
   // Code above cannot cause GC.
   // There is a Dart Frame on the stack. We must restore PP and leave frame.
@@ -660,8 +666,8 @@ void StubCode::GenerateMegamorphicMissStub(Assembler* assembler) {
   __ movq(RAX, FieldAddress(R10, ArgumentsDescriptor::count_offset()));
   // Three words (saved pp, saved fp, stub's pc marker)
   // in the stack above the return address.
-  __ movq(RAX,
-          Address(RSP, RAX, TIMES_4, kSavedAboveReturnAddress * kWordSize));
+  __ movq(RAX, Address(RSP, RAX, TIMES_4,
+                       compiler_frame_layout.saved_below_pc() * kWordSize));
   // Preserve IC data and arguments descriptor.
   __ pushq(RBX);
   __ pushq(R10);
@@ -765,7 +771,10 @@ void StubCode::GenerateAllocateArrayStub(Assembler* assembler) {
     __ Bind(&done);
 
     // Get the class index and insert it into the tags.
-    __ orq(RDI, Immediate(RawObject::ClassIdTag::encode(cid)));
+    uint32_t tags = 0;
+    tags = RawObject::ClassIdTag::update(cid, tags);
+    tags = RawObject::NewBit::update(true, tags);
+    __ orq(RDI, Immediate(tags));
     __ movq(FieldAddress(RAX, Array::tags_offset()), RDI);  // Tags.
   }
 
@@ -1168,7 +1177,10 @@ void StubCode::GenerateAllocateContextStub(Assembler* assembler) {
       // RAX: new object.
       // R10: number of context variables.
       // R13: size and bit tags.
-      __ orq(R13, Immediate(RawObject::ClassIdTag::encode(cid)));
+      uint32_t tags = 0;
+      tags = RawObject::ClassIdTag::update(cid, tags);
+      tags = RawObject::NewBit::update(true, tags);
+      __ orq(R13, Immediate(tags));
       __ movq(FieldAddress(RAX, Context::tags_offset()), R13);  // Tags.
     }
 
@@ -1225,6 +1237,23 @@ void StubCode::GenerateAllocateContextStub(Assembler* assembler) {
   __ ret();
 }
 
+void StubCode::GenerateUpdateStoreBufferWrappersStub(Assembler* assembler) {
+  for (intptr_t i = 0; i < kNumberOfCpuRegisters; ++i) {
+    if ((kDartAvailableCpuRegs & (1 << i)) == 0) continue;
+
+    Register reg = static_cast<Register>(i);
+    intptr_t start = __ CodeSize();
+    __ pushq(RDX);
+    __ movq(RDX, reg);
+    __ call(Address(THR, Thread::update_store_buffer_entry_point_offset()));
+    __ popq(RDX);
+    __ ret();
+    intptr_t end = __ CodeSize();
+
+    RELEASE_ASSERT(end - start == kStoreBufferWrapperSize);
+  }
+}
+
 // Helper stub to implement Assembler::StoreIntoObject.
 // Input parameters:
 //   RDX: Address being stored
@@ -1234,8 +1263,8 @@ void StubCode::GenerateUpdateStoreBufferStub(Assembler* assembler) {
   // store buffer if the object is in the store buffer already.
   // RDX: Address being stored
   __ movl(TMP, FieldAddress(RDX, Object::tags_offset()));
-  __ testl(TMP, Immediate(1 << RawObject::kRememberedBit));
-  __ j(EQUAL, &add_to_buffer, Assembler::kNearJump);
+  __ testl(TMP, Immediate(1 << RawObject::kOldAndNotRememberedBit));
+  __ j(NOT_EQUAL, &add_to_buffer, Assembler::kNearJump);
   __ ret();
 
   // Update the tags that this object has been remembered.
@@ -1244,10 +1273,10 @@ void StubCode::GenerateUpdateStoreBufferStub(Assembler* assembler) {
   // RDX: Address being stored
   // RAX: Current tag value
   __ Bind(&add_to_buffer);
-  // lock+orl is an atomic read-modify-write.
+  // lock+andl is an atomic read-modify-write.
   __ lock();
-  __ orl(FieldAddress(RDX, Object::tags_offset()),
-         Immediate(1 << RawObject::kRememberedBit));
+  __ andl(FieldAddress(RDX, Object::tags_offset()),
+          Immediate(~(1 << RawObject::kOldAndNotRememberedBit)));
 
   // Save registers being destroyed.
   __ pushq(RAX);
@@ -1338,6 +1367,7 @@ void StubCode::GenerateAllocationStubForClass(Assembler* assembler,
     tags = RawObject::SizeTag::update(instance_size, tags);
     ASSERT(cls.id() != kIllegalCid);
     tags = RawObject::ClassIdTag::update(cls.id(), tags);
+    tags = RawObject::NewBit::update(true, tags);
     // 64 bit store also zeros the identity hash field.
     __ movq(Address(RAX, Instance::tags_offset()), Immediate(tags));
     __ addq(RAX, Immediate(kHeapObjectTag));
@@ -1566,7 +1596,8 @@ void StubCode::GenerateNArgsCheckInlineCacheStub(
     intptr_t num_args,
     const RuntimeEntry& handle_ic_miss,
     Token::Kind kind,
-    bool optimized) {
+    bool optimized,
+    bool exactness_check) {
   ASSERT(num_args == 1 || num_args == 2);
 #if defined(DEBUG)
   {
@@ -1613,9 +1644,9 @@ void StubCode::GenerateNArgsCheckInlineCacheStub(
 
   // Get argument count as Smi into RCX.
   __ movq(RCX, FieldAddress(R10, ArgumentsDescriptor::count_offset()));
-  // Load first argument into R9.
-  __ movq(R9, Address(RSP, RCX, TIMES_4, 0));
-  __ LoadTaggedClassIdMayBeSmi(RAX, R9);
+  // Load first argument into RDX.
+  __ movq(RDX, Address(RSP, RCX, TIMES_4, 0));
+  __ LoadTaggedClassIdMayBeSmi(RAX, RDX);
   // RAX: first argument class ID as Smi.
   if (num_args == 2) {
     // Load second argument into R9.
@@ -1630,6 +1661,8 @@ void StubCode::GenerateNArgsCheckInlineCacheStub(
   const bool optimize = kind == Token::kILLEGAL;
   const intptr_t target_offset = ICData::TargetIndexFor(num_args) * kWordSize;
   const intptr_t count_offset = ICData::CountIndexFor(num_args) * kWordSize;
+  const intptr_t exactness_offset =
+      ICData::ExactnessOffsetFor(num_args) * kWordSize;
 
   __ Bind(&loop);
   for (int unroll = optimize ? 4 : 2; unroll >= 0; unroll--) {
@@ -1647,7 +1680,7 @@ void StubCode::GenerateNArgsCheckInlineCacheStub(
     __ Bind(&update);
 
     const intptr_t entry_size =
-        ICData::TestEntryLengthFor(num_args) * kWordSize;
+        ICData::TestEntryLengthFor(num_args, exactness_check) * kWordSize;
     __ addq(R13, Immediate(entry_size));  // Next entry.
 
     __ cmpq(R9, Immediate(Smi::RawValue(kIllegalCid)));  // Done?
@@ -1693,20 +1726,61 @@ void StubCode::GenerateNArgsCheckInlineCacheStub(
 
   __ Bind(&found);
   // R13: Pointer to an IC data check group.
+  Label call_target_function_through_unchecked_entry;
+  if (exactness_check) {
+    Label exactness_ok;
+    ASSERT(num_args == 1);
+    __ movq(RAX, Address(R13, exactness_offset));
+    __ cmpq(RAX, Immediate(Smi::RawValue(
+                     StaticTypeExactnessState::HasExactSuperType().Encode())));
+    __ j(LESS, &exactness_ok);
+    __ j(EQUAL, &call_target_function_through_unchecked_entry);
+
+    // Check trivial exactness.
+    // Note: RawICData::static_receiver_type_ is guaranteed to be not null
+    // because we only emit calls to this stub when it is not null.
+    __ movq(RCX, FieldAddress(RBX, ICData::static_receiver_type_offset()));
+    __ movq(RCX, FieldAddress(RCX, Type::arguments_offset()));
+    // RAX contains an offset to type arguments in words as a smi,
+    // hence TIMES_4. RDX is guaranteed to be non-smi because it is expected to
+    // have type arguments.
+    __ cmpq(RCX, FieldAddress(RDX, RAX, TIMES_4, 0));
+    __ j(EQUAL, &call_target_function_through_unchecked_entry);
+
+    // Update exactness state (not-exact anymore).
+    __ movq(Address(R13, exactness_offset),
+            Immediate(
+                Smi::RawValue(StaticTypeExactnessState::NotExact().Encode())));
+    __ Bind(&exactness_ok);
+  }
   __ movq(RAX, Address(R13, target_offset));
 
   if (FLAG_optimization_counter_threshold >= 0) {
-    __ Comment("Update caller's counter");
+    __ Comment("Update ICData counter");
     // Ignore overflow.
     __ addq(Address(R13, count_offset), Immediate(Smi::RawValue(1)));
   }
 
-  __ Comment("Call target");
+  __ Comment("Call target (via checked entry point)");
   __ Bind(&call_target_function);
   // RAX: Target function.
   __ movq(CODE_REG, FieldAddress(RAX, Function::code_offset()));
   __ movq(RCX, FieldAddress(RAX, Function::entry_point_offset()));
   __ jmp(RCX);
+
+  if (exactness_check) {
+    __ Bind(&call_target_function_through_unchecked_entry);
+    if (FLAG_optimization_counter_threshold >= 0) {
+      __ Comment("Update ICData counter");
+      // Ignore overflow.
+      __ addq(Address(R13, count_offset), Immediate(Smi::RawValue(1)));
+    }
+    __ Comment("Call target (via unchecked entry point)");
+    __ movq(RAX, Address(R13, target_offset));
+    __ movq(CODE_REG, FieldAddress(RAX, Function::code_offset()));
+    __ movq(RCX, FieldAddress(RAX, Function::unchecked_entry_point_offset()));
+    __ jmp(RCX);
+  }
 
 #if !defined(PRODUCT)
   if (!optimized) {
@@ -1736,6 +1810,14 @@ void StubCode::GenerateOneArgCheckInlineCacheStub(Assembler* assembler) {
   GenerateUsageCounterIncrement(assembler, RCX);
   GenerateNArgsCheckInlineCacheStub(
       assembler, 1, kInlineCacheMissHandlerOneArgRuntimeEntry, Token::kILLEGAL);
+}
+
+void StubCode::GenerateOneArgCheckInlineCacheWithExactnessCheckStub(
+    Assembler* assembler) {
+  GenerateUsageCounterIncrement(assembler, RCX);
+  GenerateNArgsCheckInlineCacheStub(
+      assembler, 1, kInlineCacheMissHandlerOneArgRuntimeEntry, Token::kILLEGAL,
+      /*optimized=*/false, /*exactness_check=*/true);
 }
 
 void StubCode::GenerateTwoArgsCheckInlineCacheStub(Assembler* assembler) {
@@ -1779,7 +1861,16 @@ void StubCode::GenerateOneArgOptimizedCheckInlineCacheStub(
   GenerateOptimizedUsageCounterIncrement(assembler);
   GenerateNArgsCheckInlineCacheStub(assembler, 1,
                                     kInlineCacheMissHandlerOneArgRuntimeEntry,
-                                    Token::kILLEGAL, true /* optimized */);
+                                    Token::kILLEGAL, /*optimized=*/true);
+}
+
+void StubCode::GenerateOneArgOptimizedCheckInlineCacheWithExactnessCheckStub(
+    Assembler* assembler) {
+  GenerateOptimizedUsageCounterIncrement(assembler);
+  GenerateNArgsCheckInlineCacheStub(assembler, 1,
+                                    kInlineCacheMissHandlerOneArgRuntimeEntry,
+                                    Token::kILLEGAL, /*optimized=*/true,
+                                    /*exactness_check=*/true);
 }
 
 void StubCode::GenerateTwoArgsOptimizedCheckInlineCacheStub(
@@ -1787,7 +1878,7 @@ void StubCode::GenerateTwoArgsOptimizedCheckInlineCacheStub(
   GenerateOptimizedUsageCounterIncrement(assembler);
   GenerateNArgsCheckInlineCacheStub(assembler, 2,
                                     kInlineCacheMissHandlerTwoArgsRuntimeEntry,
-                                    Token::kILLEGAL, true /* optimized */);
+                                    Token::kILLEGAL, /*optimized=*/true);
 }
 
 // Intermediary stub between a static call and its target. ICData contains
@@ -2023,124 +2114,175 @@ void StubCode::GenerateDebugStepCheckStub(Assembler* assembler) {
 //
 // Result in R8: null -> not found, otherwise result (true or false).
 static void GenerateSubtypeNTestCacheStub(Assembler* assembler, int n) {
-  ASSERT((n == 1) || (n == 2) || (n == 4));
+  ASSERT(n == 1 || n == 2 || n == 4 || n == 6);
 
   const Register kCacheReg = R9;
   const Register kInstanceReg = RAX;
   const Register kInstantiatorTypeArgumentsReg = RDX;
   const Register kFunctionTypeArgumentsReg = RCX;
 
-  __ LoadObject(R8, Object::null_object());
-  if (n > 1) {
-    __ LoadClass(R10, kInstanceReg);
-    // Compute instance type arguments into R13.
-    Label has_no_type_arguments;
-    __ movq(R13, R8);
-    __ movl(RDI,
-            FieldAddress(R10,
-                         Class::type_arguments_field_offset_in_words_offset()));
-    __ cmpl(RDI, Immediate(Class::kNoTypeArguments));
-    __ j(EQUAL, &has_no_type_arguments, Assembler::kNearJump);
-    __ movq(R13, FieldAddress(kInstanceReg, RDI, TIMES_8, 0));
-    __ Bind(&has_no_type_arguments);
+  const Register kInstanceCidOrFunction = R10;
+  const Register kInstanceInstantiatorTypeArgumentsReg = R13;
+  const Register kInstanceParentFunctionTypeArgumentsReg = PP;
+  const Register kInstanceDelayedFunctionTypeArgumentsReg = CODE_REG;
+
+  const Register kNullReg = R8;
+
+  __ LoadObject(kNullReg, Object::null_object());
+
+  // Free up these 2 registers to be used for 6-value test.
+  if (n >= 6) {
+    __ pushq(kInstanceParentFunctionTypeArgumentsReg);
+    __ pushq(kInstanceDelayedFunctionTypeArgumentsReg);
   }
-  __ LoadClassId(R10, kInstanceReg);
-  // RAX: instance, R10: instance class id.
-  // R13: instance type arguments or null, used only if n > 1.
-  __ movq(RSI, kCacheReg);
-  // RSI: SubtypeTestCache.
-  __ movq(RSI, FieldAddress(RSI, SubtypeTestCache::cache_offset()));
+
+  // Loop initialization (moved up here to avoid having all dependent loads
+  // after each other).
+  __ movq(RSI, FieldAddress(kCacheReg, SubtypeTestCache::cache_offset()));
   __ addq(RSI, Immediate(Array::data_offset() - kHeapObjectTag));
-  // RSI: Entry start.
-  // R10: instance class id.
-  // R13: instance type arguments (still null if closure).
-  Label loop, found, not_found, next_iteration;
-  __ SmiTag(R10);
-  __ cmpq(R10, Immediate(Smi::RawValue(kClosureCid)));
-  __ j(NOT_EQUAL, &loop, Assembler::kNearJump);
-  __ movq(R13, FieldAddress(kInstanceReg,
-                            Closure::function_type_arguments_offset()));
-  __ cmpq(R13, R8);  // Cache cannot be used for generic closures.
-  __ j(NOT_EQUAL, &not_found, Assembler::kNearJump);
-  __ movq(R13, FieldAddress(kInstanceReg,
-                            Closure::instantiator_type_arguments_offset()));
-  __ movq(R10, FieldAddress(kInstanceReg, Closure::function_offset()));
-  // R10: instance class id as Smi or function.
+
+  Label loop, not_closure;
+  __ LoadClassId(R10, kInstanceReg);
+  __ cmpq(R10, Immediate(kClosureCid));
+  __ j(NOT_EQUAL, &not_closure, Assembler::kNearJump);
+
+  // Closure handling.
+  {
+    __ movq(kInstanceCidOrFunction,
+            FieldAddress(kInstanceReg, Closure::function_offset()));
+    if (n >= 2) {
+      __ movq(kInstanceInstantiatorTypeArgumentsReg,
+              FieldAddress(kInstanceReg,
+                           Closure::instantiator_type_arguments_offset()));
+      if (n >= 6) {
+        ASSERT(n == 6);
+        __ movq(kInstanceParentFunctionTypeArgumentsReg,
+                FieldAddress(kInstanceReg,
+                             Closure::function_type_arguments_offset()));
+        __ movq(kInstanceDelayedFunctionTypeArgumentsReg,
+                FieldAddress(kInstanceReg,
+                             Closure::delayed_type_arguments_offset()));
+      }
+    }
+    __ jmp(&loop, Assembler::kNearJump);
+  }
+
+  // Non-Closure handling.
+  {
+    __ Bind(&not_closure);
+    if (n == 1) {
+      __ SmiTag(kInstanceCidOrFunction);
+    } else {
+      ASSERT(n >= 2);
+      Label has_no_type_arguments;
+      // [LoadClassById] also tags [kInstanceCidOrFunction] as a side-effect.
+      __ LoadClassById(RDI, kInstanceCidOrFunction);
+      __ movq(kInstanceInstantiatorTypeArgumentsReg, kNullReg);
+      __ movl(RDI,
+              FieldAddress(
+                  RDI, Class::type_arguments_field_offset_in_words_offset()));
+      __ cmpl(RDI, Immediate(Class::kNoTypeArguments));
+      __ j(EQUAL, &has_no_type_arguments, Assembler::kNearJump);
+      __ movq(kInstanceInstantiatorTypeArgumentsReg,
+              FieldAddress(kInstanceReg, RDI, TIMES_8, 0));
+      __ Bind(&has_no_type_arguments);
+
+      if (n >= 6) {
+        __ movq(kInstanceParentFunctionTypeArgumentsReg, kNullReg);
+        __ movq(kInstanceDelayedFunctionTypeArgumentsReg, kNullReg);
+      }
+    }
+  }
+
+  Label found, not_found, next_iteration;
+
+  // Loop header.
   __ Bind(&loop);
   __ movq(RDI, Address(RSI, kWordSize *
                                 SubtypeTestCache::kInstanceClassIdOrFunction));
-  __ cmpq(RDI, R8);
+  __ cmpq(RDI, kNullReg);
   __ j(EQUAL, &not_found, Assembler::kNearJump);
-  __ cmpq(RDI, R10);
+  __ cmpq(RDI, kInstanceCidOrFunction);
   if (n == 1) {
     __ j(EQUAL, &found, Assembler::kNearJump);
   } else {
     __ j(NOT_EQUAL, &next_iteration, Assembler::kNearJump);
-    __ movq(RDI,
+    __ cmpq(kInstanceInstantiatorTypeArgumentsReg,
             Address(RSI, kWordSize * SubtypeTestCache::kInstanceTypeArguments));
-    __ cmpq(RDI, R13);
     if (n == 2) {
       __ j(EQUAL, &found, Assembler::kNearJump);
     } else {
       __ j(NOT_EQUAL, &next_iteration, Assembler::kNearJump);
-      __ movq(RDI,
+      __ cmpq(kInstantiatorTypeArgumentsReg,
               Address(RSI, kWordSize *
                                SubtypeTestCache::kInstantiatorTypeArguments));
-      __ cmpq(RDI, kInstantiatorTypeArgumentsReg);
       __ j(NOT_EQUAL, &next_iteration, Assembler::kNearJump);
-      __ movq(RDI, Address(RSI, kWordSize *
-                                    SubtypeTestCache::kFunctionTypeArguments));
-      __ cmpq(RDI, kFunctionTypeArgumentsReg);
-      __ j(EQUAL, &found, Assembler::kNearJump);
+      __ cmpq(
+          kFunctionTypeArgumentsReg,
+          Address(RSI, kWordSize * SubtypeTestCache::kFunctionTypeArguments));
+
+      if (n == 4) {
+        __ j(EQUAL, &found, Assembler::kNearJump);
+      } else {
+        ASSERT(n == 6);
+        __ j(NOT_EQUAL, &next_iteration, Assembler::kNearJump);
+
+        __ cmpq(
+            kInstanceParentFunctionTypeArgumentsReg,
+            Address(
+                RSI,
+                kWordSize *
+                    SubtypeTestCache::kInstanceParentFunctionTypeArguments));
+        __ j(NOT_EQUAL, &next_iteration, Assembler::kNearJump);
+        __ cmpq(
+            kInstanceDelayedFunctionTypeArgumentsReg,
+            Address(
+                RSI,
+                kWordSize *
+                    SubtypeTestCache::kInstanceDelayedFunctionTypeArguments));
+        __ j(EQUAL, &found, Assembler::kNearJump);
+      }
     }
   }
 
   __ Bind(&next_iteration);
   __ addq(RSI, Immediate(kWordSize * SubtypeTestCache::kTestEntryLength));
   __ jmp(&loop, Assembler::kNearJump);
-  // Fall through to not found.
-  __ Bind(&not_found);
-  __ ret();
 
   __ Bind(&found);
   __ movq(R8, Address(RSI, kWordSize * SubtypeTestCache::kTestResult));
+  if (n >= 6) {
+    __ popq(kInstanceDelayedFunctionTypeArgumentsReg);
+    __ popq(kInstanceParentFunctionTypeArgumentsReg);
+  }
+  __ ret();
+
+  __ Bind(&not_found);
+  if (n >= 6) {
+    __ popq(kInstanceDelayedFunctionTypeArgumentsReg);
+    __ popq(kInstanceParentFunctionTypeArgumentsReg);
+  }
   __ ret();
 }
 
-// Used to check class and type arguments. Arguments passed on stack:
-// TOS + 0: return address.
-// TOS + 1: raw_null.
-// TOS + 2: raw_null.
-// TOS + 3: instance.
-// TOS + 4: SubtypeTestCache.
-// Result in R8: null -> not found, otherwise result (true or false).
-// Preserves RCX/RDX.
+// See comment on [GenerateSubtypeNTestCacheStub].
 void StubCode::GenerateSubtype1TestCacheStub(Assembler* assembler) {
   GenerateSubtypeNTestCacheStub(assembler, 1);
 }
 
-// Used to check class and type arguments. Arguments passed on stack:
-// TOS + 0: return address.
-// TOS + 1: raw_null.
-// TOS + 2: raw_null.
-// TOS + 3: instance.
-// TOS + 4: SubtypeTestCache.
-// Result in R8: null -> not found, otherwise result (true or false).
-// Preserves RCX/RDX.
+// See comment on [GenerateSubtypeNTestCacheStub].
 void StubCode::GenerateSubtype2TestCacheStub(Assembler* assembler) {
   GenerateSubtypeNTestCacheStub(assembler, 2);
 }
 
-// Used to check class and type arguments. Arguments passed on stack:
-// TOS + 0: return address.
-// TOS + 1: function type arguments (can be raw_null).
-// TOS + 2: instantiator type arguments (can be raw_null).
-// TOS + 3: instance.
-// TOS + 4: SubtypeTestCache.
-// Result in R8: null -> not found, otherwise result (true or false).
-// Preserves RCX/RDX.
+// See comment on [GenerateSubtypeNTestCacheStub].
 void StubCode::GenerateSubtype4TestCacheStub(Assembler* assembler) {
   GenerateSubtypeNTestCacheStub(assembler, 4);
+}
+
+// See comment on [GenerateSubtypeNTestCacheStub].
+void StubCode::GenerateSubtype6TestCacheStub(Assembler* assembler) {
+  GenerateSubtypeNTestCacheStub(assembler, 6);
 }
 
 // Used to test whether a given value is of a given type (different variants,
@@ -2316,18 +2458,24 @@ void StubCode::GenerateSlowTypeTestStub(Assembler* assembler) {
   const Register kTmp = RDI;
 
   // If this is not a [Type] object, we'll go to the runtime.
-  Label is_simple, is_instantiated, is_uninstantiated;
+  Label is_simple_case, is_complex_case;
   __ LoadClassId(kTmp, kDstTypeReg);
   __ cmpq(kTmp, Immediate(kTypeCid));
-  __ BranchIf(NOT_EQUAL, &is_uninstantiated);
+  __ BranchIf(NOT_EQUAL, &is_complex_case);
 
   // Check whether this [Type] is instantiated/uninstantiated.
   __ cmpb(FieldAddress(kDstTypeReg, Type::type_state_offset()),
           Immediate(RawType::kFinalizedInstantiated));
-  __ BranchIf(NOT_EQUAL, &is_uninstantiated);
-  // Fall through to &is_instantiated
+  __ BranchIf(NOT_EQUAL, &is_complex_case);
 
-  __ Bind(&is_instantiated);
+  // Check whether this [Type] is a function type.
+  __ movq(kTmp, FieldAddress(kDstTypeReg, Type::signature_offset()));
+  __ CompareObject(kTmp, Object::null_object());
+  __ BranchIf(NOT_EQUAL, &is_complex_case);
+
+  // Fall through to &is_simple_case
+
+  __ Bind(&is_simple_case);
   {
     __ Call(*StubCode::Subtype2TestCache_entry());
     __ CompareObject(R8, Bool::True());
@@ -2335,9 +2483,9 @@ void StubCode::GenerateSlowTypeTestStub(Assembler* assembler) {
     __ Jump(&call_runtime);
   }
 
-  __ Bind(&is_uninstantiated);
+  __ Bind(&is_complex_case);
   {
-    __ Call(*StubCode::Subtype4TestCache_entry());
+    __ Call(*StubCode::Subtype6TestCache_entry());
     __ CompareObject(R8, Bool::True());
     __ BranchIf(EQUAL, &done);  // Cache said: yes.
     // Fall through to runtime_call
@@ -2641,7 +2789,8 @@ void StubCode::GenerateICCallThroughFunctionStub(Assembler* assembler) {
   __ testq(R9, R9);
   __ j(ZERO, &miss, Assembler::kNearJump);
 
-  const intptr_t entry_length = ICData::TestEntryLengthFor(1) * kWordSize;
+  const intptr_t entry_length =
+      ICData::TestEntryLengthFor(1, /*tracking_exactness=*/false) * kWordSize;
   __ addq(R13, Immediate(entry_length));  // Next entry.
   __ jmp(&loop);
 
@@ -2677,7 +2826,8 @@ void StubCode::GenerateICCallThroughCodeStub(Assembler* assembler) {
   __ testq(R9, R9);
   __ j(ZERO, &miss, Assembler::kNearJump);
 
-  const intptr_t entry_length = ICData::TestEntryLengthFor(1) * kWordSize;
+  const intptr_t entry_length =
+      ICData::TestEntryLengthFor(1, /*tracking_exactness=*/false) * kWordSize;
   __ addq(R13, Immediate(entry_length));  // Next entry.
   __ jmp(&loop);
 
@@ -2713,7 +2863,8 @@ void StubCode::GenerateUnlinkedCallStub(Assembler* assembler) {
   __ LeaveStubFrame();
 
   __ movq(CODE_REG, Address(THR, Thread::ic_lookup_through_code_stub_offset()));
-  __ movq(RCX, FieldAddress(CODE_REG, Code::checked_entry_point_offset()));
+  __ movq(RCX, FieldAddress(CODE_REG, Code::entry_point_offset(
+                                          Code::EntryKind::kMonomorphic)));
   __ jmp(RCX);
 }
 
@@ -2749,7 +2900,8 @@ void StubCode::GenerateSingleTargetCallStub(Assembler* assembler) {
   __ LeaveStubFrame();
 
   __ movq(CODE_REG, Address(THR, Thread::ic_lookup_through_code_stub_offset()));
-  __ movq(RCX, FieldAddress(CODE_REG, Code::checked_entry_point_offset()));
+  __ movq(RCX, FieldAddress(CODE_REG, Code::entry_point_offset(
+                                          Code::EntryKind::kMonomorphic)));
   __ jmp(RCX);
 }
 
@@ -2770,7 +2922,8 @@ void StubCode::GenerateMonomorphicMissStub(Assembler* assembler) {
   __ LeaveStubFrame();
 
   __ movq(CODE_REG, Address(THR, Thread::ic_lookup_through_code_stub_offset()));
-  __ movq(RCX, FieldAddress(CODE_REG, Code::checked_entry_point_offset()));
+  __ movq(RCX, FieldAddress(CODE_REG, Code::entry_point_offset(
+                                          Code::EntryKind::kMonomorphic)));
   __ jmp(RCX);
 }
 

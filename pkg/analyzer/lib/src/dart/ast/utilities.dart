@@ -259,9 +259,26 @@ class AstCloner implements AstVisitor<AstNode> {
   }
 
   @override
-  CommentReference visitCommentReference(CommentReference node) =>
-      astFactory.commentReference(
-          cloneToken(node.newKeyword), cloneNode(node.identifier));
+  CommentReference visitCommentReference(CommentReference node) {
+    // Comment references have a token stream
+    // separate from the compilation unit's token stream.
+    // Clone the tokens in that stream here and add them to _clondedTokens
+    // for use when cloning the comment reference.
+    Token token = node.beginToken;
+    Token lastCloned = new Token.eof(-1);
+    while (token != null) {
+      Token clone = token.copy();
+      _clonedTokens[token] = clone;
+      lastCloned.setNext(clone);
+      lastCloned = clone;
+      if (token.isEof) {
+        break;
+      }
+      token = token.next;
+    }
+    return astFactory.commentReference(
+        cloneToken(node.newKeyword), cloneNode(node.identifier));
+  }
 
   @override
   CompilationUnit visitCompilationUnit(CompilationUnit node) {
@@ -723,6 +740,20 @@ class AstCloner implements AstVisitor<AstNode> {
           cloneNode(node.argumentList));
 
   @override
+  AstNode visitMixinDeclaration(MixinDeclaration node) =>
+      astFactory.mixinDeclaration(
+          cloneNode(node.documentationComment),
+          cloneNodeList(node.metadata),
+          cloneToken(node.mixinKeyword),
+          cloneNode(node.name),
+          cloneNode(node.typeParameters),
+          cloneNode(node.onClause),
+          cloneNode(node.implementsClause),
+          cloneToken(node.leftBracket),
+          cloneNodeList(node.members),
+          cloneToken(node.rightBracket));
+
+  @override
   NamedExpression visitNamedExpression(NamedExpression node) => astFactory
       .namedExpression(cloneNode(node.name), cloneNode(node.expression));
 
@@ -738,6 +769,10 @@ class AstCloner implements AstVisitor<AstNode> {
   @override
   NullLiteral visitNullLiteral(NullLiteral node) =>
       astFactory.nullLiteral(cloneToken(node.literal));
+
+  @override
+  AstNode visitOnClause(OnClause node) => astFactory.onClause(
+      cloneToken(node.onKeyword), cloneNodeList(node.superclassConstraints));
 
   @override
   ParenthesizedExpression visitParenthesizedExpression(
@@ -1001,12 +1036,6 @@ class AstCloner implements AstVisitor<AstNode> {
         CommentToken c2 = clone.precedingComments;
         while (c1 != null && c2 != null) {
           _clonedTokens[c1] = c2;
-          if (c1 is DocumentationCommentToken &&
-              c2 is DocumentationCommentToken) {
-            for (int i = 0; i < c1.references.length; i++) {
-              _clonedTokens[c1.references[i]] = c2.references[i];
-            }
-          }
           c1 = c1.next;
           c2 = c2.next;
         }
@@ -1052,6 +1081,15 @@ class AstComparator implements AstVisitor<bool> {
    */
   bool failDifferentLength(List first, List second) {
     return false;
+  }
+
+  /**
+   * Check whether the values of the [first] and [second] nodes are [equal].
+   * Subclasses can override to throw.
+   */
+  bool failIfNotEqual(
+      AstNode first, Object firstValue, AstNode second, Object secondValue) {
+    return firstValue == secondValue;
   }
 
   /**
@@ -1157,7 +1195,7 @@ class AstComparator implements AstVisitor<bool> {
 
   @override
   bool visitAssertInitializer(AssertInitializer node) {
-    AssertStatement other = _other as AssertStatement;
+    AssertInitializer other = _other as AssertInitializer;
     return isEqualTokens(node.assertKeyword, other.assertKeyword) &&
         isEqualTokens(node.leftParenthesis, other.leftParenthesis) &&
         isEqualNodes(node.condition, other.condition) &&
@@ -1219,7 +1257,7 @@ class AstComparator implements AstVisitor<bool> {
   bool visitBooleanLiteral(BooleanLiteral node) {
     BooleanLiteral other = _other as BooleanLiteral;
     return isEqualTokens(node.literal, other.literal) &&
-        node.value == other.value;
+        failIfNotEqual(node, node.value, other, other.value);
   }
 
   @override
@@ -1419,7 +1457,7 @@ class AstComparator implements AstVisitor<bool> {
   bool visitDoubleLiteral(DoubleLiteral node) {
     DoubleLiteral other = _other as DoubleLiteral;
     return isEqualTokens(node.literal, other.literal) &&
-        node.value == other.value;
+        failIfNotEqual(node, node.value, other, other.value);
   }
 
   @override
@@ -1694,7 +1732,7 @@ class AstComparator implements AstVisitor<bool> {
   bool visitIntegerLiteral(IntegerLiteral node) {
     IntegerLiteral other = _other as IntegerLiteral;
     return isEqualTokens(node.literal, other.literal) &&
-        (node.value == other.value);
+        failIfNotEqual(node, node.value, other, other.value);
   }
 
   @override
@@ -1709,7 +1747,7 @@ class AstComparator implements AstVisitor<bool> {
   bool visitInterpolationString(InterpolationString node) {
     InterpolationString other = _other as InterpolationString;
     return isEqualTokens(node.contents, other.contents) &&
-        node.value == other.value;
+        failIfNotEqual(node, node.value, other, other.value);
   }
 
   @override
@@ -1806,6 +1844,22 @@ class AstComparator implements AstVisitor<bool> {
   }
 
   @override
+  bool visitMixinDeclaration(MixinDeclaration node) {
+    MixinDeclaration other = _other as MixinDeclaration;
+    return isEqualNodes(
+            node.documentationComment, other.documentationComment) &&
+        _isEqualNodeLists(node.metadata, other.metadata) &&
+        isEqualTokens(node.mixinKeyword, other.mixinKeyword) &&
+        isEqualNodes(node.name, other.name) &&
+        isEqualNodes(node.typeParameters, other.typeParameters) &&
+        isEqualNodes(node.onClause, other.onClause) &&
+        isEqualNodes(node.implementsClause, other.implementsClause) &&
+        isEqualTokens(node.leftBracket, other.leftBracket) &&
+        _isEqualNodeLists(node.members, other.members) &&
+        isEqualTokens(node.rightBracket, other.rightBracket);
+  }
+
+  @override
   bool visitNamedExpression(NamedExpression node) {
     NamedExpression other = _other as NamedExpression;
     return isEqualNodes(node.name, other.name) &&
@@ -1831,6 +1885,14 @@ class AstComparator implements AstVisitor<bool> {
   bool visitNullLiteral(NullLiteral node) {
     NullLiteral other = _other as NullLiteral;
     return isEqualTokens(node.literal, other.literal);
+  }
+
+  @override
+  bool visitOnClause(OnClause node) {
+    OnClause other = _other as OnClause;
+    return isEqualTokens(node.onKeyword, other.onKeyword) &&
+        _isEqualNodeLists(
+            node.superclassConstraints, other.superclassConstraints);
   }
 
   @override
@@ -1953,7 +2015,7 @@ class AstComparator implements AstVisitor<bool> {
   bool visitSimpleStringLiteral(SimpleStringLiteral node) {
     SimpleStringLiteral other = _other as SimpleStringLiteral;
     return isEqualTokens(node.literal, other.literal) &&
-        (node.value == other.value);
+        failIfNotEqual(node, node.value, other, other.value);
   }
 
   @override
@@ -2627,20 +2689,21 @@ class ElementLocator_ElementMapper extends GeneralizingAstVisitor<Element> {
   Element visitBinaryExpression(BinaryExpression node) => node.staticElement;
 
   @override
-  Element visitClassDeclaration(ClassDeclaration node) => node.element;
+  Element visitClassDeclaration(ClassDeclaration node) => node.declaredElement;
 
   @override
-  Element visitCompilationUnit(CompilationUnit node) => node.element;
+  Element visitCompilationUnit(CompilationUnit node) => node.declaredElement;
 
   @override
   Element visitConstructorDeclaration(ConstructorDeclaration node) =>
-      node.element;
+      node.declaredElement;
 
   @override
   Element visitExportDirective(ExportDirective node) => node.element;
 
   @override
-  Element visitFunctionDeclaration(FunctionDeclaration node) => node.element;
+  Element visitFunctionDeclaration(FunctionDeclaration node) =>
+      node.declaredElement;
 
   @override
   Element visitIdentifier(Identifier node) {
@@ -2692,7 +2755,8 @@ class ElementLocator_ElementMapper extends GeneralizingAstVisitor<Element> {
   Element visitLibraryDirective(LibraryDirective node) => node.element;
 
   @override
-  Element visitMethodDeclaration(MethodDeclaration node) => node.element;
+  Element visitMethodDeclaration(MethodDeclaration node) =>
+      node.declaredElement;
 
   @override
   Element visitMethodInvocation(MethodInvocation node) =>
@@ -2721,7 +2785,8 @@ class ElementLocator_ElementMapper extends GeneralizingAstVisitor<Element> {
   }
 
   @override
-  Element visitVariableDeclaration(VariableDeclaration node) => node.element;
+  Element visitVariableDeclaration(VariableDeclaration node) =>
+      node.declaredElement;
 }
 
 /**
@@ -3503,6 +3568,20 @@ class IncrementalAstCloner implements AstVisitor<AstNode> {
   }
 
   @override
+  AstNode visitMixinDeclaration(MixinDeclaration node) =>
+      astFactory.mixinDeclaration(
+          _cloneNode(node.documentationComment),
+          _cloneNodeList(node.metadata),
+          _mapToken(node.mixinKeyword),
+          _cloneNode(node.name),
+          _cloneNode(node.typeParameters),
+          _cloneNode(node.onClause),
+          _cloneNode(node.implementsClause),
+          _mapToken(node.leftBracket),
+          _cloneNodeList(node.members),
+          _mapToken(node.rightBracket));
+
+  @override
   NamedExpression visitNamedExpression(NamedExpression node) {
     NamedExpression copy = astFactory.namedExpression(
         _cloneNode(node.name), _cloneNode(node.expression));
@@ -3525,6 +3604,10 @@ class IncrementalAstCloner implements AstVisitor<AstNode> {
     copy.staticType = node.staticType;
     return copy;
   }
+
+  @override
+  AstNode visitOnClause(OnClause node) => astFactory.onClause(
+      _mapToken(node.onKeyword), _cloneNodeList(node.superclassConstraints));
 
   @override
   ParenthesizedExpression visitParenthesizedExpression(
@@ -4898,6 +4981,33 @@ class NodeReplacer implements AstVisitor<bool> {
   }
 
   @override
+  bool visitMixinDeclaration(MixinDeclaration node) {
+    if (identical(node.documentationComment, _oldNode)) {
+      node.documentationComment = _newNode as Comment;
+      return true;
+    } else if (_replaceInList(node.metadata)) {
+      return true;
+    } else if (identical(node.name, _oldNode)) {
+      node.name = _newNode as SimpleIdentifier;
+      return true;
+    } else if (identical(node.typeParameters, _oldNode)) {
+      (node as MixinDeclarationImpl).typeParameters =
+          _newNode as TypeParameterList;
+      return true;
+    } else if (identical(node.onClause, _oldNode)) {
+      (node as MixinDeclarationImpl).onClause = _newNode as OnClause;
+      return true;
+    } else if (identical(node.implementsClause, _oldNode)) {
+      (node as MixinDeclarationImpl).implementsClause =
+          _newNode as ImplementsClause;
+      return true;
+    } else if (_replaceInList(node.members)) {
+      return true;
+    }
+    return visitNode(node);
+  }
+
+  @override
   bool visitNamedExpression(NamedExpression node) {
     if (identical(node.name, _oldNode)) {
       node.name = _newNode as Label;
@@ -4953,6 +5063,14 @@ class NodeReplacer implements AstVisitor<bool> {
 
   @override
   bool visitNullLiteral(NullLiteral node) => visitNode(node);
+
+  @override
+  bool visitOnClause(OnClause node) {
+    if (_replaceInList(node.superclassConstraints)) {
+      return true;
+    }
+    return visitNode(node);
+  }
 
   @override
   bool visitParenthesizedExpression(ParenthesizedExpression node) {
@@ -5557,7 +5675,7 @@ class ResolutionCopier implements AstVisitor<bool> {
         _isEqualNodeLists(node.directives, toNode.directives),
         _isEqualNodeLists(node.declarations, toNode.declarations),
         _isEqualTokens(node.endToken, toNode.endToken))) {
-      toNode.element = node.element;
+      toNode.element = node.declaredElement;
       return true;
     }
     return false;
@@ -5611,7 +5729,7 @@ class ResolutionCopier implements AstVisitor<bool> {
         _isEqualNodeLists(node.initializers, toNode.initializers),
         _isEqualNodes(node.redirectedConstructor, toNode.redirectedConstructor),
         _isEqualNodes(node.body, toNode.body))) {
-      toNode.element = node.element;
+      toNode.element = node.declaredElement;
       return true;
     }
     return false;
@@ -5870,7 +5988,7 @@ class ResolutionCopier implements AstVisitor<bool> {
     FunctionExpression toNode = this._toNode as FunctionExpression;
     if (_and(_isEqualNodes(node.parameters, toNode.parameters),
         _isEqualNodes(node.body, toNode.body))) {
-      toNode.element = node.element;
+      toNode.element = node.declaredElement;
       toNode.staticType = node.staticType;
       return true;
     }
@@ -6179,6 +6297,22 @@ class ResolutionCopier implements AstVisitor<bool> {
   }
 
   @override
+  bool visitMixinDeclaration(MixinDeclaration node) {
+    MixinDeclaration toNode = this._toNode as MixinDeclaration;
+    return _and(
+        _isEqualNodes(node.documentationComment, toNode.documentationComment),
+        _isEqualNodeLists(node.metadata, toNode.metadata),
+        _isEqualTokens(node.mixinKeyword, toNode.mixinKeyword),
+        _isEqualNodes(node.name, toNode.name),
+        _isEqualNodes(node.typeParameters, toNode.typeParameters),
+        _isEqualNodes(node.onClause, toNode.onClause),
+        _isEqualNodes(node.implementsClause, toNode.implementsClause),
+        _isEqualTokens(node.leftBracket, toNode.leftBracket),
+        _isEqualNodeLists(node.members, toNode.members),
+        _isEqualTokens(node.rightBracket, toNode.rightBracket));
+  }
+
+  @override
   bool visitNamedExpression(NamedExpression node) {
     NamedExpression toNode = this._toNode as NamedExpression;
     if (_and(_isEqualNodes(node.name, toNode.name),
@@ -6213,6 +6347,15 @@ class ResolutionCopier implements AstVisitor<bool> {
       return true;
     }
     return false;
+  }
+
+  @override
+  bool visitOnClause(OnClause node) {
+    OnClause toNode = this._toNode as OnClause;
+    return _and(
+        _isEqualTokens(node.onKeyword, toNode.onKeyword),
+        _isEqualNodeLists(
+            node.superclassConstraints, toNode.superclassConstraints));
   }
 
   @override
@@ -6366,7 +6509,8 @@ class ResolutionCopier implements AstVisitor<bool> {
         _isEqualTokens(node.keyword, toNode.keyword),
         _isEqualNodes(node.type, toNode.type),
         _isEqualNodes(node.identifier, toNode.identifier))) {
-      (toNode as SimpleFormalParameterImpl).element = node.element;
+      (toNode as SimpleFormalParameterImpl).declaredElement =
+          node.declaredElement;
       return true;
     }
     return false;
@@ -7673,6 +7817,20 @@ class ToSourceVisitor implements AstVisitor<Object> {
   }
 
   @override
+  bool visitMixinDeclaration(MixinDeclaration node) {
+    _visitNodeListWithSeparatorAndSuffix(node.metadata, " ", " ");
+    _writer.print("mixin ");
+    _visitNode(node.name);
+    _visitNode(node.typeParameters);
+    _visitNodeWithPrefix(" ", node.onClause);
+    _visitNodeWithPrefix(" ", node.implementsClause);
+    _writer.print(" {");
+    _visitNodeListWithSeparator(node.members, " ");
+    _writer.print("}");
+    return null;
+  }
+
+  @override
   Object visitNamedExpression(NamedExpression node) {
     _visitNode(node.name);
     _visitNodeWithPrefix(" ", node.expression);
@@ -7697,6 +7855,13 @@ class ToSourceVisitor implements AstVisitor<Object> {
   @override
   Object visitNullLiteral(NullLiteral node) {
     _writer.print("null");
+    return null;
+  }
+
+  @override
+  bool visitOnClause(OnClause node) {
+    _writer.print('on ');
+    _visitNodeListWithSeparator(node.superclassConstraints, ", ");
     return null;
   }
 
@@ -8988,6 +9153,20 @@ class ToSourceVisitor2 implements AstVisitor<Object> {
   }
 
   @override
+  bool visitMixinDeclaration(MixinDeclaration node) {
+    safelyVisitNodeListWithSeparatorAndSuffix(node.metadata, " ", " ");
+    sink.write("mixin ");
+    safelyVisitNode(node.name);
+    safelyVisitNode(node.typeParameters);
+    safelyVisitNodeWithPrefix(" ", node.onClause);
+    safelyVisitNodeWithPrefix(" ", node.implementsClause);
+    sink.write(" {");
+    safelyVisitNodeListWithSeparator(node.members, " ");
+    sink.write("}");
+    return null;
+  }
+
+  @override
   Object visitNamedExpression(NamedExpression node) {
     safelyVisitNode(node.name);
     safelyVisitNodeWithPrefix(" ", node.expression);
@@ -9012,6 +9191,13 @@ class ToSourceVisitor2 implements AstVisitor<Object> {
   @override
   Object visitNullLiteral(NullLiteral node) {
     sink.write("null");
+    return null;
+  }
+
+  @override
+  bool visitOnClause(OnClause node) {
+    sink.write('on ');
+    safelyVisitNodeListWithSeparator(node.superclassConstraints, ", ");
     return null;
   }
 

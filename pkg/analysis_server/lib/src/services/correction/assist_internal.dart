@@ -86,7 +86,7 @@ class AssistProcessor {
     file = dartContext.source.fullName;
     // unit
     unit = dartContext.unit;
-    unitElement = dartContext.unit.element;
+    unitElement = dartContext.unit.declaredElement;
     // library
     unitLibraryElement = resolutionMap
         .elementDeclaredByCompilationUnit(dartContext.unit)
@@ -220,7 +220,7 @@ class AssistProcessor {
     assists.add(new Assist(kind, change));
   }
 
-  Future<Null> _addProposal_addTypeAnnotation_DeclaredIdentifier() async {
+  Future<void> _addProposal_addTypeAnnotation_DeclaredIdentifier() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     DeclaredIdentifier declaredIdentifier =
@@ -271,7 +271,7 @@ class AssistProcessor {
     }
   }
 
-  Future<Null> _addProposal_addTypeAnnotation_SimpleFormalParameter() async {
+  Future<void> _addProposal_addTypeAnnotation_SimpleFormalParameter() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     AstNode node = this.node;
@@ -288,7 +288,7 @@ class AssistProcessor {
       return;
     }
     // prepare the type
-    DartType type = parameter.element.type;
+    DartType type = parameter.declaredElement.type;
     // TODO(scheglov) If the parameter is in a method declaration, and if the
     // method overrides a method that has a type for the corresponding
     // parameter, it would be nice to copy down the type from the overridden
@@ -313,7 +313,7 @@ class AssistProcessor {
     }
   }
 
-  Future<Null> _addProposal_addTypeAnnotation_VariableDeclaration() async {
+  Future<void> _addProposal_addTypeAnnotation_VariableDeclaration() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     AstNode node = this.node;
@@ -376,7 +376,7 @@ class AssistProcessor {
     }
   }
 
-  Future<Null> _addProposal_assignToLocalVariable() async {
+  Future<void> _addProposal_assignToLocalVariable() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     // prepare enclosing ExpressionStatement
@@ -431,7 +431,7 @@ class AssistProcessor {
     }
   }
 
-  Future<Null> _addProposal_convertDocumentationIntoBlock() async {
+  Future<void> _addProposal_convertDocumentationIntoBlock() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     Comment comment = node.getAncestor((n) => n is Comment);
@@ -464,7 +464,7 @@ class AssistProcessor {
         changeBuilder, DartAssistKind.CONVERT_DOCUMENTATION_INTO_BLOCK);
   }
 
-  Future<Null> _addProposal_convertDocumentationIntoLine() async {
+  Future<void> _addProposal_convertDocumentationIntoLine() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     Comment comment = node.getAncestor((n) => n is Comment);
@@ -525,7 +525,7 @@ class AssistProcessor {
         changeBuilder, DartAssistKind.CONVERT_DOCUMENTATION_INTO_LINE);
   }
 
-  Future<Null> _addProposal_convertIntoFinalField() async {
+  Future<void> _addProposal_convertIntoFinalField() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     // Find the enclosing getter.
@@ -547,7 +547,7 @@ class AssistProcessor {
     }
     // Check that there is no corresponding setter.
     {
-      ExecutableElement element = getter.element;
+      ExecutableElement element = getter.declaredElement;
       if (element == null) {
         return;
       }
@@ -596,7 +596,7 @@ class AssistProcessor {
     }
   }
 
-  Future<Null> _addProposal_convertIntoGetter() async {
+  Future<void> _addProposal_convertIntoGetter() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     // Find the enclosing field declaration.
@@ -647,7 +647,7 @@ class AssistProcessor {
     _addAssistFromBuilder(changeBuilder, DartAssistKind.CONVERT_INTO_GETTER);
   }
 
-  Future<Null> _addProposal_convertPartOfToUri() async {
+  Future<void> _addProposal_convertPartOfToUri() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     PartOfDirective directive =
@@ -656,7 +656,7 @@ class AssistProcessor {
       return;
     }
     String libraryPath = unitLibraryElement.source.fullName;
-    String partPath = unit.element.source.fullName;
+    String partPath = unit.declaredElement.source.fullName;
     String relativePath = relative(libraryPath, from: dirname(partPath));
     String uri = new Uri.file(relativePath).toString();
     SourceRange replacementRange = range.node(directive.libraryName);
@@ -667,7 +667,7 @@ class AssistProcessor {
     _addAssistFromBuilder(changeBuilder, DartAssistKind.CONVERT_PART_OF_TO_URI);
   }
 
-  Future<Null> _addProposal_convertToAsyncFunctionBody() async {
+  Future<void> _addProposal_convertToAsyncFunctionBody() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     FunctionBody body = getEnclosingFunctionBody();
@@ -700,7 +700,7 @@ class AssistProcessor {
         changeBuilder, DartAssistKind.CONVERT_INTO_ASYNC_BODY);
   }
 
-  Future<Null> _addProposal_convertToBlockFunctionBody() async {
+  Future<void> _addProposal_convertToBlockFunctionBody() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     FunctionBody body = getEnclosingFunctionBody();
@@ -745,13 +745,13 @@ class AssistProcessor {
         changeBuilder, DartAssistKind.CONVERT_INTO_BLOCK_BODY);
   }
 
-  Future<Null> _addProposal_convertToDoubleQuotedString() async {
+  Future<void> _addProposal_convertToDoubleQuotedString() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     await _convertQuotes(false, DartAssistKind.CONVERT_TO_DOUBLE_QUOTED_STRING);
   }
 
-  Future<Null> _addProposal_convertToExpressionFunctionBody() async {
+  Future<void> _addProposal_convertToExpressionFunctionBody() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     // prepare current body
@@ -804,7 +804,7 @@ class AssistProcessor {
         changeBuilder, DartAssistKind.CONVERT_INTO_EXPRESSION_BODY);
   }
 
-  Future<Null> _addProposal_convertToFieldParameter() async {
+  Future<void> _addProposal_convertToFieldParameter() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     if (node == null) {
@@ -841,7 +841,7 @@ class AssistProcessor {
     // analyze parameter
     if (parameter != null) {
       String parameterName = parameter.identifier.name;
-      ParameterElement parameterElement = parameter.element;
+      ParameterElement parameterElement = parameter.declaredElement;
       // check number of references
       {
         int numOfReferences = 0;
@@ -898,7 +898,7 @@ class AssistProcessor {
     }
   }
 
-  Future<Null> _addProposal_convertToForIndexLoop() async {
+  Future<void> _addProposal_convertToForIndexLoop() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     // find enclosing ForEachStatement
@@ -978,7 +978,7 @@ class AssistProcessor {
     _addAssistFromBuilder(changeBuilder, DartAssistKind.CONVERT_INTO_FOR_INDEX);
   }
 
-  Future<Null> _addProposal_convertToGenericFunctionSyntax() async {
+  Future<void> _addProposal_convertToGenericFunctionSyntax() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     AstNode node = this.node;
@@ -998,7 +998,7 @@ class AssistProcessor {
     }
   }
 
-  Future<Null> _addProposal_convertToIsNot_onIs() async {
+  Future<void> _addProposal_convertToIsNot_onIs() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     // may be child of "is"
@@ -1051,7 +1051,7 @@ class AssistProcessor {
     _addAssistFromBuilder(changeBuilder, DartAssistKind.CONVERT_INTO_IS_NOT);
   }
 
-  Future<Null> _addProposal_convertToIsNot_onNot() async {
+  Future<void> _addProposal_convertToIsNot_onNot() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     // may be () in prefix expression
@@ -1107,7 +1107,7 @@ class AssistProcessor {
   /**
    * Converts "!isEmpty" -> "isNotEmpty" if possible.
    */
-  Future<Null> _addProposal_convertToIsNotEmpty() async {
+  Future<void> _addProposal_convertToIsNotEmpty() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     // prepare "expr.isEmpty"
@@ -1167,7 +1167,7 @@ class AssistProcessor {
         changeBuilder, DartAssistKind.CONVERT_INTO_IS_NOT_EMPTY);
   }
 
-  Future<Null> _addProposal_convertToNormalParameter() async {
+  Future<void> _addProposal_convertToNormalParameter() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     if (node is SimpleIdentifier &&
@@ -1177,7 +1177,7 @@ class AssistProcessor {
       ConstructorDeclaration constructor = node.parent.parent.parent;
       FormalParameterList parameterList = node.parent.parent;
       FieldFormalParameter parameter = node.parent;
-      ParameterElement parameterElement = parameter.element;
+      ParameterElement parameterElement = parameter.declaredElement;
       String name = (node as SimpleIdentifier).name;
       // prepare type
       DartType type = parameterElement.type;
@@ -1208,13 +1208,13 @@ class AssistProcessor {
     }
   }
 
-  Future<Null> _addProposal_convertToSingleQuotedString() async {
+  Future<void> _addProposal_convertToSingleQuotedString() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     await _convertQuotes(true, DartAssistKind.CONVERT_TO_SINGLE_QUOTED_STRING);
   }
 
-  Future<Null> _addProposal_encapsulateField() async {
+  Future<void> _addProposal_encapsulateField() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     // find FieldDeclaration
@@ -1269,7 +1269,7 @@ class AssistProcessor {
       for (ClassMember member in classDeclaration.members) {
         if (member is ConstructorDeclaration) {
           for (FormalParameter parameter in member.parameters.parameters) {
-            ParameterElement parameterElement = parameter.element;
+            ParameterElement parameterElement = parameter.declaredElement;
             if (parameterElement is FieldFormalParameterElement &&
                 parameterElement.field == fieldElement) {
               SimpleIdentifier identifier = parameter.identifier;
@@ -1315,7 +1315,7 @@ class AssistProcessor {
     _addAssistFromBuilder(changeBuilder, DartAssistKind.ENCAPSULATE_FIELD);
   }
 
-  Future<Null> _addProposal_exchangeOperands() async {
+  Future<void> _addProposal_exchangeOperands() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     // check that user invokes quick assist on binary expression
@@ -1372,7 +1372,7 @@ class AssistProcessor {
     _addAssistFromBuilder(changeBuilder, DartAssistKind.EXCHANGE_OPERANDS);
   }
 
-  Future<Null> _addProposal_flutterConvertToChildren() async {
+  Future<void> _addProposal_flutterConvertToChildren() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     // Find "child: widget" under selection.
@@ -1403,7 +1403,7 @@ class AssistProcessor {
         changeBuilder, DartAssistKind.FLUTTER_CONVERT_TO_CHILDREN);
   }
 
-  Future<Null> _addProposal_flutterConvertToStatefulWidget() async {
+  Future<void> _addProposal_flutterConvertToStatefulWidget() async {
     ClassDeclaration widgetClass =
         node.getAncestor((n) => n is ClassDeclaration);
     TypeName superclass = widgetClass?.extendsClause?.superclass;
@@ -1436,7 +1436,7 @@ class AssistProcessor {
     }
 
     // Must be a StatelessWidget subclasses.
-    ClassElement widgetClassElement = widgetClass.element;
+    ClassElement widgetClassElement = widgetClass.declaredElement;
     if (!flutter.isExactlyStatelessWidgetType(widgetClassElement.supertype)) {
       _coverageMarker();
       return;
@@ -1481,7 +1481,7 @@ class AssistProcessor {
     for (var member in widgetClass.members) {
       if (member is FieldDeclaration && !member.isStatic) {
         for (VariableDeclaration fieldNode in member.fields.variables) {
-          FieldElement fieldElement = fieldNode.element;
+          FieldElement fieldElement = fieldNode.declaredElement;
           if (!fieldsAssignedInConstructors.contains(fieldElement)) {
             nodesToMove.add(member);
             elementsToMove.add(fieldElement);
@@ -1494,7 +1494,7 @@ class AssistProcessor {
       }
       if (member is MethodDeclaration && !member.isStatic) {
         nodesToMove.add(member);
-        elementsToMove.add(member.element);
+        elementsToMove.add(member.declaredElement);
       }
     }
 
@@ -1543,7 +1543,7 @@ class AssistProcessor {
     var stateType = stateClass.type.instantiate([widgetClassElement.type]);
 
     DartChangeBuilder changeBuilder = new DartChangeBuilder(session);
-    await changeBuilder.addFileEdit(file, (DartFileEditBuilder builder) async {
+    await changeBuilder.addFileEdit(file, (DartFileEditBuilder builder) {
       builder.addReplacement(range.node(superclass), (builder) {
         builder.writeType(statefulWidgetClass.type);
       });
@@ -1639,7 +1639,7 @@ class AssistProcessor {
         changeBuilder, DartAssistKind.FLUTTER_CONVERT_TO_STATEFUL_WIDGET);
   }
 
-  Future<Null> _addProposal_flutterMoveWidgetDown() async {
+  Future<void> _addProposal_flutterMoveWidgetDown() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     var widget = flutter.identifyWidgetExpression(node);
@@ -1673,7 +1673,7 @@ class AssistProcessor {
     }
   }
 
-  Future<Null> _addProposal_flutterMoveWidgetUp() async {
+  Future<void> _addProposal_flutterMoveWidgetUp() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     var widget = flutter.identifyWidgetExpression(node);
@@ -1706,7 +1706,7 @@ class AssistProcessor {
     }
   }
 
-  Future<Null> _addProposal_flutterRemoveWidget_multipleChildren() async {
+  Future<void> _addProposal_flutterRemoveWidget_multipleChildren() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     var widgetCreation = flutter.identifyNewExpression(node);
@@ -1746,7 +1746,7 @@ class AssistProcessor {
     _addAssistFromBuilder(changeBuilder, DartAssistKind.FLUTTER_REMOVE_WIDGET);
   }
 
-  Future<Null> _addProposal_flutterRemoveWidget_singleChild() async {
+  Future<void> _addProposal_flutterRemoveWidget_singleChild() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     var widgetCreation = flutter.identifyNewExpression(node);
@@ -1773,7 +1773,7 @@ class AssistProcessor {
     _addAssistFromBuilder(changeBuilder, DartAssistKind.FLUTTER_REMOVE_WIDGET);
   }
 
-  Future<Null> _addProposal_flutterSwapWithChild() async {
+  Future<void> _addProposal_flutterSwapWithChild() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     InstanceCreationExpression parent = flutter.identifyNewExpression(node);
@@ -1794,7 +1794,7 @@ class AssistProcessor {
         parent, child, DartAssistKind.FLUTTER_SWAP_WITH_CHILD);
   }
 
-  Future<Null> _addProposal_flutterSwapWithParent() async {
+  Future<void> _addProposal_flutterSwapWithParent() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     InstanceCreationExpression child = flutter.identifyNewExpression(node);
@@ -1815,7 +1815,7 @@ class AssistProcessor {
         parent, child, DartAssistKind.FLUTTER_SWAP_WITH_PARENT);
   }
 
-  Future<Null> _addProposal_flutterWrapWidget() async {
+  Future<void> _addProposal_flutterWrapWidget() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     await _addProposal_flutterWrapWidgetImpl();
@@ -1827,6 +1827,13 @@ class AssistProcessor {
           return !flutter.isExactWidgetTypeCenter(expr.staticType);
         });
     await _addProposal_flutterWrapWidgetImpl(
+        kind: DartAssistKind.FLUTTER_WRAP_CONTAINER,
+        parentLibraryUri: flutter.WIDGETS_LIBRARY_URI,
+        parentClassName: 'Container',
+        widgetValidator: (expr) {
+          return !flutter.isExactWidgetTypeContainer(expr.staticType);
+        });
+    await _addProposal_flutterWrapWidgetImpl(
         kind: DartAssistKind.FLUTTER_WRAP_PADDING,
         parentLibraryUri: flutter.WIDGETS_LIBRARY_URI,
         parentClassName: 'Padding',
@@ -1836,7 +1843,7 @@ class AssistProcessor {
         });
   }
 
-  Future<Null> _addProposal_flutterWrapWidgetImpl(
+  Future<void> _addProposal_flutterWrapWidgetImpl(
       {AssistKind kind: DartAssistKind.FLUTTER_WRAP_GENERIC,
       bool Function(Expression widgetExpr) widgetValidator,
       String parentLibraryUri,
@@ -1868,9 +1875,6 @@ class AssistProcessor {
     DartChangeBuilder changeBuilder = new DartChangeBuilder(session);
     await changeBuilder.addFileEdit(file, (DartFileEditBuilder builder) {
       builder.addReplacement(range.node(widgetExpr), (DartEditBuilder builder) {
-        if (!driver.analysisOptions.previewDart2) {
-          builder.write('new ');
-        }
         if (parentClassElement == null) {
           builder.addSimpleLinkedEdit('WIDGET', 'widget');
         } else {
@@ -1906,7 +1910,7 @@ class AssistProcessor {
     _addAssistFromBuilder(changeBuilder, kind);
   }
 
-  Future<Null> _addProposal_flutterWrapWidgets() async {
+  Future<void> _addProposal_flutterWrapWidgets() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     var selectionRange = new SourceRange(selectionOffset, selectionLength);
@@ -1936,7 +1940,7 @@ class AssistProcessor {
     var selectedRange = range.startEnd(firstWidget, lastWidget);
     String src = utils.getRangeText(selectedRange);
 
-    Future<Null> addAssist(
+    Future<void> addAssist(
         {@required AssistKind kind,
         @required String parentLibraryUri,
         @required String parentClassName}) async {
@@ -1953,9 +1957,6 @@ class AssistProcessor {
       DartChangeBuilder changeBuilder = new DartChangeBuilder(session);
       await changeBuilder.addFileEdit(file, (DartFileEditBuilder builder) {
         builder.addReplacement(selectedRange, (DartEditBuilder builder) {
-          if (!driver.analysisOptions.previewDart2) {
-            builder.write('new ');
-          }
           builder.writeType(parentClassElement.type);
           builder.write('(');
 
@@ -1998,7 +1999,7 @@ class AssistProcessor {
         parentClassName: 'Row');
   }
 
-  Future<Null> _addProposal_importAddShow() async {
+  Future<void> _addProposal_importAddShow() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     // prepare ImportDirective
@@ -2043,7 +2044,7 @@ class AssistProcessor {
     _addAssistFromBuilder(changeBuilder, DartAssistKind.IMPORT_ADD_SHOW);
   }
 
-  Future<Null> _addProposal_introduceLocalTestedType() async {
+  Future<void> _addProposal_introduceLocalTestedType() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     AstNode node = this.node;
@@ -2116,7 +2117,7 @@ class AssistProcessor {
     }
   }
 
-  Future<Null> _addProposal_invertIf() async {
+  Future<void> _addProposal_invertIf() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     if (node is! IfStatement) {
@@ -2144,7 +2145,7 @@ class AssistProcessor {
     _addAssistFromBuilder(changeBuilder, DartAssistKind.INVERT_IF_STATEMENT);
   }
 
-  Future<Null> _addProposal_joinIfStatementInner() async {
+  Future<void> _addProposal_joinIfStatementInner() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     // climb up condition to the (supposedly) "if" statement
@@ -2206,7 +2207,7 @@ class AssistProcessor {
     _addAssistFromBuilder(changeBuilder, DartAssistKind.JOIN_IF_WITH_INNER);
   }
 
-  Future<Null> _addProposal_joinIfStatementOuter() async {
+  Future<void> _addProposal_joinIfStatementOuter() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     // climb up condition to the (supposedly) "if" statement
@@ -2272,7 +2273,7 @@ class AssistProcessor {
     _addAssistFromBuilder(changeBuilder, DartAssistKind.JOIN_IF_WITH_OUTER);
   }
 
-  Future<Null> _addProposal_joinVariableDeclaration_onAssignment() async {
+  Future<void> _addProposal_joinVariableDeclaration_onAssignment() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     // check that node is LHS in assignment
@@ -2349,7 +2350,7 @@ class AssistProcessor {
         changeBuilder, DartAssistKind.JOIN_VARIABLE_DECLARATION);
   }
 
-  Future<Null> _addProposal_joinVariableDeclaration_onDeclaration() async {
+  Future<void> _addProposal_joinVariableDeclaration_onDeclaration() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     // prepare enclosing VariableDeclarationList
@@ -2419,7 +2420,7 @@ class AssistProcessor {
         changeBuilder, DartAssistKind.JOIN_VARIABLE_DECLARATION);
   }
 
-  Future<Null> _addProposal_removeTypeAnnotation() async {
+  Future<void> _addProposal_removeTypeAnnotation() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     VariableDeclarationList declarationList =
@@ -2465,7 +2466,7 @@ class AssistProcessor {
     _addAssistFromBuilder(changeBuilder, DartAssistKind.REMOVE_TYPE_ANNOTATION);
   }
 
-  Future<Null> _addProposal_reparentFlutterList() async {
+  Future<void> _addProposal_reparentFlutterList() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     if (node is! ListLiteral) {
@@ -2514,7 +2515,7 @@ class AssistProcessor {
     _addAssistFromBuilder(changeBuilder, DartAssistKind.FLUTTER_WRAP_GENERIC);
   }
 
-  Future<Null> _addProposal_replaceConditionalWithIfElse() async {
+  Future<void> _addProposal_replaceConditionalWithIfElse() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     ConditionalExpression conditional = null;
@@ -2620,7 +2621,7 @@ class AssistProcessor {
     }
   }
 
-  Future<Null> _addProposal_replaceIfElseWithConditional() async {
+  Future<void> _addProposal_replaceIfElseWithConditional() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     // should be "if"
@@ -2688,7 +2689,7 @@ class AssistProcessor {
     }
   }
 
-  Future<Null> _addProposal_splitAndCondition() async {
+  Future<void> _addProposal_splitAndCondition() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     // check that user invokes quick assist on binary expression
@@ -2781,7 +2782,7 @@ class AssistProcessor {
     _addAssistFromBuilder(changeBuilder, DartAssistKind.SPLIT_AND_CONDITION);
   }
 
-  Future<Null> _addProposal_splitVariableDeclaration() async {
+  Future<void> _addProposal_splitVariableDeclaration() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     // prepare DartVariableStatement, should be part of Block
@@ -2821,7 +2822,7 @@ class AssistProcessor {
         changeBuilder, DartAssistKind.SPLIT_VARIABLE_DECLARATION);
   }
 
-  Future<Null> _addProposal_surroundWith() async {
+  Future<void> _addProposal_surroundWith() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     // prepare selected statements
@@ -3059,7 +3060,7 @@ class AssistProcessor {
       ClassDeclaration targetClassDeclaration =
           target.getAncestor((node) => node is ClassDeclaration);
       if (targetClassDeclaration != null) {
-        utils.targetClassElement = targetClassDeclaration.element;
+        utils.targetClassElement = targetClassDeclaration.declaredElement;
       }
     }
   }
@@ -3107,7 +3108,7 @@ class AssistProcessor {
     }
   }
 
-  Future<Null> _convertFunctionTypeAliasToGenericTypeAlias(
+  Future<void> _convertFunctionTypeAliasToGenericTypeAlias(
       FunctionTypeAlias node) async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
@@ -3138,7 +3139,7 @@ class AssistProcessor {
         changeBuilder, DartAssistKind.CONVERT_INTO_GENERIC_FUNCTION_SYNTAX);
   }
 
-  Future<Null> _convertFunctionTypedFormalParameterToSimpleFormalParameter(
+  Future<void> _convertFunctionTypedFormalParameterToSimpleFormalParameter(
       FunctionTypedFormalParameter node) async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
@@ -3167,7 +3168,7 @@ class AssistProcessor {
         changeBuilder, DartAssistKind.CONVERT_INTO_GENERIC_FUNCTION_SYNTAX);
   }
 
-  Future<Null> _convertQuotes(bool fromDouble, AssistKind kind) async {
+  Future<void> _convertQuotes(bool fromDouble, AssistKind kind) async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     if (node is SimpleStringLiteral) {

@@ -12,13 +12,14 @@
 namespace dart {
 
 static RawObject* ExecuteTest(const Code& code) {
-  Thread* thread = Thread::Current();
-  TransitionToGenerated transition(thread);
   const intptr_t kTypeArgsLen = 0;
   const intptr_t kNumArgs = 0;
-  return Simulator::Current()->Call(
-      code, Array::Handle(ArgumentsDescriptor::New(kTypeArgsLen, kNumArgs)),
-      Array::Handle(Array::New(0)), thread);
+  const Array& args_desc =
+      Array::Handle(ArgumentsDescriptor::New(kTypeArgsLen, kNumArgs));
+  const Array& args = Array::Handle(Array::New(0));
+  Thread* thread = Thread::Current();
+  TransitionToGenerated transition(thread);
+  return Simulator::Current()->Call(code, args_desc, args, thread);
 }
 
 #define EXECUTE_TEST_CODE_INTPTR(code)                                         \
@@ -65,13 +66,14 @@ static void GenerateDummyCode(Assembler* assembler, const Object& result) {
 
 static void MakeDummyInstanceCall(Assembler* assembler, const Object& result) {
   // Make a dummy function.
-  Assembler _assembler_;
+  ObjectPoolWrapper object_pool_wrapper;
+  Assembler _assembler_(&object_pool_wrapper);
   GenerateDummyCode(&_assembler_, result);
   const char* dummy_function_name = "dummy_instance_function";
   const Function& dummy_instance_function =
       Function::Handle(CreateFunction(dummy_function_name));
-  Code& code =
-      Code::Handle(Code::FinalizeCode(dummy_instance_function, &_assembler_));
+  Code& code = Code::Handle(
+      Code::FinalizeCode(dummy_instance_function, nullptr, &_assembler_));
   dummy_instance_function.AttachCode(code);
 
   // Make a dummy ICData.

@@ -41,7 +41,7 @@ class DartChangeBuilderImpl extends ChangeBuilderImpl
   DartChangeBuilderImpl(this.session);
 
   @override
-  Future<Null> addFileEdit(
+  Future<void> addFileEdit(
       String path, void buildFileEdit(DartFileEditBuilder builder),
       {ImportPrefixGenerator importPrefixGenerator}) {
     return super.addFileEdit(path, (builder) {
@@ -100,12 +100,14 @@ class DartEditBuilderImpl extends EditBuilderImpl implements DartEditBuilder {
       DartFileEditBuilderImpl sourceFileEditBuilder, int offset, int length)
       : super(sourceFileEditBuilder, offset, length);
 
-  DartFileEditBuilderImpl get dartFileEditBuilder => fileEditBuilder;
+  DartFileEditBuilderImpl get dartFileEditBuilder =>
+      fileEditBuilder as DartFileEditBuilderImpl;
 
   @override
   void addLinkedEdit(String groupName,
           void buildLinkedEdit(DartLinkedEditBuilder builder)) =>
-      super.addLinkedEdit(groupName, (builder) => buildLinkedEdit(builder));
+      super.addLinkedEdit(groupName,
+          (builder) => buildLinkedEdit(builder as DartLinkedEditBuilder));
 
   @override
   LinkedEditBuilderImpl createLinkedEditBuilder() {
@@ -573,11 +575,7 @@ class DartEditBuilderImpl extends EditBuilderImpl implements DartEditBuilder {
       // default value
       String defaultCode = parameter.defaultValueCode;
       if (defaultCode != null) {
-        if (sawPositional) {
-          write(' = ');
-        } else {
-          write(': ');
-        }
+        write(' = ');
         write(defaultCode);
       }
     }
@@ -1120,17 +1118,22 @@ class DartFileEditBuilderImpl extends FileEditBuilderImpl
    */
   DartFileEditBuilderImpl(DartChangeBuilderImpl changeBuilder, String path,
       int timeStamp, this.unit)
-      : libraryElement = unit.element.library,
+      : libraryElement = unit.declaredElement.library,
         super(changeBuilder, path, timeStamp);
 
   @override
+  bool get hasEdits => super.hasEdits || librariesToImport.isNotEmpty;
+
+  @override
   void addInsertion(int offset, void buildEdit(DartEditBuilder builder)) =>
-      super.addInsertion(offset, (builder) => buildEdit(builder));
+      super.addInsertion(
+          offset, (builder) => buildEdit(builder as DartEditBuilder));
 
   @override
   void addReplacement(
           SourceRange range, void buildEdit(DartEditBuilder builder)) =>
-      super.addReplacement(range, (builder) => buildEdit(builder));
+      super.addReplacement(
+          range, (builder) => buildEdit(builder as DartEditBuilder));
 
   @override
   void convertFunctionFromSyncToAsync(
@@ -1139,9 +1142,14 @@ class DartFileEditBuilderImpl extends FileEditBuilderImpl
       throw new ArgumentError(
           'The function must have a synchronous, non-generator body.');
     }
-    addInsertion(body.offset, (EditBuilder builder) {
-      builder.write('async ');
-    });
+    if (body is! EmptyFunctionBody) {
+      addInsertion(body.offset, (EditBuilder builder) {
+        if (_isFusedWithPreviousToken(body.beginToken)) {
+          builder.write(' ');
+        }
+        builder.write('async ');
+      });
+    }
     _replaceReturnTypeWithFuture(body, typeProvider);
   }
 
@@ -1151,13 +1159,13 @@ class DartFileEditBuilderImpl extends FileEditBuilderImpl
   }
 
   @override
-  Future<Null> finalize() async {
+  Future<void> finalize() async {
     // TODO(brianwilkerson) Determine whether this await is necessary.
     await null;
     if (librariesToImport.isNotEmpty) {
       CompilationUnitElement definingUnitElement =
           libraryElement.definingCompilationUnit;
-      if (definingUnitElement == unit.element) {
+      if (definingUnitElement == unit.declaredElement) {
         _addLibraryImports(librariesToImport.values);
       } else {
         await (changeBuilder as DartChangeBuilder).addFileEdit(
@@ -1446,6 +1454,10 @@ class DartFileEditBuilderImpl extends FileEditBuilderImpl
       }
     }
   }
+
+  static bool _isFusedWithPreviousToken(Token token) {
+    return token.previous.end == token.offset;
+  }
 }
 
 /**
@@ -1490,13 +1502,13 @@ class _EnclosingElementFinder {
     AstNode node = new NodeLocator2(offset).searchWithin(target);
     while (node != null) {
       if (node is ClassDeclaration) {
-        enclosingClass = node.element;
+        enclosingClass = node.declaredElement;
       } else if (node is ConstructorDeclaration) {
-        enclosingExecutable = node.element;
+        enclosingExecutable = node.declaredElement;
       } else if (node is MethodDeclaration) {
-        enclosingExecutable = node.element;
+        enclosingExecutable = node.declaredElement;
       } else if (node is FunctionDeclaration) {
-        enclosingExecutable = node.element;
+        enclosingExecutable = node.declaredElement;
       }
       node = node.parent;
     }

@@ -60,8 +60,6 @@ export_ambiguous_main_test: Crash
 external_test/10: MissingRuntimeError
 external_test/13: MissingRuntimeError
 external_test/20: MissingRuntimeError
-field_initialization_order_test/01: MissingCompileTimeError
-field_initialization_order_test/none: RuntimeError
 flatten_test/05: MissingRuntimeError
 flatten_test/08: MissingRuntimeError
 flatten_test/09: MissingRuntimeError
@@ -69,7 +67,6 @@ flatten_test/12: MissingRuntimeError
 function_propagation_test: RuntimeError
 function_subtype_inline2_test: RuntimeError
 generic_function_bounds_test: RuntimeError
-generic_function_dcall_test: RuntimeError
 generic_instanceof2_test: RuntimeError
 generic_is_check_test: RuntimeError
 generic_no_such_method_dispatcher_simple_test: CompileTimeError
@@ -88,7 +85,6 @@ local_function2_test/none: RuntimeError
 local_function3_test/none: RuntimeError
 local_function_test/none: RuntimeError
 main_test/03: RuntimeError
-method_override_test: CompileTimeError
 mixin_illegal_super_use_test/01: MissingCompileTimeError
 mixin_illegal_super_use_test/04: MissingCompileTimeError
 mixin_illegal_super_use_test/07: MissingCompileTimeError
@@ -129,13 +125,6 @@ nested_generic_closure_test: RuntimeError
 no_main_test/01: Crash
 no_such_method_mock_test: RuntimeError
 null_no_such_method_test: CompileTimeError
-override_inheritance_field_test/04: CompileTimeError
-override_inheritance_field_test/06: CompileTimeError
-override_inheritance_field_test/26: CompileTimeError
-override_inheritance_field_test/29: CompileTimeError
-override_inheritance_generic_test/02: CompileTimeError
-override_inheritance_method_test/28: CompileTimeError
-override_inheritance_method_test/29: CompileTimeError
 parser_quirks_test: CompileTimeError
 regress_22443_test: RuntimeError
 regress_23408_test: CompileTimeError
@@ -167,11 +156,7 @@ vm/type_cast_vm_test: RuntimeError
 web_int_literals_test/*: SkipByDesign # Test applies only to JavaScript targets
 
 [ $compiler == dartkp ]
-class_cycle_test/02: MissingCompileTimeError
-class_cycle_test/03: MissingCompileTimeError
 covariant_subtyping_test: RuntimeError
-duplicate_implements_test/01: MissingCompileTimeError
-duplicate_implements_test/02: MissingCompileTimeError
 generic_methods_generic_function_result_test/01: MissingCompileTimeError
 generic_no_such_method_dispatcher_test: RuntimeError # Issue 31424
 web_int_literals_test/*: SkipByDesign # Test applies only to JavaScript targets
@@ -221,164 +206,206 @@ abstract_override_adds_optional_args_concrete_subclass_test: MissingCompileTimeE
 abstract_override_adds_optional_args_concrete_test: MissingCompileTimeError # Issue 32014.
 additional_interface_adds_optional_args_concrete_subclass_test: MissingCompileTimeError # Issue 32014.
 additional_interface_adds_optional_args_concrete_test: MissingCompileTimeError # Issue 32014.
-async_or_generator_return_type_stacktrace_test/01: MissingCompileTimeError # Issue 33068
-async_or_generator_return_type_stacktrace_test/02: MissingCompileTimeError # Issue 33068
-async_or_generator_return_type_stacktrace_test/03: MissingCompileTimeError # Issue 33068
 async_return_types_test/nestedFuture: MissingCompileTimeError # Issue 33068
-async_return_types_test/wrongReturnType: MissingCompileTimeError # Issue 33068
-call_non_method_field_test/01: MissingCompileTimeError # Issue 32975
-call_non_method_field_test/02: MissingCompileTimeError # Issue 32975
 const_cast2_test/01: CompileTimeError # Issue 32517
 const_cast2_test/none: CompileTimeError # Issue 32517
-const_instance_field_test/01: MissingCompileTimeError # Fasta bug: Const instance field. Issue 32326.
-const_map2_test/00: MissingCompileTimeError # KernelVM bug: Constant evaluation.
-const_map3_test/00: MissingCompileTimeError # KernelVM bug: Constant evaluation.
-const_switch2_test/01: MissingCompileTimeError # KernelVM bug: Constant evaluation.
-const_types_test/34: MissingCompileTimeError # Issue 32988
-const_types_test/39: MissingCompileTimeError # Issue 32988
-constructor_redirect_test/01: MissingCompileTimeError # Fasta bug: Initializer refers to this.
+const_constructor_mixin3_test: CompileTimeError # Issue 33644.
+const_constructor_mixin_test: CompileTimeError # Issue 33644.
+const_types_test/34: MissingCompileTimeError # Issue 31590
+const_types_test/39: MissingCompileTimeError # Issue 31590
 cyclic_type_variable_test/01: MissingCompileTimeError # Issue 32989 (missing cycle check in bounds)
 cyclic_type_variable_test/02: MissingCompileTimeError # Issue 32989 (missing cycle check in bounds)
 cyclic_type_variable_test/03: MissingCompileTimeError # Issue 32989 (missing cycle check in bounds)
 cyclic_type_variable_test/04: MissingCompileTimeError # Issue 32989 (missing cycle check in bounds)
-default_factory2_test/01: MissingCompileTimeError # Issue 32988
-default_factory_test/01: MissingCompileTimeError # Issue 32988
+default_factory2_test/01: MissingCompileTimeError # Issue 31590
+default_factory_test/01: MissingCompileTimeError # Issue 31590
 deferred_inheritance_constraints_test/extends: MissingCompileTimeError # Fasta/KernelVM bug: Deferred loading kernel issue 30273.
 deferred_inheritance_constraints_test/implements: MissingCompileTimeError # Fasta/KernelVM bug: Deferred loading kernel issue 30273.
 deferred_inheritance_constraints_test/mixin: MissingCompileTimeError # Fasta/KernelVM bug: Deferred loading kernel issue 30273.
 deferred_inheritance_constraints_test/redirecting_constructor: MissingCompileTimeError # Fasta/KernelVM bug: Deferred loading kernel issue 30273.
 duplicate_export_collision_test/01: MissingCompileTimeError # Issue 12916
-f_bounded_quantification_test/01: MissingCompileTimeError # Issue 33018
-f_bounded_quantification_test/02: MissingCompileTimeError # Issue 33018
-factory4_test/00: MissingCompileTimeError # Issue 32988
-field3_test/01: MissingCompileTimeError # Issue 33022
-field3_test/02: MissingCompileTimeError # Issue 33022
-generic_methods_bounds_test/01: MissingCompileTimeError # Issue 33018
-generic_methods_recursive_bound_test/02: MissingCompileTimeError # Issue 33018
-initializer_super_last_test/cc04: MissingCompileTimeError
-initializer_super_last_test/cc09: MissingCompileTimeError
-initializer_super_last_test/cc10: MissingCompileTimeError
-initializer_super_last_test/cc11: MissingCompileTimeError
-initializer_super_last_test/cc12: MissingCompileTimeError
-initializer_super_last_test/cc13: MissingCompileTimeError
-initializer_super_last_test/cc14: MissingCompileTimeError
-initializer_super_last_test/cc15: MissingCompileTimeError
-initializer_super_last_test/cc16: MissingCompileTimeError
-initializer_super_last_test/cc25: MissingCompileTimeError
-initializer_super_last_test/cc26: MissingCompileTimeError
-initializer_super_last_test/cc27: MissingCompileTimeError
-initializer_super_last_test/cc28: MissingCompileTimeError
-initializer_super_last_test/cc29: MissingCompileTimeError
-initializer_super_last_test/cc30: MissingCompileTimeError
-initializer_super_last_test/cc31: MissingCompileTimeError
-initializer_super_last_test/cc32: MissingCompileTimeError
-issue31596_super_test/02: MissingCompileTimeError
-issue31596_super_test/04: MissingCompileTimeError
-malbounded_instantiation_test/01: MissingCompileTimeError # Issue 33018
-malbounded_instantiation_test/02: MissingCompileTimeError # Issue 33018
-malbounded_instantiation_test/03: MissingCompileTimeError # Issue 33018
-malbounded_redirecting_factory_test/02: MissingCompileTimeError # Issue 33018
-malbounded_redirecting_factory_test/03: MissingCompileTimeError # Issue 33018
-malbounded_redirecting_factory_test/04: MissingCompileTimeError # Issue 33018
-malbounded_redirecting_factory_test/05: MissingCompileTimeError # Issue 33018
-malbounded_type_cast2_test: MissingCompileTimeError # Issue 33018
-malbounded_type_cast_test/00: MissingCompileTimeError # Issue 33018
-malbounded_type_cast_test/01: MissingCompileTimeError # Issue 33018
-malbounded_type_cast_test/02: MissingCompileTimeError # Issue 33018
-malbounded_type_literal_test/00: MissingCompileTimeError # Issue 33018
-malbounded_type_test2_test/00: MissingCompileTimeError # Issue 33018
-malbounded_type_test_test/00: MissingCompileTimeError # Issue 33018
-malbounded_type_test_test/01: MissingCompileTimeError # Issue 33018
-malbounded_type_test_test/02: MissingCompileTimeError # Issue 33018
-mixin_forwarding_constructor4_test/01: MissingCompileTimeError # KernelVM bug: Issue 15101
-mixin_forwarding_constructor4_test/02: MissingCompileTimeError # KernelVM bug: Issue 15101
-mixin_forwarding_constructor4_test/03: MissingCompileTimeError # KernelVM bug: Issue 15101
-mixin_invalid_bound2_test/02: MissingCompileTimeError # Issue 33071 (missing bounds check)
-mixin_invalid_bound2_test/03: MissingCompileTimeError # Issue 33071 (missing bounds check)
-mixin_invalid_bound2_test/04: MissingCompileTimeError # Issue 33071 (missing bounds check)
-mixin_invalid_bound2_test/05: MissingCompileTimeError # Issue 33071 (missing bounds check)
-mixin_invalid_bound2_test/06: MissingCompileTimeError # Issue 33071 (missing bounds check)
-mixin_invalid_bound2_test/07: MissingCompileTimeError # Issue 33071 (missing bounds check)
-mixin_invalid_bound2_test/08: MissingCompileTimeError # Issue 33071 (missing bounds check)
-mixin_invalid_bound2_test/09: MissingCompileTimeError # Issue 33071 (missing bounds check)
-mixin_invalid_bound2_test/10: MissingCompileTimeError # Issue 33071 (missing bounds check)
-mixin_invalid_bound2_test/11: MissingCompileTimeError # Issue 33071 (missing bounds check)
-mixin_invalid_bound2_test/12: MissingCompileTimeError # Issue 33071 (missing bounds check)
-mixin_invalid_bound2_test/13: MissingCompileTimeError # Issue 33071 (missing bounds check)
-mixin_invalid_bound2_test/14: MissingCompileTimeError # Issue 33071 (missing bounds check)
-mixin_invalid_bound2_test/15: MissingCompileTimeError # Issue 33071 (missing bounds check)
-mixin_invalid_bound_test/02: MissingCompileTimeError # Issue 33071 (missing bounds check)
-mixin_invalid_bound_test/03: MissingCompileTimeError # Issue 33071 (missing bounds check)
-mixin_invalid_bound_test/04: MissingCompileTimeError # Issue 33071 (missing bounds check)
-mixin_invalid_bound_test/05: MissingCompileTimeError # Issue 33071 (missing bounds check)
-mixin_invalid_bound_test/06: MissingCompileTimeError # Issue 33071 (missing bounds check)
-mixin_invalid_bound_test/07: MissingCompileTimeError # Issue 33071 (missing bounds check)
-mixin_invalid_bound_test/08: MissingCompileTimeError # Issue 33071 (missing bounds check)
-mixin_invalid_bound_test/09: MissingCompileTimeError # Issue 33071 (missing bounds check)
-mixin_invalid_bound_test/10: MissingCompileTimeError # Issue 33071 (missing bounds check)
-mixin_super_bound_test/01: MissingCompileTimeError
-mixin_super_bound_test/02: MissingCompileTimeError
-mixin_super_constructor_named_test/01: MissingCompileTimeError # KernelVM bug: Issue 15101
-mixin_super_constructor_positionals_test/01: MissingCompileTimeError # KernelVM bug: Issue 15101
-mixin_type_parameters_errors_test/03: MissingCompileTimeError
-mixin_type_parameters_errors_test/04: MissingCompileTimeError
-named_constructor_test/01: MissingCompileTimeError
-named_parameters_default_eq_test/02: MissingCompileTimeError # Fasta bug: Default values are not allowed on redirecting factory constructors.
-override_field_test/02: MissingCompileTimeError
-override_field_test/03: MissingCompileTimeError
-partial_tearoff_instantiation_test/05: MissingCompileTimeError
-partial_tearoff_instantiation_test/06: MissingCompileTimeError
-partial_tearoff_instantiation_test/07: MissingCompileTimeError
-partial_tearoff_instantiation_test/08: MissingCompileTimeError
-redirecting_factory_default_values_test/01: MissingCompileTimeError # Fasta bug: Default values are not allowed on redirecting factory constructors.
-redirecting_factory_default_values_test/02: MissingCompileTimeError # Fasta bug: Default values are not allowed on redirecting factory constructors.
+f_bounded_quantification_test/01: MissingCompileTimeError # Issue 33308
+f_bounded_quantification_test/02: MissingCompileTimeError # Issue 33308
+factory4_test/00: MissingCompileTimeError # Issue 31590
+generic_methods_bounds_test/01: MissingCompileTimeError # Issue 33308
+generic_methods_recursive_bound_test/02: MissingCompileTimeError # Issue 33308
+issue31596_super_test/02: MissingCompileTimeError # Issue 31596
+issue31596_super_test/04: MissingCompileTimeError # Issue 31596
+malbounded_instantiation_test/01: MissingCompileTimeError # Issue 33308
+malbounded_instantiation_test/02: MissingCompileTimeError # Issue 33308
+malbounded_instantiation_test/03: MissingCompileTimeError # Issue 33308
+malbounded_redirecting_factory_test/02: MissingCompileTimeError # Issue 33308
+malbounded_redirecting_factory_test/03: MissingCompileTimeError # Issue 33308
+malbounded_redirecting_factory_test/04: MissingCompileTimeError # Issue 33308
+malbounded_redirecting_factory_test/05: MissingCompileTimeError # Issue 33308
+malbounded_type_cast2_test: MissingCompileTimeError # Issue 33308
+malbounded_type_cast_test/00: MissingCompileTimeError # Issue 33308
+malbounded_type_cast_test/01: MissingCompileTimeError # Issue 33308
+malbounded_type_cast_test/02: MissingCompileTimeError # Issue 33308
+malbounded_type_literal_test/00: MissingCompileTimeError # Issue 33308
+malbounded_type_test2_test/00: MissingCompileTimeError # Issue 33308
+malbounded_type_test_test/00: MissingCompileTimeError # Issue 33308
+malbounded_type_test_test/01: MissingCompileTimeError # Issue 33308
+malbounded_type_test_test/02: MissingCompileTimeError # Issue 33308
+mixin_invalid_bound2_test/02: MissingCompileTimeError # Issue 33308
+mixin_invalid_bound2_test/03: MissingCompileTimeError # Issue 33308
+mixin_invalid_bound2_test/04: MissingCompileTimeError # Issue 33308
+mixin_invalid_bound2_test/05: MissingCompileTimeError # Issue 33308
+mixin_invalid_bound2_test/06: MissingCompileTimeError # Issue 33308
+mixin_invalid_bound2_test/07: MissingCompileTimeError # Issue 33308
+mixin_invalid_bound2_test/08: MissingCompileTimeError # Issue 33308
+mixin_invalid_bound2_test/09: MissingCompileTimeError # Issue 33308
+mixin_invalid_bound2_test/10: MissingCompileTimeError # Issue 33308
+mixin_invalid_bound2_test/11: MissingCompileTimeError # Issue 33308
+mixin_invalid_bound2_test/12: MissingCompileTimeError # Issue 33308
+mixin_invalid_bound2_test/13: MissingCompileTimeError # Issue 33308
+mixin_invalid_bound2_test/14: MissingCompileTimeError # Issue 33308
+mixin_invalid_bound2_test/15: MissingCompileTimeError # Issue 33308
+mixin_invalid_bound_test/02: MissingCompileTimeError # Issue 33308
+mixin_invalid_bound_test/03: MissingCompileTimeError # Issue 33308
+mixin_invalid_bound_test/04: MissingCompileTimeError # Issue 33308
+mixin_invalid_bound_test/05: MissingCompileTimeError # Issue 33308
+mixin_invalid_bound_test/06: MissingCompileTimeError # Issue 33308
+mixin_invalid_bound_test/07: MissingCompileTimeError # Issue 33308
+mixin_invalid_bound_test/08: MissingCompileTimeError # Issue 33308
+mixin_invalid_bound_test/09: MissingCompileTimeError # Issue 33308
+mixin_invalid_bound_test/10: MissingCompileTimeError # Issue 33308
+mixin_super_bound_test/01: MissingCompileTimeError # Issue 33308
+mixin_super_bound_test/02: MissingCompileTimeError # Issue 33308
+mixin_type_parameters_errors_test/03: MissingCompileTimeError # Issue 32972
+mixin_type_parameters_errors_test/04: MissingCompileTimeError # Issue 32972
+named_constructor_test/01: MissingCompileTimeError # Issue 34159
+named_parameters_default_eq_test/02: MissingCompileTimeError # Issue 34160
+partial_tearoff_instantiation_test/05: MissingCompileTimeError # Issue 32281
+partial_tearoff_instantiation_test/06: MissingCompileTimeError # Issue 32281
+partial_tearoff_instantiation_test/07: MissingCompileTimeError # Issue 32281
+partial_tearoff_instantiation_test/08: MissingCompileTimeError # Issue 32281
+redirecting_factory_default_values_test/01: MissingCompileTimeError # Issue 34160
+redirecting_factory_default_values_test/02: MissingCompileTimeError # Issue 34160
 regress_22976_test/*: CompileTimeError # Issue 31935
-regress_27617_test/1: MissingCompileTimeError # Fasta bug: Bad constructor redirection.
-regress_29784_test/01: MissingCompileTimeError
-regress_29784_test/02: MissingCompileTimeError
-switch_bad_case_test/01: MissingCompileTimeError # KernelVM bug: Constant evaluation.
-switch_bad_case_test/02: MissingCompileTimeError # KernelVM bug: Constant evaluation.
-switch_case_test/00: MissingCompileTimeError # KernelVM bug: Constant evaluation.
-switch_case_test/01: MissingCompileTimeError # KernelVM bug: Constant evaluation.
-switch_case_test/02: MissingCompileTimeError # KernelVM bug: Constant evaluation.
-syntax_test/28: MissingCompileTimeError # Issue 29763
-syntax_test/29: MissingCompileTimeError # Issue 29763
-syntax_test/30: MissingCompileTimeError # Issue 29763
-syntax_test/31: MissingCompileTimeError # Issue 29763
-syntax_test/32: MissingCompileTimeError # Issue 29763
-syntax_test/33: MissingCompileTimeError # Issue 29763
-syntax_test/60: MissingCompileTimeError # Issue 30176
-syntax_test/61: MissingCompileTimeError # Issue 30176
-type_variable_bounds2_test: MissingCompileTimeError
-type_variable_bounds3_test/00: MissingCompileTimeError
-type_variable_bounds4_test/01: MissingCompileTimeError
-type_variable_bounds_test/01: MissingCompileTimeError
-type_variable_bounds_test/02: MissingCompileTimeError
-type_variable_bounds_test/03: MissingCompileTimeError
-type_variable_bounds_test/04: MissingCompileTimeError
-type_variable_bounds_test/05: MissingCompileTimeError
-type_variable_bounds_test/06: MissingCompileTimeError
-type_variable_bounds_test/08: MissingCompileTimeError
-type_variable_bounds_test/11: MissingCompileTimeError
+syntax_test/28: MissingCompileTimeError # Issue 29763 - low priority
+syntax_test/29: MissingCompileTimeError # Issue 29763 - low priority
+syntax_test/30: MissingCompileTimeError # Issue 29763 - low priority
+syntax_test/31: MissingCompileTimeError # Issue 29763 - low priority
+syntax_test/32: MissingCompileTimeError # Issue 29763 - low priority
+syntax_test/33: MissingCompileTimeError # Issue 29763 - low priority
+syntax_test/60: MissingCompileTimeError # Issue 30470
+syntax_test/61: MissingCompileTimeError # Issue 30470
+type_variable_bounds2_test: MissingCompileTimeError # Issue 33308
+type_variable_bounds3_test/00: MissingCompileTimeError # Issue 33308
+type_variable_bounds4_test/01: MissingCompileTimeError # Issue 33308
+type_variable_bounds_test/01: MissingCompileTimeError # Issue 33308
+type_variable_bounds_test/02: MissingCompileTimeError # Issue 33308
+type_variable_bounds_test/03: MissingCompileTimeError # Issue 33308
+type_variable_bounds_test/04: MissingCompileTimeError # Issue 33308
+type_variable_bounds_test/05: MissingCompileTimeError # Issue 33308
+type_variable_bounds_test/06: MissingCompileTimeError # Issue 33308
+type_variable_bounds_test/08: MissingCompileTimeError # Issue 33308
+type_variable_bounds_test/11: MissingCompileTimeError # Issue 33308
 vm/debug_break_enabled_vm_test/01: CompileTimeError # KernelVM bug: Bad test using extended break syntax.
 vm/debug_break_enabled_vm_test/none: CompileTimeError # KernelVM bug: Bad test using extended break syntax.
 vm/regress_27201_test: CompileTimeError # Fasta/KernelVM bug: Deferred loading kernel issue 30273.
 
-[ $arch != simarm && $arch != simarm64 && $arch != simdbc64 && $runtime == vm && $strong && ($compiler == dartk || $compiler == dartkb) ]
+[ $arch != simarm && $arch != simarm64 && $arch != simdbc64 && $compiler == dartk && $runtime == vm && $strong ]
 export_ambiguous_main_test: Crash # Issue 32618
 
 [ $compiler == app_jitk && $mode == product ]
-type_variable_promotion_test: RuntimeError
 vm/causal_async_exception_stack2_test: RuntimeError
 vm/causal_async_exception_stack_test: RuntimeError
 
 [ $compiler == app_jitk && ($mode == debug || $mode == release) ]
 assertion_test: RuntimeError
 
-[ $compiler != app_jitk && $compiler != dart2js && $compiler != dartk && $compiler != dartkb && $compiler != dartkp && $fasta ]
+[ $compiler != app_jitk && $compiler != dart2analyzer && $compiler != dart2js && $compiler != dartk && $compiler != dartkb && $compiler != dartkp && $fasta ]
 const_optional_args_test/01: MissingCompileTimeError
 
+# The precomilation configuration uses a kernel2kernel constants evaluator
+# which is is more correct than fasta/vm in JIT mode (i.e. it catches more
+# compile-time errors).
+[ $compiler != dart2analyzer && $compiler != dart2js && $compiler != dartkb && $compiler != dartkp && $fasta ]
+compile_time_constant_c_test/02: MissingCompileTimeError
+const_constructor_nonconst_field_test/01: MissingCompileTimeError
+const_syntax_test/05: MissingCompileTimeError
+
+[ $compiler != dart2analyzer && $compiler != dart2js && $fasta && $strong ]
+super_call4_test/01: MissingCompileTimeError
+
+# The precomilation and bytecode configurations use a kernel2kernel constants evaluator
+# which is is more correct than fasta/vm in JIT mode (i.e. it catches more
+# compile-time errors).
+[ $compiler != dart2analyzer && $compiler != dartkb && $compiler != dartkp && $fasta ]
+compile_time_constant_o_test/01: MissingCompileTimeError # Issue 32983
+compile_time_constant_o_test/02: MissingCompileTimeError # Issue 32983
+const_dynamic_type_literal_test/02: MissingCompileTimeError # Issue 32983
+identical_const_test/01: MissingCompileTimeError # Issue 32983
+identical_const_test/02: MissingCompileTimeError # Issue 32983
+identical_const_test/03: MissingCompileTimeError # Issue 32983
+identical_const_test/04: MissingCompileTimeError # Issue 32983
+
+# The precomilation and bytecode configurations use a kernel2kernel constants evaluator
+# which is is more correct than fasta/vm in JIT mode (i.e. it catches more
+# compile-time errors).
+[ $compiler != dart2analyzer && $compiler != dartkb && $compiler != dartkp && $fasta && $strong ]
+compile_time_constant_k_test/01: MissingCompileTimeError
+compile_time_constant_k_test/02: MissingCompileTimeError
+compile_time_constant_k_test/03: MissingCompileTimeError
+map_literal3_test/01: MissingCompileTimeError
+map_literal3_test/02: MissingCompileTimeError
+
 [ $compiler != dart2analyzer && $fasta ]
+const_map2_test/00: MissingCompileTimeError # KernelVM bug: Constant evaluation.
+const_map3_test/00: MissingCompileTimeError # KernelVM bug: Constant evaluation.
+const_switch2_test/01: MissingCompileTimeError # KernelVM bug: Constant evaluation.
+invalid_returns/async_invalid_return_05_test: MissingCompileTimeError
+invalid_returns/async_invalid_return_06_test: MissingCompileTimeError
+invalid_returns/async_invalid_return_07_test: MissingCompileTimeError
+invalid_returns/async_invalid_return_08_test: MissingCompileTimeError
+invalid_returns/async_invalid_return_09_test: MissingCompileTimeError
+invalid_returns/async_invalid_return_10_test: MissingCompileTimeError
+invalid_returns/async_invalid_return_11_test: MissingCompileTimeError
+invalid_returns/async_invalid_return_12_test: MissingCompileTimeError
+invalid_returns/async_invalid_return_13_test: MissingCompileTimeError
+invalid_returns/async_invalid_return_14_test: MissingCompileTimeError
+invalid_returns/async_invalid_return_15_test: MissingCompileTimeError
+invalid_returns/async_invalid_return_16_test: MissingCompileTimeError
+invalid_returns/async_invalid_return_17_test: MissingCompileTimeError
+invalid_returns/async_invalid_return_18_test: MissingCompileTimeError
+invalid_returns/async_invalid_return_19_test: MissingCompileTimeError
+invalid_returns/async_invalid_return_20_test: MissingCompileTimeError
+invalid_returns/async_invalid_return_21_test: MissingCompileTimeError
+invalid_returns/async_invalid_return_22_test: MissingCompileTimeError
+invalid_returns/async_invalid_return_23_test: MissingCompileTimeError
+invalid_returns/async_invalid_return_24_test: MissingCompileTimeError
+invalid_returns/async_invalid_return_25_test: MissingCompileTimeError
+invalid_returns/async_invalid_return_26_test: MissingCompileTimeError
+invalid_returns/async_invalid_return_27_test: MissingCompileTimeError
+invalid_returns/async_invalid_return_28_test: MissingCompileTimeError
+invalid_returns/async_invalid_return_29_test: MissingCompileTimeError
+invalid_returns/async_invalid_return_30_test: MissingCompileTimeError
+invalid_returns/async_invalid_return_31_test: MissingCompileTimeError
+invalid_returns/async_invalid_return_32_test: MissingCompileTimeError
+invalid_returns/async_invalid_return_33_test: MissingCompileTimeError
+invalid_returns/async_invalid_return_34_test: MissingCompileTimeError
+invalid_returns/async_invalid_return_35_test: MissingCompileTimeError
+invalid_returns/async_invalid_return_36_test: MissingCompileTimeError
+invalid_returns/async_invalid_return_37_test: MissingCompileTimeError
+invalid_returns/sync_invalid_return_06_test: MissingCompileTimeError
+invalid_returns/sync_invalid_return_07_test: MissingCompileTimeError
+invalid_returns/sync_invalid_return_08_test: MissingCompileTimeError
+invalid_returns/sync_invalid_return_09_test: MissingCompileTimeError
+invalid_returns/sync_invalid_return_10_test: MissingCompileTimeError
+invalid_returns/sync_invalid_return_11_test: MissingCompileTimeError
+invalid_returns/sync_invalid_return_12_test: MissingCompileTimeError
+invalid_returns/sync_invalid_return_13_test: MissingCompileTimeError
+invalid_returns/sync_invalid_return_14_test: MissingCompileTimeError
+invalid_returns/sync_invalid_return_15_test: MissingCompileTimeError
+invalid_returns/sync_invalid_return_16_test: MissingCompileTimeError
+invalid_returns/sync_invalid_return_17_test: MissingCompileTimeError
+switch_bad_case_test/01: MissingCompileTimeError # KernelVM bug: Constant evaluation.
+switch_bad_case_test/02: MissingCompileTimeError # KernelVM bug: Constant evaluation.
+switch_case_test/00: MissingCompileTimeError # KernelVM bug: Constant evaluation.
+switch_case_test/01: MissingCompileTimeError # KernelVM bug: Constant evaluation.
+switch_case_test/02: MissingCompileTimeError # KernelVM bug: Constant evaluation.
 void/return_future_future_or_void_async_error0_test: MissingCompileTimeError
 void/return_future_future_or_void_sync_error0_test: MissingCompileTimeError
 void/return_future_or_future_or_void_sync_error1_test: MissingCompileTimeError
@@ -390,216 +417,277 @@ void/return_void_async_error4_test: MissingCompileTimeError
 void/return_void_sync_error0_test: MissingCompileTimeError
 void/return_void_sync_error1_test: MissingCompileTimeError
 void/return_void_sync_error2_test: MissingCompileTimeError
-void_block_return_test/00: MissingCompileTimeError
-void_type_callbacks_test/00: MissingCompileTimeError
-void_type_callbacks_test/01: MissingCompileTimeError
-void_type_function_types_test/04: MissingCompileTimeError # Issue 32804
-void_type_function_types_test/06: MissingCompileTimeError # Issue 32804
-void_type_function_types_test/08: MissingCompileTimeError # Issue 32804
-void_type_override_test/03: MissingCompileTimeError # Issue 32804
-void_type_usage_test/call_argument: MissingCompileTimeError # Issue 32804
-void_type_usage_test/call_cascade: MissingCompileTimeError # Issue 32804
-void_type_usage_test/call_do_while: MissingCompileTimeError # Issue 32804
-void_type_usage_test/call_dynamic_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/call_for_in: MissingCompileTimeError # Issue 32804
-void_type_usage_test/call_is: MissingCompileTimeError # Issue 32804
-void_type_usage_test/call_literal_list_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/call_literal_map_key_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/call_literal_map_key_init2: MissingCompileTimeError # Issue 32804
-void_type_usage_test/call_literal_map_value_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/call_literal_map_value_init2: MissingCompileTimeError # Issue 32804
-void_type_usage_test/call_null_dot: MissingCompileTimeError # Issue 32804
-void_type_usage_test/call_null_equals2: MissingCompileTimeError # Issue 32804
-void_type_usage_test/call_return: MissingCompileTimeError # Issue 32804
-void_type_usage_test/call_throw: MissingCompileTimeError # Issue 32804
-void_type_usage_test/call_toString: MissingCompileTimeError # Issue 32804
-void_type_usage_test/call_void_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/call_while: MissingCompileTimeError # Issue 32804
-void_type_usage_test/conditional2_argument: MissingCompileTimeError # Issue 32804
-void_type_usage_test/conditional2_dynamic_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/conditional2_literal_list_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/conditional2_literal_map_value_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/conditional2_literal_map_value_init2: MissingCompileTimeError # Issue 32804
-void_type_usage_test/conditional2_null_equals2: MissingCompileTimeError # Issue 32804
-void_type_usage_test/conditional2_return: MissingCompileTimeError # Issue 32804
-void_type_usage_test/conditional2_throw: MissingCompileTimeError # Issue 32804
-void_type_usage_test/conditional2_void_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/conditional2do_while: MissingCompileTimeError # Issue 32804
-void_type_usage_test/conditional2for_in: MissingCompileTimeError # Issue 32804
-void_type_usage_test/conditional2while: MissingCompileTimeError # Issue 32804
-void_type_usage_test/conditional3_argument: MissingCompileTimeError # Issue 32804
-void_type_usage_test/conditional3_dynamic_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/conditional3_literal_list_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/conditional3_literal_map_value_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/conditional3_literal_map_value_init2: MissingCompileTimeError # Issue 32804
-void_type_usage_test/conditional3_null_equals2: MissingCompileTimeError # Issue 32804
-void_type_usage_test/conditional3_return: MissingCompileTimeError # Issue 32804
-void_type_usage_test/conditional3_throw: MissingCompileTimeError # Issue 32804
-void_type_usage_test/conditional3_void_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/conditional_argument: MissingCompileTimeError # Issue 32804
-void_type_usage_test/conditional_do_while: MissingCompileTimeError # Issue 32804
-void_type_usage_test/conditional_dynamic_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/conditional_for_in: MissingCompileTimeError # Issue 32804
-void_type_usage_test/conditional_literal_list_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/conditional_literal_map_value_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/conditional_literal_map_value_init2: MissingCompileTimeError # Issue 32804
-void_type_usage_test/conditional_null_equals2: MissingCompileTimeError # Issue 32804
-void_type_usage_test/conditional_return: MissingCompileTimeError # Issue 32804
-void_type_usage_test/conditional_throw: MissingCompileTimeError # Issue 32804
-void_type_usage_test/conditional_void_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/conditional_while: MissingCompileTimeError # Issue 32804
-void_type_usage_test/final_local_argument: MissingCompileTimeError # Issue 32804
-void_type_usage_test/final_local_cascade: MissingCompileTimeError # Issue 32804
-void_type_usage_test/final_local_do_while: MissingCompileTimeError # Issue 32804
-void_type_usage_test/final_local_dynamic_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/final_local_for_in: MissingCompileTimeError # Issue 32804
-void_type_usage_test/final_local_is: MissingCompileTimeError # Issue 32804
-void_type_usage_test/final_local_literal_list_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/final_local_literal_map_key_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/final_local_literal_map_key_init2: MissingCompileTimeError # Issue 32804
-void_type_usage_test/final_local_literal_map_value_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/final_local_literal_map_value_init2: MissingCompileTimeError # Issue 32804
-void_type_usage_test/final_local_null_dot: MissingCompileTimeError # Issue 32804
-void_type_usage_test/final_local_null_equals2: MissingCompileTimeError # Issue 32804
-void_type_usage_test/final_local_return: MissingCompileTimeError # Issue 32804
-void_type_usage_test/final_local_throw: MissingCompileTimeError # Issue 32804
-void_type_usage_test/final_local_toString: MissingCompileTimeError # Issue 32804
-void_type_usage_test/final_local_void_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/final_local_while: MissingCompileTimeError # Issue 32804
-void_type_usage_test/global_argument: MissingCompileTimeError # Issue 32804
-void_type_usage_test/global_cascade: MissingCompileTimeError # Issue 32804
-void_type_usage_test/global_do_while: MissingCompileTimeError # Issue 32804
-void_type_usage_test/global_dynamic_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/global_for_in: MissingCompileTimeError # Issue 32804
-void_type_usage_test/global_is: MissingCompileTimeError # Issue 32804
-void_type_usage_test/global_literal_list_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/global_literal_map_key_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/global_literal_map_key_init2: MissingCompileTimeError # Issue 32804
-void_type_usage_test/global_literal_map_value_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/global_literal_map_value_init2: MissingCompileTimeError # Issue 32804
-void_type_usage_test/global_null_dot: MissingCompileTimeError # Issue 32804
-void_type_usage_test/global_null_equals2: MissingCompileTimeError # Issue 32804
-void_type_usage_test/global_return: MissingCompileTimeError # Issue 32804
-void_type_usage_test/global_throw: MissingCompileTimeError # Issue 32804
-void_type_usage_test/global_toString: MissingCompileTimeError # Issue 32804
-void_type_usage_test/global_void_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/global_while: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance2_argument: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance2_cascade: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance2_do_while: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance2_dynamic_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance2_for_in: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance2_is: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance2_literal_list_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance2_literal_map_key_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance2_literal_map_key_init2: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance2_literal_map_value_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance2_literal_map_value_init2: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance2_null_dot: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance2_null_equals2: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance2_return: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance2_throw: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance2_toString: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance2_void_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance2_while: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance3_argument: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance3_cascade: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance3_do_while: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance3_dynamic_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance3_for_in: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance3_is: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance3_literal_list_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance3_literal_map_key_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance3_literal_map_key_init2: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance3_literal_map_value_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance3_literal_map_value_init2: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance3_null_dot: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance3_null_equals2: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance3_return: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance3_throw: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance3_toString: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance3_void_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance3_while: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance_argument: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance_cascade: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance_do_while: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance_dynamic_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance_for_in: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance_is: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance_literal_list_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance_literal_map_key_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance_literal_map_key_init2: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance_literal_map_value_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance_literal_map_value_init2: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance_null_dot: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance_null_equals2: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance_return: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance_throw: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance_toString: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance_void_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/instance_while: MissingCompileTimeError # Issue 32804
-void_type_usage_test/local_argument: MissingCompileTimeError # Issue 32804
-void_type_usage_test/local_cascade: MissingCompileTimeError # Issue 32804
-void_type_usage_test/local_do_while: MissingCompileTimeError # Issue 32804
-void_type_usage_test/local_dynamic_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/local_for_in: MissingCompileTimeError # Issue 32804
-void_type_usage_test/local_is: MissingCompileTimeError # Issue 32804
-void_type_usage_test/local_literal_list_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/local_literal_map_key_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/local_literal_map_key_init2: MissingCompileTimeError # Issue 32804
-void_type_usage_test/local_literal_map_value_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/local_literal_map_value_init2: MissingCompileTimeError # Issue 32804
-void_type_usage_test/local_null_dot: MissingCompileTimeError # Issue 32804
-void_type_usage_test/local_null_equals2: MissingCompileTimeError # Issue 32804
-void_type_usage_test/local_return: MissingCompileTimeError # Issue 32804
-void_type_usage_test/local_throw: MissingCompileTimeError # Issue 32804
-void_type_usage_test/local_toString: MissingCompileTimeError # Issue 32804
-void_type_usage_test/local_void_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/local_while: MissingCompileTimeError # Issue 32804
-void_type_usage_test/param_argument: MissingCompileTimeError # Issue 32804
-void_type_usage_test/param_cascade: MissingCompileTimeError # Issue 32804
-void_type_usage_test/param_do_while: MissingCompileTimeError # Issue 32804
-void_type_usage_test/param_dynamic_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/param_for_in: MissingCompileTimeError # Issue 32804
-void_type_usage_test/param_is: MissingCompileTimeError # Issue 32804
-void_type_usage_test/param_literal_list_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/param_literal_map_key_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/param_literal_map_key_init2: MissingCompileTimeError # Issue 32804
-void_type_usage_test/param_literal_map_value_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/param_literal_map_value_init2: MissingCompileTimeError # Issue 32804
-void_type_usage_test/param_null_dot: MissingCompileTimeError # Issue 32804
-void_type_usage_test/param_null_equals2: MissingCompileTimeError # Issue 32804
-void_type_usage_test/param_return: MissingCompileTimeError # Issue 32804
-void_type_usage_test/param_throw: MissingCompileTimeError # Issue 32804
-void_type_usage_test/param_toString: MissingCompileTimeError # Issue 32804
-void_type_usage_test/param_void_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/param_while: MissingCompileTimeError # Issue 32804
-void_type_usage_test/paren_argument: MissingCompileTimeError # Issue 32804
-void_type_usage_test/paren_cascade: MissingCompileTimeError # Issue 32804
-void_type_usage_test/paren_do_while: MissingCompileTimeError # Issue 32804
-void_type_usage_test/paren_dynamic_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/paren_for_in: MissingCompileTimeError # Issue 32804
-void_type_usage_test/paren_is: MissingCompileTimeError # Issue 32804
-void_type_usage_test/paren_literal_list_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/paren_literal_map_key_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/paren_literal_map_key_init2: MissingCompileTimeError # Issue 32804
-void_type_usage_test/paren_literal_map_value_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/paren_literal_map_value_init2: MissingCompileTimeError # Issue 32804
-void_type_usage_test/paren_null_dot: MissingCompileTimeError # Issue 32804
-void_type_usage_test/paren_null_equals2: MissingCompileTimeError # Issue 32804
-void_type_usage_test/paren_return: MissingCompileTimeError # Issue 32804
-void_type_usage_test/paren_throw: MissingCompileTimeError # Issue 32804
-void_type_usage_test/paren_toString: MissingCompileTimeError # Issue 32804
-void_type_usage_test/paren_void_init: MissingCompileTimeError # Issue 32804
-void_type_usage_test/paren_while: MissingCompileTimeError # Issue 32804
+void/void_block_return_test/00: MissingCompileTimeError
+void/void_type_callbacks_test/00: MissingCompileTimeError
+void/void_type_callbacks_test/01: MissingCompileTimeError
+void/void_type_usage_test/async_use_in_await_for: MissingCompileTimeError
+void/void_type_usage_test/async_use_in_yield: MissingCompileTimeError
+void/void_type_usage_test/async_use_in_yield_star: MissingCompileTimeError
+void/void_type_usage_test/call_addition: MissingCompileTimeError
+void/void_type_usage_test/call_argument: MissingCompileTimeError
+void/void_type_usage_test/call_boolean_and_left: MissingCompileTimeError
+void/void_type_usage_test/call_boolean_and_right: MissingCompileTimeError
+void/void_type_usage_test/call_boolean_negation: MissingCompileTimeError
+void/void_type_usage_test/call_boolean_or_left: MissingCompileTimeError
+void/void_type_usage_test/call_boolean_or_right: MissingCompileTimeError
+void/void_type_usage_test/call_cascade: MissingCompileTimeError
+void/void_type_usage_test/call_conditional_stmt: MissingCompileTimeError
+void/void_type_usage_test/call_do_while: MissingCompileTimeError
+void/void_type_usage_test/call_dynamic_init: MissingCompileTimeError
+void/void_type_usage_test/call_equals_left: MissingCompileTimeError
+void/void_type_usage_test/call_equals_right: MissingCompileTimeError
+void/void_type_usage_test/call_for_in: MissingCompileTimeError
+void/void_type_usage_test/call_identical: MissingCompileTimeError
+void/void_type_usage_test/call_is: MissingCompileTimeError
+void/void_type_usage_test/call_literal_list_init: MissingCompileTimeError
+void/void_type_usage_test/call_literal_map_key_init2: MissingCompileTimeError
+void/void_type_usage_test/call_literal_map_value_init2: MissingCompileTimeError
+void/void_type_usage_test/call_multiplication: MissingCompileTimeError
+void/void_type_usage_test/call_null_dot: MissingCompileTimeError
+void/void_type_usage_test/call_null_equals1: MissingCompileTimeError
+void/void_type_usage_test/call_return: MissingCompileTimeError # Issue 32804
+void/void_type_usage_test/call_throw: MissingCompileTimeError
+void/void_type_usage_test/call_toString: MissingCompileTimeError
+void/void_type_usage_test/call_use_in_conditional_assignment_right: MissingCompileTimeError
+void/void_type_usage_test/call_use_in_list_subscript: MissingCompileTimeError
+void/void_type_usage_test/call_use_in_map_lookup: MissingCompileTimeError
+void/void_type_usage_test/call_use_in_string_interpolation: MissingCompileTimeError
+void/void_type_usage_test/call_while: MissingCompileTimeError
+void/void_type_usage_test/conditional2_argument: MissingCompileTimeError
+void/void_type_usage_test/conditional2_dynamic_init: MissingCompileTimeError
+void/void_type_usage_test/conditional2_literal_list_init: MissingCompileTimeError
+void/void_type_usage_test/conditional2_literal_map_value_init2: MissingCompileTimeError
+void/void_type_usage_test/conditional2_null_equals1: MissingCompileTimeError
+void/void_type_usage_test/conditional2_return: MissingCompileTimeError # Issue 32804
+void/void_type_usage_test/conditional2_throw: MissingCompileTimeError
+void/void_type_usage_test/conditional2do_while: MissingCompileTimeError
+void/void_type_usage_test/conditional2for_in: MissingCompileTimeError
+void/void_type_usage_test/conditional2while: MissingCompileTimeError
+void/void_type_usage_test/conditional3_argument: MissingCompileTimeError
+void/void_type_usage_test/conditional3_dynamic_init: MissingCompileTimeError
+void/void_type_usage_test/conditional3_literal_list_init: MissingCompileTimeError
+void/void_type_usage_test/conditional3_literal_map_value_init2: MissingCompileTimeError
+void/void_type_usage_test/conditional3_null_equals1: MissingCompileTimeError
+void/void_type_usage_test/conditional3_return: MissingCompileTimeError # Issue 32804
+void/void_type_usage_test/conditional3_throw: MissingCompileTimeError
+void/void_type_usage_test/conditional_argument: MissingCompileTimeError
+void/void_type_usage_test/conditional_do_while: MissingCompileTimeError
+void/void_type_usage_test/conditional_dynamic_init: MissingCompileTimeError
+void/void_type_usage_test/conditional_for_in: MissingCompileTimeError
+void/void_type_usage_test/conditional_literal_list_init: MissingCompileTimeError
+void/void_type_usage_test/conditional_literal_map_value_init2: MissingCompileTimeError
+void/void_type_usage_test/conditional_null_equals1: MissingCompileTimeError
+void/void_type_usage_test/conditional_return: MissingCompileTimeError # Issue 32804
+void/void_type_usage_test/conditional_throw: MissingCompileTimeError
+void/void_type_usage_test/conditional_while: MissingCompileTimeError
+void/void_type_usage_test/final_local_addition: MissingCompileTimeError
+void/void_type_usage_test/final_local_argument: MissingCompileTimeError
+void/void_type_usage_test/final_local_boolean_and_left: MissingCompileTimeError
+void/void_type_usage_test/final_local_boolean_and_right: MissingCompileTimeError
+void/void_type_usage_test/final_local_boolean_negation: MissingCompileTimeError
+void/void_type_usage_test/final_local_boolean_or_left: MissingCompileTimeError
+void/void_type_usage_test/final_local_boolean_or_right: MissingCompileTimeError
+void/void_type_usage_test/final_local_cascade: MissingCompileTimeError
+void/void_type_usage_test/final_local_conditional_stmt: MissingCompileTimeError
+void/void_type_usage_test/final_local_do_while: MissingCompileTimeError
+void/void_type_usage_test/final_local_dynamic_init: MissingCompileTimeError
+void/void_type_usage_test/final_local_equals_left: MissingCompileTimeError
+void/void_type_usage_test/final_local_equals_right: MissingCompileTimeError
+void/void_type_usage_test/final_local_for_in: MissingCompileTimeError
+void/void_type_usage_test/final_local_identical: MissingCompileTimeError
+void/void_type_usage_test/final_local_is: MissingCompileTimeError
+void/void_type_usage_test/final_local_literal_list_init: MissingCompileTimeError
+void/void_type_usage_test/final_local_literal_map_key_init2: MissingCompileTimeError
+void/void_type_usage_test/final_local_literal_map_value_init2: MissingCompileTimeError
+void/void_type_usage_test/final_local_multiplication: MissingCompileTimeError
+void/void_type_usage_test/final_local_null_dot: MissingCompileTimeError
+void/void_type_usage_test/final_local_null_equals1: MissingCompileTimeError
+void/void_type_usage_test/final_local_return: MissingCompileTimeError # Issue 32804
+void/void_type_usage_test/final_local_throw: MissingCompileTimeError
+void/void_type_usage_test/final_local_toString: MissingCompileTimeError
+void/void_type_usage_test/final_local_use_in_conditional_assignment_right: MissingCompileTimeError
+void/void_type_usage_test/final_local_use_in_list_subscript: MissingCompileTimeError
+void/void_type_usage_test/final_local_use_in_map_lookup: MissingCompileTimeError
+void/void_type_usage_test/final_local_use_in_string_interpolation: MissingCompileTimeError
+void/void_type_usage_test/final_local_while: MissingCompileTimeError
+void/void_type_usage_test/global_addition: MissingCompileTimeError
+void/void_type_usage_test/global_argument: MissingCompileTimeError
+void/void_type_usage_test/global_boolean_and_left: MissingCompileTimeError
+void/void_type_usage_test/global_boolean_and_right: MissingCompileTimeError
+void/void_type_usage_test/global_boolean_negation: MissingCompileTimeError
+void/void_type_usage_test/global_boolean_or_left: MissingCompileTimeError
+void/void_type_usage_test/global_boolean_or_right: MissingCompileTimeError
+void/void_type_usage_test/global_cascade: MissingCompileTimeError
+void/void_type_usage_test/global_conditional_stmt: MissingCompileTimeError
+void/void_type_usage_test/global_do_while: MissingCompileTimeError
+void/void_type_usage_test/global_dynamic_init: MissingCompileTimeError
+void/void_type_usage_test/global_equals_left: MissingCompileTimeError
+void/void_type_usage_test/global_equals_right: MissingCompileTimeError
+void/void_type_usage_test/global_for_in: MissingCompileTimeError
+void/void_type_usage_test/global_identical: MissingCompileTimeError
+void/void_type_usage_test/global_is: MissingCompileTimeError
+void/void_type_usage_test/global_literal_list_init: MissingCompileTimeError
+void/void_type_usage_test/global_literal_map_key_init2: MissingCompileTimeError
+void/void_type_usage_test/global_literal_map_value_init2: MissingCompileTimeError
+void/void_type_usage_test/global_multiplication: MissingCompileTimeError
+void/void_type_usage_test/global_null_dot: MissingCompileTimeError
+void/void_type_usage_test/global_null_equals2: MissingCompileTimeError
+void/void_type_usage_test/global_return: MissingCompileTimeError # Issue 32804
+void/void_type_usage_test/global_throw: MissingCompileTimeError
+void/void_type_usage_test/global_toString: MissingCompileTimeError
+void/void_type_usage_test/global_use_in_conditional_assignment_left: MissingCompileTimeError
+void/void_type_usage_test/global_use_in_conditional_assignment_right: MissingCompileTimeError
+void/void_type_usage_test/global_use_in_list_subscript: MissingCompileTimeError
+void/void_type_usage_test/global_use_in_map_lookup: MissingCompileTimeError
+void/void_type_usage_test/global_use_in_string_interpolation: MissingCompileTimeError
+void/void_type_usage_test/global_while: MissingCompileTimeError
+void/void_type_usage_test/instance2_argument: MissingCompileTimeError
+void/void_type_usage_test/instance2_cascade: MissingCompileTimeError
+void/void_type_usage_test/instance2_do_while: MissingCompileTimeError
+void/void_type_usage_test/instance2_dynamic_init: MissingCompileTimeError
+void/void_type_usage_test/instance2_for_in: MissingCompileTimeError
+void/void_type_usage_test/instance2_is: MissingCompileTimeError
+void/void_type_usage_test/instance2_literal_list_init: MissingCompileTimeError
+void/void_type_usage_test/instance2_literal_map_key_init2: MissingCompileTimeError
+void/void_type_usage_test/instance2_literal_map_value_init2: MissingCompileTimeError
+void/void_type_usage_test/instance2_null_dot: MissingCompileTimeError
+void/void_type_usage_test/instance2_null_equals2: MissingCompileTimeError
+void/void_type_usage_test/instance2_return: MissingCompileTimeError # Issue 32804
+void/void_type_usage_test/instance2_throw: MissingCompileTimeError
+void/void_type_usage_test/instance2_toString: MissingCompileTimeError
+void/void_type_usage_test/instance2_while: MissingCompileTimeError
+void/void_type_usage_test/instance3_argument: MissingCompileTimeError
+void/void_type_usage_test/instance3_cascade: MissingCompileTimeError
+void/void_type_usage_test/instance3_do_while: MissingCompileTimeError
+void/void_type_usage_test/instance3_dynamic_init: MissingCompileTimeError
+void/void_type_usage_test/instance3_for_in: MissingCompileTimeError
+void/void_type_usage_test/instance3_is: MissingCompileTimeError
+void/void_type_usage_test/instance3_literal_list_init: MissingCompileTimeError
+void/void_type_usage_test/instance3_literal_map_key_init2: MissingCompileTimeError
+void/void_type_usage_test/instance3_literal_map_value_init2: MissingCompileTimeError
+void/void_type_usage_test/instance3_null_dot: MissingCompileTimeError
+void/void_type_usage_test/instance3_null_equals2: MissingCompileTimeError
+void/void_type_usage_test/instance3_return: MissingCompileTimeError # Issue 32804
+void/void_type_usage_test/instance3_throw: MissingCompileTimeError
+void/void_type_usage_test/instance3_toString: MissingCompileTimeError
+void/void_type_usage_test/instance3_while: MissingCompileTimeError
+void/void_type_usage_test/instance_argument: MissingCompileTimeError
+void/void_type_usage_test/instance_cascade: MissingCompileTimeError
+void/void_type_usage_test/instance_do_while: MissingCompileTimeError
+void/void_type_usage_test/instance_dynamic_init: MissingCompileTimeError
+void/void_type_usage_test/instance_for_in: MissingCompileTimeError
+void/void_type_usage_test/instance_is: MissingCompileTimeError
+void/void_type_usage_test/instance_literal_list_init: MissingCompileTimeError
+void/void_type_usage_test/instance_literal_map_key_init2: MissingCompileTimeError
+void/void_type_usage_test/instance_literal_map_value_init2: MissingCompileTimeError
+void/void_type_usage_test/instance_null_dot: MissingCompileTimeError
+void/void_type_usage_test/instance_null_equals2: MissingCompileTimeError
+void/void_type_usage_test/instance_return: MissingCompileTimeError # Issue 32804
+void/void_type_usage_test/instance_throw: MissingCompileTimeError
+void/void_type_usage_test/instance_toString: MissingCompileTimeError
+void/void_type_usage_test/instance_while: MissingCompileTimeError
+void/void_type_usage_test/local_addition: MissingCompileTimeError
+void/void_type_usage_test/local_argument: MissingCompileTimeError
+void/void_type_usage_test/local_boolean_and_left: MissingCompileTimeError
+void/void_type_usage_test/local_boolean_and_right: MissingCompileTimeError
+void/void_type_usage_test/local_boolean_negation: MissingCompileTimeError
+void/void_type_usage_test/local_boolean_or_left: MissingCompileTimeError
+void/void_type_usage_test/local_boolean_or_right: MissingCompileTimeError
+void/void_type_usage_test/local_cascade: MissingCompileTimeError
+void/void_type_usage_test/local_conditional_stmt: MissingCompileTimeError
+void/void_type_usage_test/local_do_while: MissingCompileTimeError
+void/void_type_usage_test/local_dynamic_init: MissingCompileTimeError
+void/void_type_usage_test/local_equals_left: MissingCompileTimeError
+void/void_type_usage_test/local_equals_right: MissingCompileTimeError
+void/void_type_usage_test/local_for_in: MissingCompileTimeError
+void/void_type_usage_test/local_identical: MissingCompileTimeError
+void/void_type_usage_test/local_is: MissingCompileTimeError
+void/void_type_usage_test/local_literal_list_init: MissingCompileTimeError
+void/void_type_usage_test/local_literal_map_key_init2: MissingCompileTimeError
+void/void_type_usage_test/local_literal_map_value_init2: MissingCompileTimeError
+void/void_type_usage_test/local_multiplication: MissingCompileTimeError
+void/void_type_usage_test/local_null_dot: MissingCompileTimeError
+void/void_type_usage_test/local_null_equals1: MissingCompileTimeError
+void/void_type_usage_test/local_return: MissingCompileTimeError # Issue 32804
+void/void_type_usage_test/local_throw: MissingCompileTimeError
+void/void_type_usage_test/local_toString: MissingCompileTimeError
+void/void_type_usage_test/local_use_in_conditional_assignment_left: MissingCompileTimeError
+void/void_type_usage_test/local_use_in_conditional_assignment_right: MissingCompileTimeError
+void/void_type_usage_test/local_use_in_list_subscript: MissingCompileTimeError
+void/void_type_usage_test/local_use_in_map_lookup: MissingCompileTimeError
+void/void_type_usage_test/local_use_in_string_interpolation: MissingCompileTimeError
+void/void_type_usage_test/local_while: MissingCompileTimeError
+void/void_type_usage_test/param_addition: MissingCompileTimeError
+void/void_type_usage_test/param_argument: MissingCompileTimeError
+void/void_type_usage_test/param_boolean_and_left: MissingCompileTimeError
+void/void_type_usage_test/param_boolean_and_right: MissingCompileTimeError
+void/void_type_usage_test/param_boolean_negation: MissingCompileTimeError
+void/void_type_usage_test/param_boolean_or_left: MissingCompileTimeError
+void/void_type_usage_test/param_boolean_or_right: MissingCompileTimeError
+void/void_type_usage_test/param_cascade: MissingCompileTimeError
+void/void_type_usage_test/param_conditional_stmt: MissingCompileTimeError
+void/void_type_usage_test/param_do_while: MissingCompileTimeError
+void/void_type_usage_test/param_dynamic_init: MissingCompileTimeError
+void/void_type_usage_test/param_equals_left: MissingCompileTimeError
+void/void_type_usage_test/param_equals_right: MissingCompileTimeError
+void/void_type_usage_test/param_for_in: MissingCompileTimeError
+void/void_type_usage_test/param_identical: MissingCompileTimeError
+void/void_type_usage_test/param_is: MissingCompileTimeError
+void/void_type_usage_test/param_literal_list_init: MissingCompileTimeError
+void/void_type_usage_test/param_literal_map_key_init2: MissingCompileTimeError
+void/void_type_usage_test/param_literal_map_value_init2: MissingCompileTimeError
+void/void_type_usage_test/param_multiplication: MissingCompileTimeError
+void/void_type_usage_test/param_null_dot: MissingCompileTimeError
+void/void_type_usage_test/param_null_equals1: MissingCompileTimeError
+void/void_type_usage_test/param_return: MissingCompileTimeError # Issue 32804
+void/void_type_usage_test/param_throw: MissingCompileTimeError
+void/void_type_usage_test/param_toString: MissingCompileTimeError
+void/void_type_usage_test/param_use_in_conditional_assignment_left: MissingCompileTimeError
+void/void_type_usage_test/param_use_in_conditional_assignment_right: MissingCompileTimeError
+void/void_type_usage_test/param_use_in_list_subscript: MissingCompileTimeError
+void/void_type_usage_test/param_use_in_map_lookup: MissingCompileTimeError
+void/void_type_usage_test/param_use_in_string_interpolation: MissingCompileTimeError
+void/void_type_usage_test/param_while: MissingCompileTimeError
+void/void_type_usage_test/paren_addition: MissingCompileTimeError
+void/void_type_usage_test/paren_argument: MissingCompileTimeError
+void/void_type_usage_test/paren_boolean_and_left: MissingCompileTimeError
+void/void_type_usage_test/paren_boolean_and_right: MissingCompileTimeError
+void/void_type_usage_test/paren_boolean_negation: MissingCompileTimeError
+void/void_type_usage_test/paren_boolean_or_left: MissingCompileTimeError
+void/void_type_usage_test/paren_boolean_or_right: MissingCompileTimeError
+void/void_type_usage_test/paren_cascade: MissingCompileTimeError
+void/void_type_usage_test/paren_conditional_stmt: MissingCompileTimeError
+void/void_type_usage_test/paren_do_while: MissingCompileTimeError
+void/void_type_usage_test/paren_dynamic_init: MissingCompileTimeError
+void/void_type_usage_test/paren_equals_left: MissingCompileTimeError
+void/void_type_usage_test/paren_equals_right: MissingCompileTimeError
+void/void_type_usage_test/paren_for_in: MissingCompileTimeError
+void/void_type_usage_test/paren_identical: MissingCompileTimeError
+void/void_type_usage_test/paren_is: MissingCompileTimeError
+void/void_type_usage_test/paren_literal_list_init: MissingCompileTimeError
+void/void_type_usage_test/paren_literal_map_key_init2: MissingCompileTimeError
+void/void_type_usage_test/paren_literal_map_value_init2: MissingCompileTimeError
+void/void_type_usage_test/paren_multiplication: MissingCompileTimeError
+void/void_type_usage_test/paren_null_dot: MissingCompileTimeError
+void/void_type_usage_test/paren_null_equals1: MissingCompileTimeError
+void/void_type_usage_test/paren_return: MissingCompileTimeError # Issue 32804
+void/void_type_usage_test/paren_throw: MissingCompileTimeError
+void/void_type_usage_test/paren_toString: MissingCompileTimeError
+void/void_type_usage_test/paren_use_in_conditional_assignment_right: MissingCompileTimeError
+void/void_type_usage_test/paren_use_in_list_subscript: MissingCompileTimeError
+void/void_type_usage_test/paren_use_in_map_lookup: MissingCompileTimeError
+void/void_type_usage_test/paren_use_in_string_interpolation: MissingCompileTimeError
+void/void_type_usage_test/paren_while: MissingCompileTimeError
+void/void_type_usage_test/sync_use_in_yield: MissingCompileTimeError
+void/void_type_usage_test/sync_use_in_yield_star: MissingCompileTimeError
+void/void_type_usage_test/void_default_parameter_closure: MissingCompileTimeError
+void/void_type_usage_test/void_default_parameter_global: MissingCompileTimeError
 
-# The precomilation configuration uses a kernel2kernel constants evaluator
-# which is is more correct than fasta/vm in JIT mode (i.e. it catches more
-# compile-time errors).
-[ $compiler != dart2js && $compiler != dartkp && $fasta ]
-compile_time_constant_c_test/02: MissingCompileTimeError
-const_constructor_nonconst_field_test/01: MissingCompileTimeError
-const_syntax_test/05: MissingCompileTimeError
+[ $compiler != dart2analyzer && $fasta && $strong ]
+map_literal3_test/03: MissingCompileTimeError
+
+[ $compiler != dart2analyzer && $fasta && !$strong ]
+super_call4_test/01: MissingCompileTimeError
 
 [ $compiler != dart2js && $fasta ]
 mixin_super_2_test/01: MissingCompileTimeError
@@ -607,11 +695,32 @@ mixin_super_2_test/03: MissingCompileTimeError
 mixin_supertype_subclass_test/02: MissingCompileTimeError
 mixin_supertype_subclass_test/05: MissingCompileTimeError
 
-[ $compiler != dart2js && $fasta && $strong ]
-super_call4_test/01: MissingCompileTimeError
+[ $compiler == dartk && $runtime == vm && !$checked && $strong ]
+assertion_initializer_const_error2_test/cc01: MissingCompileTimeError # Not reporting failed assert() at compile time.
+assertion_initializer_const_error2_test/cc02: MissingCompileTimeError # Not reporting failed assert() at compile time.
+assertion_initializer_const_error2_test/cc03: MissingCompileTimeError # Not reporting failed assert() at compile time.
+assertion_initializer_const_error2_test/cc04: MissingCompileTimeError # Not reporting failed assert() at compile time.
+assertion_initializer_const_error2_test/cc05: MissingCompileTimeError # Not reporting failed assert() at compile time.
+assertion_initializer_const_error2_test/cc06: MissingCompileTimeError # Not reporting failed assert() at compile time.
+assertion_initializer_const_error2_test/cc07: MissingCompileTimeError # Not reporting failed assert() at compile time.
+assertion_initializer_const_error2_test/cc08: MissingCompileTimeError # Not reporting failed assert() at compile time.
+assertion_initializer_const_error2_test/cc09: MissingCompileTimeError # Not reporting failed assert() at compile time.
+assertion_initializer_const_error2_test/cc10: MissingCompileTimeError # Not reporting failed assert() at compile time.
+
+[ $compiler == dartkb && $runtime == vm && $strong ]
+compile_time_constant_o_test/01: Pass
+compile_time_constant_o_test/02: Pass
+const_dynamic_type_literal_test/02: Pass
+map_literal3_test/01: Pass
+map_literal3_test/02: Pass
+type_alias_equality_test/02: RuntimeError # Issue 31359
+vm/bool_check_stack_traces_test/01: RuntimeError # No support for line numbers in stacktraces
+vm/bool_check_stack_traces_test/none: RuntimeError # No support for line numbers in stacktraces
+vm/causal_async_exception_stack2_test: RuntimeError # No support for line numbers in stacktraces
+vm/causal_async_exception_stack_test: RuntimeError # No support for line numbers in stacktraces
+vm/regress_28325_test: RuntimeError # No support for line numbers in stacktraces
 
 [ $compiler == dartkp && $mode == debug && $runtime == dart_precompiled && $strong ]
-const_instance_field_test/01: Crash # Issue 32326.
 external_test/13: Crash
 type_promotion_functions_test/05: Pass
 type_promotion_functions_test/06: Pass
@@ -782,7 +891,6 @@ external_test/13: MissingRuntimeError # KernelVM bug: Unbound external.
 external_test/20: MissingRuntimeError # KernelVM bug: Unbound external.
 factory3_test/01: Pass
 field_increment_bailout_test: SkipByDesign
-field_initialization_order_test: Fail, OK
 flatten_test/05: MissingRuntimeError
 flatten_test/08: MissingRuntimeError
 flatten_test/09: MissingRuntimeError
@@ -851,7 +959,6 @@ method_override5_test/03: MissingCompileTimeError
 method_override6_test/01: MissingCompileTimeError
 method_override6_test/02: MissingCompileTimeError
 method_override6_test/03: MissingCompileTimeError
-method_override_test: CompileTimeError # Issue 31616
 mixin_illegal_super_use_test: Skip # Issues 24478 and 23773
 mixin_illegal_superclass_test: Skip # Issues 24478 and 23773
 named_parameters_default_eq_test/none: RuntimeError
@@ -863,13 +970,6 @@ null_no_such_method_test: CompileTimeError # Issue 31533
 null_test/mirrors: Skip # Uses mirrors.
 null_test/none: SkipByDesign
 overridden_no_such_method_test: SkipByDesign
-override_inheritance_field_test/04: CompileTimeError # Issue 31616
-override_inheritance_field_test/06: CompileTimeError # Issue 31616
-override_inheritance_field_test/26: CompileTimeError # Issue 31616
-override_inheritance_field_test/29: CompileTimeError # Issue 31616
-override_inheritance_generic_test/02: CompileTimeError
-override_inheritance_method_test/28: CompileTimeError
-override_inheritance_method_test/29: CompileTimeError
 parser_quirks_test: CompileTimeError # Issue 31533
 redirecting_factory_infinite_steps_test/01: MissingCompileTimeError
 redirecting_factory_malbounded_test/01: MissingCompileTimeError
@@ -943,33 +1043,8 @@ wrong_number_type_arguments_test/01: MissingCompileTimeError
 no_such_method_native_test: RuntimeError # Compares symbol #foobar with string "foobar" in noSuchMethod
 recursive_generic_test: RuntimeError # Compares a (dynamic) toString call to 'C<D>'
 tearoff_dynamic_test: RuntimeError # Compares call to "foo" (noSuchMethod) with string "foo"
-type_variable_promotion_test: RuntimeError # Compares runtime type to the string "List<B>"
-
-# The precomilation configuration uses a kernel2kernel constants evaluator
-# which is is more correct than fasta/vm in JIT mode (i.e. it catches more
-# compile-time errors).
-[ $compiler != dartkp && $fasta ]
-compile_time_constant_o_test/01: MissingCompileTimeError # Issue 32983
-compile_time_constant_o_test/02: MissingCompileTimeError # Issue 32983
-const_dynamic_type_literal_test/02: MissingCompileTimeError # Issue 32983
-identical_const_test/01: MissingCompileTimeError # Issue 32983
-identical_const_test/02: MissingCompileTimeError # Issue 32983
-identical_const_test/03: MissingCompileTimeError # Issue 32983
-identical_const_test/04: MissingCompileTimeError # Issue 32983
-
-# The precomilation configuration uses a kernel2kernel constants evaluator
-# which is is more correct than fasta/vm in JIT mode (i.e. it catches more
-# compile-time errors).
-[ $compiler != dartkp && $fasta && $strong ]
-compile_time_constant_k_test/01: MissingCompileTimeError
-compile_time_constant_k_test/02: MissingCompileTimeError
-compile_time_constant_k_test/03: MissingCompileTimeError
-map_literal3_test/01: MissingCompileTimeError
-map_literal3_test/02: MissingCompileTimeError
 
 [ $compiler == fasta && $strong ]
-class_cycle_test/02: MissingCompileTimeError
-class_cycle_test/03: MissingCompileTimeError
 compile_time_constant_static4_test/02: MissingCompileTimeError
 compile_time_constant_static4_test/03: MissingCompileTimeError
 compile_time_constant_static5_test/11: CompileTimeError
@@ -983,16 +1058,11 @@ config_import_test: Crash
 const_constructor3_test/04: MissingCompileTimeError
 constants_test/05: MissingCompileTimeError
 deferred_load_library_wrong_args_test/01: CompileTimeError
-duplicate_implements_test/01: MissingCompileTimeError
-duplicate_implements_test/02: MissingCompileTimeError
 dynamic_prefix_core_test/none: CompileTimeError
 emit_const_fields_test: CompileTimeError
 export_ambiguous_main_test: MissingCompileTimeError
 external_test/21: CompileTimeError
 external_test/24: CompileTimeError
-field_initialization_order_test/01: MissingCompileTimeError
-generic_function_type_as_type_argument_test/01: MissingCompileTimeError
-generic_function_type_as_type_argument_test/02: MissingCompileTimeError
 generic_methods_generic_function_result_test/01: MissingCompileTimeError
 generic_no_such_method_dispatcher_simple_test: CompileTimeError
 generic_no_such_method_dispatcher_test: CompileTimeError
@@ -1000,7 +1070,6 @@ generic_tearoff_test: CompileTimeError
 instantiate_tearoff_of_call_test: CompileTimeError
 issue31596_super_test/01: CompileTimeError
 issue31596_super_test/03: CompileTimeError
-method_override_test: CompileTimeError
 mixin_illegal_super_use_test/01: MissingCompileTimeError
 mixin_illegal_super_use_test/04: MissingCompileTimeError
 mixin_illegal_super_use_test/07: MissingCompileTimeError
@@ -1043,13 +1112,6 @@ multiline_newline_test/05r: MissingCompileTimeError
 multiline_newline_test/06: MissingCompileTimeError
 multiline_newline_test/06r: MissingCompileTimeError
 null_no_such_method_test: CompileTimeError
-override_inheritance_field_test/04: CompileTimeError
-override_inheritance_field_test/06: CompileTimeError
-override_inheritance_field_test/26: CompileTimeError
-override_inheritance_field_test/29: CompileTimeError
-override_inheritance_generic_test/02: CompileTimeError
-override_inheritance_method_test/28: CompileTimeError
-override_inheritance_method_test/29: CompileTimeError
 parser_quirks_test: CompileTimeError
 regress_23408_test: CompileTimeError
 regress_29025_test: CompileTimeError
@@ -1311,7 +1373,6 @@ super_no_such_method5_test/01: MissingCompileTimeError # Requires Dart 2 semanti
 variable_shadow_class_test/01: MissingCompileTimeError
 
 [ $mode == debug && $runtime == vm && $strong && ($compiler == app_jitk || $compiler == dartk || $compiler == dartkb) ]
-const_instance_field_test/01: Crash # Issue 32326.
 deopt_inlined_function_lazy_test: Skip
 
 [ $mode == debug && $hot_reload && ($compiler == dartk || $compiler == dartkb) ]
@@ -1322,7 +1383,7 @@ async_star_test/05: Crash
 enum_test: Crash
 
 [ $mode == debug && ($compiler == dartk || $compiler == dartkb) && ($hot_reload || $hot_reload_rollback) ]
-enum_duplicate_test/01: Crash
+enum_duplicate_test/01: Pass, Crash
 
 [ $mode == product && $runtime == vm && ($compiler == dartk || $compiler == dartkb) ]
 deferred_load_constants_test/02: Fail
@@ -1377,17 +1438,6 @@ regress_30339_test: RuntimeError
 type_variable_bounds4_test/01: RuntimeError
 
 [ $runtime == vm && !$checked && $strong && ($compiler == dartk || $compiler == dartkb) ]
-assertion_initializer_const_error2_test/cc01: MissingCompileTimeError # Not reporting failed assert() at compile time.
-assertion_initializer_const_error2_test/cc02: MissingCompileTimeError # Not reporting failed assert() at compile time.
-assertion_initializer_const_error2_test/cc03: MissingCompileTimeError # Not reporting failed assert() at compile time.
-assertion_initializer_const_error2_test/cc04: MissingCompileTimeError # Not reporting failed assert() at compile time.
-assertion_initializer_const_error2_test/cc05: MissingCompileTimeError # Not reporting failed assert() at compile time.
-assertion_initializer_const_error2_test/cc06: MissingCompileTimeError # Not reporting failed assert() at compile time.
-assertion_initializer_const_error2_test/cc07: MissingCompileTimeError # Not reporting failed assert() at compile time.
-assertion_initializer_const_error2_test/cc08: MissingCompileTimeError # Not reporting failed assert() at compile time.
-assertion_initializer_const_error2_test/cc09: MissingCompileTimeError # Not reporting failed assert() at compile time.
-assertion_initializer_const_error2_test/cc10: MissingCompileTimeError # Not reporting failed assert() at compile time.
-assertion_initializer_const_error2_test/cc11: MissingCompileTimeError # Not reporting failed assert() at compile time.
 conditional_rewrite_test: RuntimeError # Issue 31402 (Not)
 type_error_test: RuntimeError # Issue 31402 (Variable declaration)
 
@@ -1402,9 +1452,6 @@ call_method_implicit_tear_off_implements_function_test/05: RuntimeError
 call_method_implicit_tear_off_implements_function_test/06: RuntimeError
 call_method_must_not_be_field_test/03: RuntimeError # Issue 32265
 call_method_must_not_be_getter_test/03: RuntimeError # Issue 32265
-compile_time_constant_k_test/01: MissingCompileTimeError
-compile_time_constant_k_test/02: MissingCompileTimeError
-compile_time_constant_k_test/03: MissingCompileTimeError
 compile_time_constant_o_test/01: RuntimeError # KernelVM bug: Constant map duplicated key.
 compile_time_constant_o_test/02: RuntimeError # KernelVM bug: Constant map duplicated key.
 compile_time_constant_static5_test/11: CompileTimeError # Issue 31537
@@ -1415,6 +1462,8 @@ conditional_import_string_test: CompileTimeError # KernelVM bug: Deferred loadin
 conditional_import_test: CompileTimeError # KernelVM bug: Deferred loading kernel issue 30273.
 config_import_corelib_test: CompileTimeError # Issue 31533
 config_import_test: RuntimeError # KernelVM bug: Configurable imports.
+const_constructor_mixin3_test: CompileTimeError # Issue 33644.
+const_constructor_mixin_test: CompileTimeError # Issue 33644.
 const_dynamic_type_literal_test/02: RuntimeError # KernelVM bug: Constant map duplicated key.
 const_list_test: RuntimeError
 const_locals_test: RuntimeError
@@ -1442,7 +1491,6 @@ example_constructor_test: Fail, OK
 external_test/10: MissingRuntimeError # KernelVM bug: Unbound external.
 external_test/13: MissingRuntimeError # KernelVM bug: Unbound external.
 external_test/20: MissingRuntimeError # KernelVM bug: Unbound external.
-field_initialization_order_test: Fail, OK
 flatten_test/05: MissingRuntimeError
 flatten_test/08: MissingRuntimeError
 flatten_test/09: MissingRuntimeError
@@ -1454,8 +1502,7 @@ generic_instanceof2_test: RuntimeError
 generic_is_check_test: RuntimeError
 generic_no_such_method_dispatcher_simple_test: CompileTimeError # Issue 31533
 generic_no_such_method_dispatcher_test: CompileTimeError # Issue 31533
-generic_tearoff_test: CompileTimeError
-generic_tearoff_test: RuntimeError
+generic_tearoff_test: CompileTimeError, RuntimeError
 if_null_evaluation_order_test: Pass
 instantiate_tearoff_of_call_test: CompileTimeError
 issue18628_2_test/01: MissingCompileTimeError
@@ -1482,7 +1529,6 @@ method_override5_test/03: MissingCompileTimeError
 method_override6_test/01: MissingCompileTimeError
 method_override6_test/02: MissingCompileTimeError
 method_override6_test/03: MissingCompileTimeError
-method_override_test: CompileTimeError # Issue 31616
 mixin_illegal_super_use_test: Skip # Issues 24478 and 23773
 mixin_illegal_superclass_test: Skip # Issues 24478 and 23773
 named_constructor_test/01: MissingRuntimeError # Fasta bug: Bad compilation of constructor reference.
@@ -1492,19 +1538,11 @@ no_main_test/01: Skip
 no_main_test/01: DartkCrash
 no_such_method_mock_test: RuntimeError # Issue 31426
 null_no_such_method_test: CompileTimeError # Issue 31533
-override_inheritance_field_test/04: CompileTimeError # Issue 31616
-override_inheritance_field_test/06: CompileTimeError # Issue 31616
-override_inheritance_field_test/26: CompileTimeError # Issue 31616
-override_inheritance_field_test/29: CompileTimeError # Issue 31616
-override_inheritance_generic_test/02: CompileTimeError
-override_inheritance_method_test/28: CompileTimeError
-override_inheritance_method_test/29: CompileTimeError
 parser_quirks_test: CompileTimeError # Issue 31533
 redirecting_factory_infinite_steps_test/01: MissingCompileTimeError
 redirecting_factory_malbounded_test/01: MissingCompileTimeError
 regress_22443_test: RuntimeError # KernelVM bug: Deferred loading kernel issue 30273.
-regress_23408_test: CompileTimeError # KernelVM bug: Deferred loading kernel issue 30273.
-regress_23408_test: RuntimeError
+regress_23408_test: RuntimeError, CompileTimeError # KernelVM bug: Deferred loading kernel issue 30273.
 regress_29025_test: CompileTimeError # Issue 31402 (Variable declaration)
 regress_29405_test: CompileTimeError # Issue 31402 (Invocation arguments)
 regress_30339_test: CompileTimeError # Issue 31402 (Variable declaration)
@@ -1551,7 +1589,6 @@ assertion_initializer_const_error2_test/cc10: Pass # Works in --checked mode but
 
 [ $fasta && $strong ]
 issue18628_2_test/01: MissingCompileTimeError
-map_literal3_test/03: MissingCompileTimeError
 redirecting_factory_infinite_steps_test/01: MissingCompileTimeError
 redirecting_factory_malbounded_test/01: MissingCompileTimeError
 type_promotion_logical_and_test/01: MissingCompileTimeError
@@ -1586,7 +1623,9 @@ async_congruence_local_test/02: MissingCompileTimeError
 async_congruence_method_test/01: MissingCompileTimeError
 async_congruence_unnamed_test/01: MissingCompileTimeError
 async_congruence_unnamed_test/02: MissingCompileTimeError
+async_or_generator_return_type_stacktrace_test/01: MissingCompileTimeError
 async_return_types_test/tooManyTypeParameters: MissingCompileTimeError
+async_return_types_test/wrongReturnType: MissingCompileTimeError
 async_return_types_test/wrongTypeParameter: MissingCompileTimeError
 bad_named_parameters2_test/01: MissingCompileTimeError
 bad_named_parameters_test/01: MissingCompileTimeError
@@ -1743,8 +1782,6 @@ deferred_constraints_type_annotation_test/type_annotation_generic3: MissingCompi
 deferred_constraints_type_annotation_test/type_annotation_generic4: MissingCompileTimeError
 deferred_constraints_type_annotation_test/type_annotation_null: MissingCompileTimeError
 deferred_constraints_type_annotation_test/type_annotation_top_level: MissingCompileTimeError
-duplicate_implements_test/01: MissingCompileTimeError
-duplicate_implements_test/02: MissingCompileTimeError
 duplicate_implements_test/03: MissingCompileTimeError
 duplicate_implements_test/04: MissingCompileTimeError
 dynamic_field_test/01: MissingCompileTimeError
@@ -1779,7 +1816,6 @@ factory_redirection_test/none: MissingCompileTimeError
 factory_return_type_checked_test/00: MissingCompileTimeError
 fauxverride_test/03: MissingCompileTimeError
 fauxverride_test/05: MissingCompileTimeError
-field_initialization_order_test/01: MissingCompileTimeError
 field_method4_test: MissingCompileTimeError
 field_override2_test: MissingCompileTimeError
 field_override3_test/00: MissingCompileTimeError
@@ -1822,8 +1858,6 @@ generic_constructor_mixin2_test/01: MissingCompileTimeError
 generic_constructor_mixin3_test/01: MissingCompileTimeError
 generic_constructor_mixin_test/01: MissingCompileTimeError
 generic_field_mixin6_test/01: MissingCompileTimeError
-generic_function_type_as_type_argument_test/01: MissingCompileTimeError
-generic_function_type_as_type_argument_test/02: MissingCompileTimeError
 generic_function_typedef2_test/04: MissingCompileTimeError
 generic_methods_dynamic_test/01: MissingCompileTimeError
 generic_methods_dynamic_test/03: MissingCompileTimeError
@@ -2110,19 +2144,24 @@ optional_named_parameters_test/08: MissingCompileTimeError
 optional_named_parameters_test/09: MissingCompileTimeError
 override_field_test/01: MissingCompileTimeError
 override_inheritance_abstract_test/*: Skip # Tests Dart 2 semantics
+override_inheritance_field_test/04: MissingCompileTimeError
 override_inheritance_field_test/05: MissingCompileTimeError
+override_inheritance_field_test/06: MissingCompileTimeError
 override_inheritance_field_test/07: MissingCompileTimeError
 override_inheritance_field_test/08: MissingCompileTimeError
 override_inheritance_field_test/09: MissingCompileTimeError
 override_inheritance_field_test/10: MissingCompileTimeError
 override_inheritance_field_test/11: MissingCompileTimeError
+override_inheritance_field_test/26: MissingCompileTimeError
 override_inheritance_field_test/28: MissingCompileTimeError
+override_inheritance_field_test/29: MissingCompileTimeError
 override_inheritance_field_test/30: MissingCompileTimeError
 override_inheritance_field_test/31: MissingCompileTimeError
 override_inheritance_field_test/32: MissingCompileTimeError
 override_inheritance_field_test/33: MissingCompileTimeError
 override_inheritance_field_test/33a: MissingCompileTimeError
 override_inheritance_field_test/34: MissingCompileTimeError
+override_inheritance_generic_test/02: MissingCompileTimeError
 override_inheritance_generic_test/04: MissingCompileTimeError
 override_inheritance_generic_test/06: MissingCompileTimeError
 override_inheritance_generic_test/07: MissingCompileTimeError
@@ -2140,10 +2179,14 @@ override_inheritance_method_test/19: MissingCompileTimeError
 override_inheritance_method_test/20: MissingCompileTimeError
 override_inheritance_method_test/21: MissingCompileTimeError
 override_inheritance_method_test/27: MissingCompileTimeError
+override_inheritance_method_test/28: MissingCompileTimeError
+override_inheritance_method_test/29: MissingCompileTimeError
 override_inheritance_method_test/30: MissingCompileTimeError
 override_inheritance_method_test/31: MissingCompileTimeError
 override_inheritance_method_test/32: MissingCompileTimeError
 override_inheritance_method_test/33: MissingCompileTimeError
+override_inheritance_method_test/36: MissingCompileTimeError
+override_inheritance_method_test/39: MissingCompileTimeError
 override_method_with_field_test/02: MissingCompileTimeError
 part2_test/01: MissingCompileTimeError
 partial_tearoff_instantiation_test/01: MissingCompileTimeError
@@ -2228,7 +2271,6 @@ string_test/01: MissingCompileTimeError
 substring_test/01: MissingCompileTimeError
 super_assign_test/01: MissingCompileTimeError
 super_bound_closure_test/01: MissingCompileTimeError
-super_call4_test/01: MissingCompileTimeError
 super_operator_index_test/01: MissingCompileTimeError
 super_operator_index_test/02: MissingCompileTimeError
 super_operator_index_test/03: MissingCompileTimeError
@@ -2342,6 +2384,10 @@ unresolved_in_factory_test: MissingCompileTimeError
 unresolved_top_level_method_test: MissingCompileTimeError
 unresolved_top_level_var_test: MissingCompileTimeError
 
+[ $fasta && ($compiler == dartkb || ($runtime != dart_precompiled && $runtime != vm)) ]
+generic_function_type_as_type_argument_test/01: MissingCompileTimeError # Issue 30931
+generic_function_type_as_type_argument_test/02: MissingCompileTimeError # Issue 30931
+
 [ $hot_reload_rollback && ($compiler == dartk || $compiler == dartkb) ]
 symbol_conflict_test: Pass, Slow
 
@@ -2358,7 +2404,7 @@ redirecting_factory_reflection_test: RuntimeError
 [ !$strong && ($compiler == dartk || $compiler == dartkb || $compiler == dartkp || $runtime == dart_precompiled || $runtime == vm) ]
 *: SkipByDesign # language_2 is only supported in strong mode.
 
-[ ($compiler == app_jitk || $compiler == dartk || $compiler == dartkb || $compiler == dartkp) && ($runtime == dart_precompiled || $runtime == vm) ]
+[ ($compiler == app_jitk || $compiler == dartk || $compiler == dartkp) && ($runtime == dart_precompiled || $runtime == vm) ]
 type_alias_equality_test/02: RuntimeError # Issue 31359
 type_alias_equality_test/03: RuntimeError # Issue 31359
 type_alias_equality_test/04: RuntimeError # Issue 31359
@@ -2374,6 +2420,3 @@ async_star_test/none: Skip # Timeout
 [ $compiler == dartk || $compiler == dartkb || $compiler == dartkp ]
 generic_function_bounds_test: RuntimeError # Issue 32076
 generic_test/01: MissingCompileTimeError
-
-[ $compiler == dartkp || $compiler == fasta ]
-duplicate_interface_implements_test/01: MissingCompileTimeError

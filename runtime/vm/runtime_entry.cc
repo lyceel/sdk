@@ -225,6 +225,11 @@ DEFINE_RUNTIME_ENTRY(ArgumentErrorUnboxedInt64, 0) {
   Exceptions::ThrowArgumentError(value);
 }
 
+DEFINE_RUNTIME_ENTRY(IntegerDivisionByZeroException, 0) {
+  const Array& args = Array::Handle(Array::New(0));
+  Exceptions::ThrowByType(Exceptions::kIntegerDivisionByZeroException, args);
+}
+
 static void EnsureNewOrRemembered(Isolate* isolate,
                                   Thread* thread,
                                   const Object& result) {
@@ -494,6 +499,90 @@ DEFINE_RUNTIME_ENTRY(CloneContext, 1) {
   arguments.SetReturn(cloned_ctx);
 }
 
+// Extract a method by allocating and initializing a new Closure.
+// Arg0: receiver.
+// Arg1: method.
+// Return value: newly allocated Closure.
+DEFINE_RUNTIME_ENTRY(ExtractMethod, 2) {
+#if defined(DART_USE_INTERPRETER)
+  const Instance& receiver = Instance::CheckedHandle(zone, arguments.ArgAt(0));
+  const Function& method = Function::CheckedHandle(zone, arguments.ArgAt(1));
+  const TypeArguments& instantiator_type_arguments =
+      method.HasInstantiatedSignature(kCurrentClass)
+          ? Object::null_type_arguments()
+          : TypeArguments::Handle(zone, receiver.GetTypeArguments());
+  ASSERT(method.HasInstantiatedSignature(kFunctions));
+  const Context& context = Context::Handle(zone, Context::New(1));
+  context.SetAt(0, receiver);
+  const Closure& closure = Closure::Handle(
+      zone,
+      Closure::New(instantiator_type_arguments, Object::null_type_arguments(),
+                   Object::empty_type_arguments(), method, context));
+  arguments.SetReturn(closure);
+#else
+  UNREACHABLE();
+#endif  // defined(DART_USE_INTERPRETER)
+}
+
+// Result of an invoke may be an unhandled exception, in which case we
+// rethrow it.
+static void CheckResultError(const Object& result) {
+  if (result.IsError()) {
+    Exceptions::PropagateError(Error::Cast(result));
+  }
+}
+
+// Invoke field getter before dispatch.
+// Arg0: instance.
+// Arg1: field name.
+// Return value: field value.
+DEFINE_RUNTIME_ENTRY(GetFieldForDispatch, 2) {
+#if defined(DART_USE_INTERPRETER)
+  const Instance& receiver = Instance::CheckedHandle(zone, arguments.ArgAt(0));
+  const String& name = String::CheckedHandle(zone, arguments.ArgAt(1));
+  const Class& receiver_class = Class::Handle(zone, receiver.clazz());
+  const String& getter_name = String::Handle(zone, Field::GetterName(name));
+  const int kTypeArgsLen = 0;
+  const int kNumArguments = 1;
+  ArgumentsDescriptor args_desc(Array::Handle(
+      zone, ArgumentsDescriptor::New(kTypeArgsLen, kNumArguments)));
+  const Function& getter =
+      Function::Handle(zone, Resolver::ResolveDynamicForReceiverClass(
+                                 receiver_class, getter_name, args_desc));
+  ASSERT(!getter.IsNull());  // An InvokeFieldDispatcher function was created.
+  const Array& args = Array::Handle(zone, Array::New(kNumArguments));
+  args.SetAt(0, receiver);
+  const Object& result =
+      Object::Handle(zone, DartEntry::InvokeFunction(getter, args));
+  CheckResultError(result);
+  arguments.SetReturn(result);
+#else
+  UNREACHABLE();
+#endif  // defined(DART_USE_INTERPRETER)
+}
+
+// Resolve 'call' function of receiver.
+// Arg0: receiver (not a closure).
+// Return value: 'call' function'.
+DEFINE_RUNTIME_ENTRY(ResolveCallFunction, 1) {
+#if defined(DART_USE_INTERPRETER)
+  const Instance& receiver = Instance::CheckedHandle(zone, arguments.ArgAt(0));
+  ASSERT(!receiver.IsClosure());  // Interpreter tests for closure.
+  Class& cls = Class::Handle(zone, receiver.clazz());
+  Function& call_function = Function::Handle(zone);
+  do {
+    call_function = cls.LookupDynamicFunction(Symbols::Call());
+    if (!call_function.IsNull()) {
+      break;
+    }
+    cls = cls.SuperClass();
+  } while (!cls.IsNull());
+  arguments.SetReturn(call_function);
+#else
+  UNREACHABLE();
+#endif  // defined(DART_USE_INTERPRETER)
+}
+
 // Helper routine for tracing a type check.
 static void PrintTypeCheck(const char* message,
                            const Instance& instance,
@@ -546,6 +635,7 @@ static void PrintTypeCheck(const char* message,
 // evaluation of type arguments.
 // This operation is currently very slow (lookup of code is not efficient yet).
 static void UpdateTypeTestCache(
+    Zone* zone,
     const Instance& instance,
     const AbstractType& type,
     const TypeArguments& instantiator_type_arguments,
@@ -572,27 +662,18 @@ static void UpdateTypeTestCache(
   // when concatenated.
   ASSERT(function_type_arguments.IsNull() ||
          function_type_arguments.IsCanonical());
-  const Class& instance_class = Class::Handle(instance.clazz());
-  Object& instance_class_id_or_function = Object::Handle();
-  TypeArguments& instance_type_arguments = TypeArguments::Handle();
+  const Class& instance_class = Class::Handle(zone, instance.clazz());
+  auto& instance_class_id_or_function = Object::Handle(zone);
+  auto& instance_type_arguments = TypeArguments::Handle(zone);
+  auto& instance_parent_function_type_arguments = TypeArguments::Handle(zone);
+  auto& instance_delayed_type_arguments = TypeArguments::Handle(zone);
   if (instance_class.IsClosureClass()) {
-    // If the closure instance has a generic parent, we cannot perform the
-    // optimization, because one more input (closure.function_type_arguments)
-    // would need to be considered. For now, only perform the optimization if
-    // the closure's function_type_arguments field is null, meaning the closure
-    // function has no generic parent.
-    if (Closure::Cast(instance).function_type_arguments() !=
-        TypeArguments::null()) {
-      if (FLAG_trace_type_checks) {
-        OS::PrintErr(
-            "UpdateTypeTestCache: closure function_type_arguments is "
-            "not null\n");
-      }
-      return;
-    }
-    instance_class_id_or_function = Closure::Cast(instance).function();
-    instance_type_arguments =
-        Closure::Cast(instance).instantiator_type_arguments();
+    const auto& closure = Closure::Cast(instance);
+    const auto& closure_function = Function::Handle(zone, closure.function());
+    instance_class_id_or_function = closure_function.raw();
+    instance_type_arguments = closure.instantiator_type_arguments();
+    instance_parent_function_type_arguments = closure.function_type_arguments();
+    instance_delayed_type_arguments = closure.delayed_type_arguments();
   } else {
     instance_class_id_or_function = Smi::New(instance_class.id());
     if (instance_class.NumTypeArguments() > 0) {
@@ -610,22 +691,34 @@ static void UpdateTypeTestCache(
          instantiator_type_arguments.IsCanonical());
   ASSERT(function_type_arguments.IsNull() ||
          function_type_arguments.IsCanonical());
-  Object& last_instance_class_id_or_function = Object::Handle();
-  TypeArguments& last_instance_type_arguments = TypeArguments::Handle();
-  TypeArguments& last_instantiator_type_arguments = TypeArguments::Handle();
-  TypeArguments& last_function_type_arguments = TypeArguments::Handle();
-  Bool& last_result = Bool::Handle();
+  ASSERT(instance_parent_function_type_arguments.IsNull() ||
+         instance_parent_function_type_arguments.IsCanonical());
+  ASSERT(instance_delayed_type_arguments.IsNull() ||
+         instance_delayed_type_arguments.IsCanonical());
+  auto& last_instance_class_id_or_function = Object::Handle(zone);
+  auto& last_instance_type_arguments = TypeArguments::Handle(zone);
+  auto& last_instantiator_type_arguments = TypeArguments::Handle(zone);
+  auto& last_function_type_arguments = TypeArguments::Handle(zone);
+  auto& last_instance_parent_function_type_arguments =
+      TypeArguments::Handle(zone);
+  auto& last_instance_delayed_type_arguments = TypeArguments::Handle(zone);
+  Bool& last_result = Bool::Handle(zone);
   for (intptr_t i = 0; i < len; ++i) {
-    new_cache.GetCheck(i, &last_instance_class_id_or_function,
-                       &last_instance_type_arguments,
-                       &last_instantiator_type_arguments,
-                       &last_function_type_arguments, &last_result);
+    new_cache.GetCheck(
+        i, &last_instance_class_id_or_function, &last_instance_type_arguments,
+        &last_instantiator_type_arguments, &last_function_type_arguments,
+        &last_instance_parent_function_type_arguments,
+        &last_instance_delayed_type_arguments, &last_result);
     if ((last_instance_class_id_or_function.raw() ==
          instance_class_id_or_function.raw()) &&
         (last_instance_type_arguments.raw() == instance_type_arguments.raw()) &&
         (last_instantiator_type_arguments.raw() ==
          instantiator_type_arguments.raw()) &&
-        (last_function_type_arguments.raw() == function_type_arguments.raw())) {
+        (last_function_type_arguments.raw() == function_type_arguments.raw()) &&
+        (last_instance_parent_function_type_arguments.raw() ==
+         instance_parent_function_type_arguments.raw()) &&
+        (last_instance_delayed_type_arguments.raw() ==
+         instance_delayed_type_arguments.raw())) {
       OS::PrintErr("  Error in test cache %p ix: %" Pd ",", new_cache.raw(), i);
       PrintTypeCheck(" duplicate cache entry", instance, type,
                      instantiator_type_arguments, function_type_arguments,
@@ -637,16 +730,20 @@ static void UpdateTypeTestCache(
 #endif
   new_cache.AddCheck(instance_class_id_or_function, instance_type_arguments,
                      instantiator_type_arguments, function_type_arguments,
-                     result);
+                     instance_parent_function_type_arguments,
+                     instance_delayed_type_arguments, result);
   if (FLAG_trace_type_checks) {
-    AbstractType& test_type = AbstractType::Handle(type.raw());
+    AbstractType& test_type = AbstractType::Handle(zone, type.raw());
     if (!test_type.IsInstantiated()) {
-      Error& bound_error = Error::Handle();
+      Error& bound_error = Error::Handle(zone);
       test_type = type.InstantiateFrom(instantiator_type_arguments,
                                        function_type_arguments, kAllFree,
                                        &bound_error, NULL, NULL, Heap::kNew);
       ASSERT(bound_error.IsNull());  // Malbounded types are not optimized.
     }
+    const auto& type_class = Class::Handle(zone, test_type.type_class());
+    const auto& instance_class_name =
+        String::Handle(zone, instance_class.Name());
     OS::PrintErr(
         "  Updated test cache %p ix: %" Pd
         " with "
@@ -656,20 +753,13 @@ static void UpdateTypeTestCache(
         "),    type-args: %p %s]\n"
         "    test-type [class: (%p '%s' cid: %" Pd
         "), i-type-args: %p %s, f-type-args: %p %s]\n",
-        new_cache.raw(), len,
-
-        instance_class_id_or_function.raw(), instance_type_arguments.raw(),
-        instantiator_type_arguments.raw(), instantiator_type_arguments.raw(),
-        result.ToCString(),
-
-        instance_class.raw(), String::Handle(instance_class.Name()).ToCString(),
+        new_cache.raw(), len, instance_class_id_or_function.raw(),
+        instance_type_arguments.raw(), instantiator_type_arguments.raw(),
+        instantiator_type_arguments.raw(), result.ToCString(),
+        instance_class.raw(), instance_class_name.ToCString(),
         instance_class.id(), instance_type_arguments.raw(),
-        instance_type_arguments.ToCString(),
-
-        test_type.type_class(),
-        String::Handle(Class::Handle(test_type.type_class()).Name())
-            .ToCString(),
-        Class::Handle(test_type.type_class()).id(),
+        instance_type_arguments.ToCString(), type_class.raw(),
+        String::Handle(zone, type_class.Name()).ToCString(), type_class.id(),
         instantiator_type_arguments.raw(),
         instantiator_type_arguments.ToCString(), function_type_arguments.raw(),
         function_type_arguments.ToCString());
@@ -716,7 +806,8 @@ DEFINE_RUNTIME_ENTRY(Instanceof, 5) {
                                         Symbols::Empty(), bound_error_message);
     UNREACHABLE();
   }
-  UpdateTypeTestCache(instance, type, instantiator_type_arguments,
+
+  UpdateTypeTestCache(zone, instance, type, instantiator_type_arguments,
                       function_type_arguments, result, cache);
   arguments.SetReturn(result);
 }
@@ -859,8 +950,9 @@ DEFINE_RUNTIME_ENTRY(TypeCheck, 7) {
 #endif
     }
 
-    UpdateTypeTestCache(src_instance, dst_type, instantiator_type_arguments,
-                        function_type_arguments, Bool::True(), cache);
+    UpdateTypeTestCache(zone, src_instance, dst_type,
+                        instantiator_type_arguments, function_type_arguments,
+                        Bool::True(), cache);
   }
 
   arguments.SetReturn(src_instance);
@@ -960,21 +1052,13 @@ DEFINE_RUNTIME_ENTRY(PatchStaticCall, 0) {
               ""
               " to '%s' new entry point %#" Px " (%s)\n",
               caller_frame->pc(), target_function.ToFullyQualifiedCString(),
-              target_code.UncheckedEntryPoint(),
+              target_code.EntryPoint(),
               target_code.is_optimized() ? "optimized" : "unoptimized");
   }
   arguments.SetReturn(target_code);
 #else
   UNREACHABLE();
 #endif
-}
-
-// Result of an invoke may be an unhandled exception, in which case we
-// rethrow it.
-static void CheckResultError(const Object& result) {
-  if (result.IsError()) {
-    Exceptions::PropagateError(Error::Cast(result));
-  }
 }
 
 #if defined(PRODUCT) || defined(DART_PRECOMPILED_RUNTIME)
@@ -1150,7 +1234,21 @@ static RawFunction* InlineCacheMissHandler(
     return target_function.raw();
   }
   if (args.length() == 1) {
-    ic_data.AddReceiverCheck(args[0]->GetClassId(), target_function);
+    if (ic_data.IsTrackingExactness()) {
+#if !defined(DART_PRECOMPILED_RUNTIME)
+      const auto& receiver = *args[0];
+      const auto state = StaticTypeExactnessState::Compute(
+          Type::Cast(AbstractType::Handle(ic_data.StaticReceiverType())),
+          receiver);
+      ic_data.AddReceiverCheck(
+          receiver.GetClassId(), target_function,
+          /*count=*/1, /*exactness=*/state.CollapseSuperTypeExactness());
+#else
+      UNREACHABLE();
+#endif
+    } else {
+      ic_data.AddReceiverCheck(args[0]->GetClassId(), target_function);
+    }
   } else {
     GrowableArray<intptr_t> class_ids(args.length());
     ASSERT(ic_data.NumArgsTested() == args.length());
@@ -1521,7 +1619,7 @@ DEFINE_RUNTIME_ENTRY(MonomorphicMiss, 1) {
           SingleTargetCache::Handle(SingleTargetCache::New());
       const Code& code = Code::Handle(target_function.CurrentCode());
       cache.set_target(code);
-      cache.set_entry_point(code.UncheckedEntryPoint());
+      cache.set_entry_point(code.EntryPoint());
       cache.set_lower_limit(lower);
       cache.set_upper_limit(upper);
       const Code& stub =
@@ -1793,15 +1891,7 @@ static void HandleStackOverflowTestCases(Thread* thread) {
       isolate->reload_every_n_stack_overflow_checks();
   if ((FLAG_deoptimize_every > 0) || (FLAG_stacktrace_every > 0) ||
       (isolate_reload_every > 0)) {
-    bool is_auxiliary_isolate = ServiceIsolate::IsServiceIsolate(isolate);
-#if !defined(DART_PRECOMPILED_RUNTIME)
-    // Certain flags should not effect the kernel isolate itself.  They might be
-    // used by tests via the "VMOptions=--..." annotation to test VM
-    // functionality in the main isolate.
-    is_auxiliary_isolate =
-        is_auxiliary_isolate || KernelIsolate::IsKernelIsolate(isolate);
-#endif  // !defined(DART_PRECOMPILED_RUNTIME)
-    if (!is_auxiliary_isolate) {
+    if (!Isolate::IsVMInternalIsolate(isolate)) {
       // TODO(turnidge): To make --deoptimize_every and
       // --stacktrace-every faster we could move this increment/test to
       // the generated code.
@@ -1977,8 +2067,7 @@ static void HandleOSRRequest(Thread* thread) {
 
   if (!result.IsNull()) {
     const Code& code = Code::Cast(result);
-    uword optimized_entry =
-        Instructions::UncheckedEntryPoint(code.instructions());
+    uword optimized_entry = Instructions::EntryPoint(code.instructions());
     frame->set_pc(optimized_entry);
     frame->set_pc_marker(code.raw());
   }
@@ -2158,7 +2247,7 @@ DEFINE_RUNTIME_ENTRY(FixCallersTarget, 0) {
                  " "
                  "target '%s' -> %#" Px "\n",
                  frame->pc(), target_function.ToFullyQualifiedCString(),
-                 current_target_code.UncheckedEntryPoint());
+                 current_target_code.EntryPoint());
   }
   ASSERT(!current_target_code.IsDisabled());
   arguments.SetReturn(current_target_code);
@@ -2201,8 +2290,7 @@ DEFINE_RUNTIME_ENTRY(FixAllocationStubTarget, 0) {
     OS::PrintErr("FixAllocationStubTarget: caller %#" Px
                  " alloc-class %s "
                  " -> %#" Px "\n",
-                 frame->pc(), alloc_class.ToCString(),
-                 alloc_stub.UncheckedEntryPoint());
+                 frame->pc(), alloc_class.ToCString(), alloc_stub.EntryPoint());
   }
   arguments.SetReturn(alloc_stub);
 #else
@@ -2362,10 +2450,10 @@ DEFINE_LEAF_RUNTIME_ENTRY(intptr_t,
   HANDLESCOPE(thread);
 
   // All registers have been saved below last-fp as if they were locals.
-  const uword last_fp = saved_registers_address +
-                        (kNumberOfSavedCpuRegisters * kWordSize) +
-                        (kNumberOfSavedFpuRegisters * kFpuRegisterSize) -
-                        ((kFirstLocalSlotFromFp + 1) * kWordSize);
+  const uword last_fp =
+      saved_registers_address + (kNumberOfSavedCpuRegisters * kWordSize) +
+      (kNumberOfSavedFpuRegisters * kFpuRegisterSize) -
+      ((runtime_frame_layout.first_local_from_fp + 1) * kWordSize);
 
   // Get optimized code and frame that need to be deoptimized.
   DartFrameIterator iterator(last_fp, thread,
@@ -2644,7 +2732,6 @@ RawObject* RuntimeEntry::InterpretCall(RawFunction* function,
                                        RawObject** argv,
                                        Thread* thread) {
 #if defined(DART_USE_INTERPRETER)
-  RawObject* result;
   Interpreter* interpreter = Interpreter::Current();
 #if defined(DEBUG)
   uword exit_fp = thread->top_exit_frame_info();
@@ -2654,9 +2741,11 @@ RawObject* RuntimeEntry::InterpretCall(RawFunction* function,
   ASSERT(Function::HasBytecode(function));
   ASSERT(interpreter != NULL);
 #endif
-  result = interpreter->Call(function, argdesc, argc, argv, thread);
+  const Object& result = Object::Handle(
+      thread->zone(), interpreter->Call(function, argdesc, argc, argv, thread));
   DEBUG_ASSERT(thread->top_exit_frame_info() == exit_fp);
-  return result;
+  CheckResultError(result);
+  return result.raw();
 #else
   UNREACHABLE();
 #endif  // defined(DART_USE_INTERPRETER)

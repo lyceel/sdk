@@ -5,6 +5,7 @@
 #ifndef RUNTIME_VM_COMPILER_FRONTEND_KERNEL_TRANSLATION_HELPER_H_
 #define RUNTIME_VM_COMPILER_FRONTEND_KERNEL_TRANSLATION_HELPER_H_
 
+#include "vm/compiler/backend/il.h"  // For CompileType.
 #include "vm/kernel.h"
 #include "vm/kernel_binary.h"
 #include "vm/object.h"
@@ -15,6 +16,7 @@ namespace dart {
 namespace kernel {
 
 class KernelReaderHelper;
+class TypeTranslator;
 
 class TranslationHelper {
  public:
@@ -831,13 +833,31 @@ class DirectCallMetadataHelper : public MetadataHelper {
 };
 
 struct InferredTypeMetadata {
-  InferredTypeMetadata(intptr_t cid_, bool nullable_)
-      : cid(cid_), nullable(nullable_) {}
+  enum Flag {
+    kFlagNullable = 1 << 0,
+    kFlagInt = 1 << 1,
+  };
+
+  InferredTypeMetadata(intptr_t cid_, uint8_t flags_)
+      : cid(cid_), flags(flags_) {}
 
   const intptr_t cid;
-  const bool nullable;
+  const uint8_t flags;
 
-  bool IsTrivial() const { return (cid == kDynamicCid) && nullable; }
+  bool IsTrivial() const {
+    return (cid == kDynamicCid) && (flags == kFlagNullable);
+  }
+  bool IsNullable() const { return (flags & kFlagNullable) != 0; }
+  bool IsInt() const { return (flags & kFlagInt) != 0; }
+
+  CompileType ToCompileType(Zone* zone) const {
+    if (IsInt()) {
+      return CompileType::FromAbstractType(
+          Type::ZoneHandle(zone, Type::IntType()), IsNullable());
+    } else {
+      return CompileType::CreateNullable(IsNullable(), cid);
+    }
+  }
 };
 
 // Helper class which provides access to inferred type metadata.
@@ -881,6 +901,28 @@ class ProcedureAttributesMetadataHelper : public MetadataHelper {
   DISALLOW_COPY_AND_ASSIGN(ProcedureAttributesMetadataHelper);
 };
 
+struct CallSiteAttributesMetadata {
+  const AbstractType* receiver_type = nullptr;
+};
+
+// Helper class which provides access to direct call metadata.
+class CallSiteAttributesMetadataHelper : public MetadataHelper {
+ public:
+  static const char* tag() { return "vm.call-site-attributes.metadata"; }
+
+  CallSiteAttributesMetadataHelper(KernelReaderHelper* helper,
+                                   TypeTranslator* type_translator);
+
+  CallSiteAttributesMetadata GetCallSiteAttributes(intptr_t node_offset);
+
+ private:
+  bool ReadMetadata(intptr_t node_offset, CallSiteAttributesMetadata* metadata);
+
+  TypeTranslator& type_translator_;
+
+  DISALLOW_COPY_AND_ASSIGN(CallSiteAttributesMetadataHelper);
+};
+
 class KernelReaderHelper {
  public:
   KernelReaderHelper(Zone* zone,
@@ -913,6 +955,8 @@ class KernelReaderHelper {
   virtual void ReportUnexpectedTag(const char* variant, Tag tag);
 
   void ReadUntilFunctionNode();
+
+  Tag PeekTag(uint8_t* payload = NULL);
 
  protected:
   const Script& script() const { return script_; }
@@ -978,7 +1022,6 @@ class KernelReaderHelper {
   void SkipLibraryTypedef();
   TokenPosition ReadPosition(bool record = true);
   Tag ReadTag(uint8_t* payload = NULL);
-  Tag PeekTag(uint8_t* payload = NULL);
   uint8_t ReadFlags() { return reader_.ReadFlags(); }
 
   intptr_t SourceTableSize();
@@ -1000,6 +1043,7 @@ class KernelReaderHelper {
   intptr_t data_program_offset_;
 
   friend class ClassHelper;
+  friend class CallSiteAttributesMetadataHelper;
   friend class ConstantEvaluator;
   friend class ConstantHelper;
   friend class ConstructorHelper;

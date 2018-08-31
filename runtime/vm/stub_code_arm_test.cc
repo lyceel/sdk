@@ -46,8 +46,7 @@ static void GenerateCallToCallRuntimeStub(Assembler* assembler, int length) {
   __ CallRuntime(kAllocateArrayRuntimeEntry, argc);
   __ AddImmediate(SP, argc * kWordSize);
   __ Pop(R0);  // Pop return value from return slot.
-  __ LeaveDartFrame();
-  __ Ret();
+  __ LeaveDartFrameAndReturn();
 }
 
 TEST_CASE(CallRuntimeStubCode) {
@@ -55,10 +54,11 @@ TEST_CASE(CallRuntimeStubCode) {
                                               const Code& code);
   const int length = 10;
   const char* kName = "Test_CallRuntimeStubCode";
-  Assembler assembler;
+  ObjectPoolWrapper object_pool_wrapper;
+  Assembler assembler(&object_pool_wrapper);
   GenerateCallToCallRuntimeStub(&assembler, length);
   const Code& code = Code::Handle(Code::FinalizeCode(
-      *CreateFunction("Test_CallRuntimeStubCode"), &assembler));
+      *CreateFunction("Test_CallRuntimeStubCode"), nullptr, &assembler));
   const Function& function = RegisterFakeFunction(kName, code);
   Array& result = Array::Handle();
   result ^= DartEntry::InvokeFunction(function, Object::empty_array());
@@ -82,8 +82,7 @@ static void GenerateCallToCallLeafRuntimeStub(Assembler* assembler,
   __ LoadObject(R2, rhs_index);
   __ LoadObject(R3, length);
   __ CallRuntime(kCaseInsensitiveCompareUC16RuntimeEntry, 4);
-  __ LeaveDartFrame();
-  __ Ret();  // Return value is in R0.
+  __ LeaveDartFrameAndReturn();  // Return value is in R0.
 }
 
 TEST_CASE(CallLeafRuntimeStubCode) {
@@ -94,11 +93,12 @@ TEST_CASE(CallLeafRuntimeStubCode) {
   intptr_t rhs_index_value = 2;
   intptr_t length_value = 2;
   const char* kName = "Test_CallLeafRuntimeStubCode";
-  Assembler assembler;
+  ObjectPoolWrapper object_pool_wrapper;
+  Assembler assembler(&object_pool_wrapper);
   GenerateCallToCallLeafRuntimeStub(&assembler, str_value, lhs_index_value,
                                     rhs_index_value, length_value);
   const Code& code = Code::Handle(Code::FinalizeCode(
-      *CreateFunction("Test_CallLeafRuntimeStubCode"), &assembler));
+      *CreateFunction("Test_CallLeafRuntimeStubCode"), nullptr, &assembler));
   const Function& function = RegisterFakeFunction(kName, code);
   Instance& result = Instance::Handle();
   result ^= DartEntry::InvokeFunction(function, Object::empty_array());

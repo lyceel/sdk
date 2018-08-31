@@ -41,7 +41,6 @@ main() {
     defineReflectiveTests(LibraryElementImplTest);
     defineReflectiveTests(MethodElementImplTest);
     defineReflectiveTests(MethodMemberTest);
-    defineReflectiveTests(MultiplyDefinedElementImplTest);
     defineReflectiveTests(ParameterElementImplTest);
     defineReflectiveTests(PropertyAccessorElementImplTest);
     defineReflectiveTests(TopLevelVariableElementImplTest);
@@ -69,7 +68,7 @@ enum C {C1, C2, C3}
       ClassDeclaration nodeA = elementA.computeNode();
       expect(nodeA, isNotNull);
       expect(nodeA.name.name, "A");
-      expect(nodeA.element, same(elementA));
+      expect(nodeA.declaredElement, same(elementA));
     }
     // B
     {
@@ -79,7 +78,7 @@ enum C {C1, C2, C3}
       ClassDeclaration nodeB = elementB.computeNode();
       expect(nodeB, isNotNull);
       expect(nodeB.name.name, "B");
-      expect(nodeB.element, same(elementB));
+      expect(nodeB.declaredElement, same(elementB));
     }
     // C
     {
@@ -89,7 +88,7 @@ enum C {C1, C2, C3}
       EnumDeclaration nodeC = elementC.computeNode();
       expect(nodeC, isNotNull);
       expect(nodeC.name.name, "C");
-      expect(nodeC.element, same(elementC));
+      expect(nodeC.declaredElement, same(elementC));
     }
     // D
     {
@@ -99,7 +98,7 @@ enum C {C1, C2, C3}
       EnumDeclaration nodeC = elementD.computeNode();
       expect(nodeC, isNotNull);
       expect(nodeC.name.name, "D");
-      expect(nodeC.element, same(elementD));
+      expect(nodeC.declaredElement, same(elementD));
     }
   }
 
@@ -118,7 +117,7 @@ abstract class A<K, V> = Object with MapMixin<K, V>;
       ClassTypeAlias nodeA = elementA.computeNode();
       expect(nodeA, isNotNull);
       expect(nodeA.name.name, "A");
-      expect(nodeA.element, same(elementA));
+      expect(nodeA.declaredElement, same(elementA));
     }
   }
 
@@ -1214,7 +1213,7 @@ enum B {B1, B2, B3}''');
       VariableDeclaration nodeA = elementA.computeNode();
       expect(nodeA, isNotNull);
       expect(nodeA.name.name, "a");
-      expect(nodeA.element, same(elementA));
+      expect(nodeA.declaredElement, same(elementA));
     }
     // B
     {
@@ -1222,7 +1221,7 @@ enum B {B1, B2, B3}''');
       EnumConstantDeclaration nodeB = elementB.computeNode();
       expect(nodeB, isNotNull);
       expect(nodeB.name.name, "B2");
-      expect(nodeB.element, same(elementB));
+      expect(nodeB.declaredElement, same(elementB));
     }
   }
 
@@ -2534,7 +2533,7 @@ class InterfaceTypeImplTest extends EngineTestCase {
 
   void test_getConstructors_empty() {
     ClassElementImpl typeElement = ElementFactory.classElement2("A");
-    typeElement.constructors = ConstructorElement.EMPTY_LIST;
+    typeElement.constructors = const <ConstructorElement>[];
     InterfaceTypeImpl type = new InterfaceTypeImpl(typeElement);
     expect(type.constructors, isEmpty);
   }
@@ -3820,7 +3819,7 @@ abstract class A {
       MethodDeclaration m1Node = m1Element.computeNode();
       expect(m1Node, isNotNull);
       expect(m1Node.name.name, "m1");
-      expect(m1Node.element, same(m1Element));
+      expect(m1Node.declaredElement, same(m1Element));
     }
     // m2
     {
@@ -3828,7 +3827,7 @@ abstract class A {
       MethodDeclaration m2Node = m2Element.computeNode();
       expect(m2Node, isNotNull);
       expect(m2Node.name.name, "m2");
-      expect(m2Node.element, same(m2Element));
+      expect(m2Node.declaredElement, same(m2Element));
     }
   }
 
@@ -3852,7 +3851,7 @@ abstract class A {
       MethodDeclaration m1Node = m1Element.computeNode();
       expect(m1Node, isNotNull);
       expect(m1Node.name.name, "m1");
-      expect(m1Node.element, same(m1Element));
+      expect(m1Node.declaredElement, same(m1Element));
     }
     // m2
     {
@@ -3860,7 +3859,7 @@ abstract class A {
       MethodDeclaration m2Node = m2Element.computeNode();
       expect(m2Node, isNotNull);
       expect(m2Node.name.name, "m2");
-      expect(m2Node.element, same(m2Element));
+      expect(m2Node.declaredElement, same(m2Element));
     }
   }
 }
@@ -3910,68 +3909,6 @@ class B<S> extends A<S> {
 }
 
 @reflectiveTest
-class MultiplyDefinedElementImplTest extends EngineTestCase {
-  void test_fromElements_conflicting() {
-    TopLevelVariableElement firstElement =
-        ElementFactory.topLevelVariableElement2('xx');
-    TopLevelVariableElement secondElement =
-        ElementFactory.topLevelVariableElement2('yy');
-    _addToLibrary([firstElement, secondElement]);
-    Element result = MultiplyDefinedElementImpl.fromElements(
-        null, firstElement, secondElement);
-    EngineTestCase.assertInstanceOf(
-        (obj) => obj is MultiplyDefinedElement, MultiplyDefinedElement, result);
-    List<Element> elements =
-        (result as MultiplyDefinedElement).conflictingElements;
-    expect(elements, hasLength(2));
-    for (int i = 0; i < elements.length; i++) {
-      EngineTestCase.assertInstanceOf((obj) => obj is TopLevelVariableElement,
-          TopLevelVariableElement, elements[i]);
-    }
-  }
-
-  void test_fromElements_multiple() {
-    TopLevelVariableElement firstElement =
-        ElementFactory.topLevelVariableElement2('xx');
-    TopLevelVariableElement secondElement =
-        ElementFactory.topLevelVariableElement2('yy');
-    TopLevelVariableElement thirdElement =
-        ElementFactory.topLevelVariableElement2('zz');
-    _addToLibrary([firstElement, secondElement, thirdElement]);
-    Element result = MultiplyDefinedElementImpl.fromElements(
-        null,
-        MultiplyDefinedElementImpl.fromElements(
-            null, firstElement, secondElement),
-        thirdElement);
-    EngineTestCase.assertInstanceOf(
-        (obj) => obj is MultiplyDefinedElement, MultiplyDefinedElement, result);
-    List<Element> elements =
-        (result as MultiplyDefinedElement).conflictingElements;
-    expect(elements, hasLength(3));
-    for (int i = 0; i < elements.length; i++) {
-      EngineTestCase.assertInstanceOf((obj) => obj is TopLevelVariableElement,
-          TopLevelVariableElement, elements[i]);
-    }
-  }
-
-  void test_fromElements_nonConflicting() {
-    TopLevelVariableElement element =
-        ElementFactory.topLevelVariableElement2('xx');
-    _addToLibrary([element]);
-    expect(MultiplyDefinedElementImpl.fromElements(null, element, element),
-        same(element));
-  }
-
-  void _addToLibrary(List<TopLevelVariableElement> variables) {
-    CompilationUnitElementImpl compilationUnit =
-        ElementFactory.compilationUnit('lib.dart');
-    LibraryElementImpl library = ElementFactory.library(null, 'lib');
-    library.definingCompilationUnit = compilationUnit;
-    compilationUnit.topLevelVariables = variables;
-  }
-}
-
-@reflectiveTest
 class ParameterElementImplTest extends EngineTestCase {
   void test_computeNode_DefaultFormalParameter() {
     AnalysisContextHelper contextHelper = new AnalysisContextHelper();
@@ -3988,7 +3925,7 @@ main([int p = 42]) {
       DefaultFormalParameter node = element.computeNode();
       expect(node, isNotNull);
       expect(node.identifier.name, 'p');
-      expect(node.element, same(element));
+      expect(node.declaredElement, same(element));
     }
   }
 
@@ -4012,7 +3949,7 @@ class A {
       FieldFormalParameter node = element.computeNode();
       expect(node, isNotNull);
       expect(node.identifier.name, 'p');
-      expect(node.element, same(element));
+      expect(node.declaredElement, same(element));
     }
   }
 
@@ -4031,7 +3968,7 @@ main(p(int a, int b)) {
       FunctionTypedFormalParameter node = element.computeNode();
       expect(node, isNotNull);
       expect(node.identifier.name, 'p');
-      expect(node.element, same(element));
+      expect(node.declaredElement, same(element));
     }
   }
 
@@ -4050,7 +3987,7 @@ main(int p) {
       SimpleFormalParameter node = element.computeNode();
       expect(node, isNotNull);
       expect(node.identifier.name, 'p');
-      expect(node.element, same(element));
+      expect(node.declaredElement, same(element));
     }
   }
 }

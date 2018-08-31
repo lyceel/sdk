@@ -1840,6 +1840,12 @@ void Assembler::StoreIntoObjectFilter(Register object,
                                       CanBeSmi can_be_smi,
                                       BarrierFilterMode how_to_jump) {
   if (can_be_smi == kValueIsNotSmi) {
+#if defined(DEBUG)
+    Label okay;
+    BranchIfNotSmi(value, &okay);
+    Stop("Unexpected Smi!");
+    Bind(&okay);
+#endif
     COMPILE_ASSERT((kNewObjectAlignmentOffset == kWordSize) &&
                    (kOldObjectAlignmentOffset == 0));
     // Write-barrier triggers if the value is in the new space (has bit set) and
@@ -2227,6 +2233,7 @@ void Assembler::TryAllocate(const Class& cls,
     tags = RawObject::SizeTag::update(instance_size, tags);
     ASSERT(cls.id() != kIllegalCid);
     tags = RawObject::ClassIdTag::update(cls.id(), tags);
+    tags = RawObject::NewBit::update(true, tags);
     movl(FieldAddress(instance_reg, Object::tags_offset()), Immediate(tags));
   } else {
     jmp(failure);
@@ -2271,6 +2278,7 @@ void Assembler::TryAllocateArray(intptr_t cid,
     uint32_t tags = 0;
     tags = RawObject::ClassIdTag::update(cid, tags);
     tags = RawObject::SizeTag::update(instance_size, tags);
+    tags = RawObject::NewBit::update(true, tags);
     movl(FieldAddress(instance, Object::tags_offset()), Immediate(tags));
   } else {
     jmp(failure);

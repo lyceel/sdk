@@ -58,7 +58,7 @@ RawClass* Class::ReadFrom(SnapshotReader* reader,
     }
     cls.set_type_arguments_field_offset_in_words(reader->Read<int32_t>());
     cls.set_num_type_arguments(reader->Read<int16_t>());
-    cls.set_num_own_type_arguments(reader->Read<int16_t>());
+    cls.set_has_pragma_and_num_own_type_arguments(reader->Read<int16_t>());
     cls.set_num_native_fields(reader->Read<uint16_t>());
     cls.set_token_pos(TokenPosition::SnapshotDecode(reader->Read<int32_t>()));
     cls.set_state_bits(reader->Read<uint16_t>());
@@ -114,7 +114,7 @@ void RawClass::WriteTo(SnapshotWriter* writer,
     }
     writer->Write<int32_t>(ptr()->type_arguments_field_offset_in_words_);
     writer->Write<uint16_t>(ptr()->num_type_arguments_);
-    writer->Write<uint16_t>(ptr()->num_own_type_arguments_);
+    writer->Write<uint16_t>(ptr()->has_pragma_and_num_own_type_arguments_);
     writer->Write<uint16_t>(ptr()->num_native_fields_);
     writer->Write<int32_t>(ptr()->token_pos_.SnapshotEncode());
     writer->Write<uint16_t>(ptr()->state_bits_);
@@ -746,6 +746,22 @@ void RawRedirectionData::WriteTo(SnapshotWriter* writer,
   visitor.VisitPointers(from(), to());
 }
 
+RawNativeEntryData* NativeEntryData::ReadFrom(SnapshotReader* reader,
+                                              intptr_t object_id,
+                                              intptr_t tags,
+                                              Snapshot::Kind kind,
+                                              bool as_reference) {
+  UNREACHABLE();
+  return NativeEntryData::null();
+}
+
+void RawNativeEntryData::WriteTo(SnapshotWriter* writer,
+                                 intptr_t object_id,
+                                 Snapshot::Kind kind,
+                                 bool as_reference) {
+  UNREACHABLE();
+}
+
 RawFunction* Function::ReadFrom(SnapshotReader* reader,
                                 intptr_t object_id,
                                 intptr_t tags,
@@ -881,6 +897,8 @@ RawField* Field::ReadFrom(SnapshotReader* reader,
       TokenPosition::SnapshotDecode(reader->Read<int32_t>()));
   field.set_guarded_cid(reader->Read<int32_t>());
   field.set_is_nullable(reader->Read<int32_t>());
+  field.set_static_type_exactness_state(
+      StaticTypeExactnessState::Decode(reader->Read<int8_t>()));
 #if !defined(DART_PRECOMPILED_RUNTIME)
   field.set_kernel_offset(reader->Read<int32_t>());
 #endif
@@ -896,6 +914,8 @@ RawField* Field::ReadFrom(SnapshotReader* reader,
     field.set_is_nullable(true);
     field.set_guarded_list_length(Field::kNoFixedLength);
     field.set_guarded_list_length_in_object_offset(Field::kUnknownLengthOffset);
+    field.set_static_type_exactness_state(
+        StaticTypeExactnessState::NotTracking());
   } else {
     field.InitializeGuardedListLengthInObjectOffset();
   }
@@ -922,6 +942,7 @@ void RawField::WriteTo(SnapshotWriter* writer,
   writer->Write<int32_t>(ptr()->end_token_pos_.SnapshotEncode());
   writer->Write<int32_t>(ptr()->guarded_cid_);
   writer->Write<int32_t>(ptr()->is_nullable_);
+  writer->Write<int32_t>(ptr()->static_type_exactness_state_);
 #if !defined(DART_PRECOMPILED_RUNTIME)
   writer->Write<int32_t>(ptr()->kernel_offset_);
 #endif
@@ -1334,7 +1355,8 @@ RawKernelProgramInfo* KernelProgramInfo::ReadFrom(SnapshotReader* reader,
   reader->AddBackRef(object_id, &info, kIsDeserialized);
 
   // Set all the object fields.
-  READ_OBJECT_FIELDS(info, info.raw()->from(), info.raw()->to(), kAsReference);
+  READ_OBJECT_FIELDS(info, info.raw()->from(), info.raw()->to_snapshot(kind),
+                     kAsReference);
   return info.raw();
 }
 
@@ -1354,7 +1376,7 @@ void RawKernelProgramInfo::WriteTo(SnapshotWriter* writer,
 
   // Write out all the object pointer fields.
   SnapshotWriterVisitor visitor(writer, kAsReference);
-  visitor.VisitPointers(from(), to());
+  visitor.VisitPointers(from(), to_snapshot(kind));
 }
 
 RawCode* Code::ReadFrom(SnapshotReader* reader,

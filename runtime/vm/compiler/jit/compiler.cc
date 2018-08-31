@@ -133,18 +133,6 @@ DEFINE_FLAG_HANDLER(PrecompilationModeHandler,
                     precompilation,
                     "Precompilation mode");
 
-static void UnsafeModeHandler(bool value) {
-  if (value) {
-    FLAG_omit_strong_type_checks = true;
-    FLAG_use_strong_mode_types = false;
-  }
-}
-
-DEFINE_FLAG_HANDLER(UnsafeModeHandler,
-                    experimental_unsafe_mode_use_at_your_own_risk,
-                    "Omit runtime strong mode type checks and disable "
-                    "optimizations based on types.");
-
 #ifndef DART_PRECOMPILED_RUNTIME
 
 bool UseKernelFrontEndFor(ParsedFunction* parsed_function) {
@@ -603,8 +591,8 @@ RawCode* CompileParsedFunctionHelper::FinalizeCompilation(
            deopt_info_array.Length() * sizeof(uword));
   // Allocates instruction object. Since this occurs only at safepoint,
   // there can be no concurrent access to the instruction page.
-  Code& code =
-      Code::Handle(Code::FinalizeCode(function, assembler, optimized()));
+  Code& code = Code::Handle(Code::FinalizeCode(
+      function, graph_compiler, assembler, optimized(), /*stats=*/nullptr));
   code.set_is_optimized(optimized());
   code.set_owner(function);
 #if !defined(PRODUCT)
@@ -788,11 +776,11 @@ RawCode* CompileParsedFunctionHelper::Compile(CompilationPipeline* pipeline) {
   Code* volatile result = &Code::ZoneHandle(zone);
   while (!done) {
     *result = Code::null();
-    const intptr_t prev_deopt_id = thread()->deopt_id();
-    thread()->set_deopt_id(0);
+    DeoptIdScope deopt_id_scope(thread(), 0);
     LongJumpScope jump;
     if (setjmp(*jump.Set()) == 0) {
-      FlowGraph* flow_graph = NULL;
+      FlowGraph* flow_graph = nullptr;
+      ZoneGrowableArray<const ICData*>* ic_data_array = nullptr;
 
       // Class hierarchy analysis is registered with the thread in the
       // constructor and unregisters itself upon destruction.
@@ -802,34 +790,37 @@ RawCode* CompileParsedFunctionHelper::Compile(CompilationPipeline* pipeline) {
       // LongJump.
       {
         CSTAT_TIMER_SCOPE(thread(), graphbuilder_timer);
-        ZoneGrowableArray<const ICData*>* ic_data_array =
-            new (zone) ZoneGrowableArray<const ICData*>();
-        if (optimized()) {
-          // Extract type feedback before the graph is built, as the graph
-          // builder uses it to attach it to nodes.
 
+        if (optimized()) {
           // In background compilation the deoptimization counter may have
           // already reached the limit.
           ASSERT(Compiler::IsBackgroundCompilation() ||
                  (function.deoptimization_counter() <
                   FLAG_max_deoptimization_counter_threshold));
+        }
 
-          // 'Freeze' ICData in background compilation so that it does not
-          // change while compiling.
-          const bool clone_ic_data = Compiler::IsBackgroundCompilation();
-          function.RestoreICDataMap(ic_data_array, clone_ic_data);
+        // Extract type feedback before the graph is built, as the graph
+        // builder uses it to attach it to nodes.
+        ic_data_array = new (zone) ZoneGrowableArray<const ICData*>();
 
+        // Clone ICData for background compilation so that it does not
+        // change while compiling.
+        const bool clone_ic_data = Compiler::IsBackgroundCompilation();
+        function.RestoreICDataMap(ic_data_array, clone_ic_data);
+
+        if (optimized()) {
           if (Compiler::IsBackgroundCompilation() &&
               (function.ic_data_array() == Array::null())) {
             Compiler::AbortBackgroundCompilation(
                 Thread::kNoDeoptId, "RestoreICDataMap: ICData array cleared.");
           }
-          if (FLAG_print_ic_data_map) {
-            for (intptr_t i = 0; i < ic_data_array->length(); i++) {
-              if ((*ic_data_array)[i] != NULL) {
-                THR_Print("%" Pd " ", i);
-                FlowGraphPrinter::PrintICData(*(*ic_data_array)[i]);
-              }
+        }
+
+        if (FLAG_print_ic_data_map) {
+          for (intptr_t i = 0; i < ic_data_array->length(); i++) {
+            if ((*ic_data_array)[i] != NULL) {
+              THR_Print("%" Pd " ", i);
+              FlowGraphPrinter::PrintICData(*(*ic_data_array)[i]);
             }
           }
         }
@@ -892,11 +883,13 @@ RawCode* CompileParsedFunctionHelper::Compile(CompilationPipeline* pipeline) {
 
       ASSERT(pass_state.inline_id_to_function.length() ==
              pass_state.caller_inline_id.length());
-      Assembler assembler(use_far_branches);
+      ObjectPoolWrapper object_pool_wrapper;
+      Assembler assembler(&object_pool_wrapper, use_far_branches);
       FlowGraphCompiler graph_compiler(
           &assembler, flow_graph, *parsed_function(), optimized(),
           &speculative_policy, pass_state.inline_id_to_function,
-          pass_state.inline_id_to_token_pos, pass_state.caller_inline_id);
+          pass_state.inline_id_to_token_pos, pass_state.caller_inline_id,
+          ic_data_array);
       {
         CSTAT_TIMER_SCOPE(thread(), graphcompiler_timer);
         NOT_IN_PRODUCT(TimelineDurationScope tds(thread(), compiler_timeline,
@@ -962,8 +955,6 @@ RawCode* CompileParsedFunctionHelper::Compile(CompilationPipeline* pipeline) {
         thread()->clear_sticky_error();
       }
     }
-    // Reset global isolate state.
-    thread()->set_deopt_id(prev_deopt_id);
   }
   return result->raw();
 }
@@ -1215,7 +1206,8 @@ static RawError* ParseFunctionHelper(CompilationPipeline* pipeline,
 }
 
 RawObject* Compiler::CompileFunction(Thread* thread, const Function& function) {
-#ifdef DART_PRECOMPILER
+#if defined(DART_PRECOMPILER) && !defined(TARGET_ARCH_DBC) &&                  \
+    !defined(TARGET_ARCH_IA32)
   if (FLAG_precompiled_mode) {
     return Precompiler::CompileFunction(
         /* precompiler = */ NULL, thread, thread->zone(), function);
@@ -1359,8 +1351,7 @@ void Compiler::ComputeLocalVarDescriptors(const Code& code) {
   ASSERT(!function.IsIrregexpFunction());
   // In background compilation, parser can produce 'errors": bailouts
   // if state changed while compiling in background.
-  const intptr_t prev_deopt_id = Thread::Current()->deopt_id();
-  Thread::Current()->set_deopt_id(0);
+  DeoptIdScope deopt_id_scope(Thread::Current(), 0);
   LongJumpScope jump;
   if (setjmp(*jump.Set()) == 0) {
     ZoneGrowableArray<const ICData*>* ic_data_array =
@@ -1392,7 +1383,6 @@ void Compiler::ComputeLocalVarDescriptors(const Code& code) {
     // Only possible with background compilation.
     ASSERT(Compiler::IsBackgroundCompilation());
   }
-  Thread::Current()->set_deopt_id(prev_deopt_id);
 }
 
 RawError* Compiler::CompileAllFunctions(const Class& cls) {
@@ -1411,8 +1401,13 @@ RawError* Compiler::CompileAllFunctions(const Class& cls) {
   for (int i = 0; i < functions.Length(); i++) {
     func ^= functions.At(i);
     ASSERT(!func.IsNull());
-    if (!func.HasCode() && !func.is_abstract() &&
-        !func.IsRedirectingFactory()) {
+    if (!func.HasCode() &&
+#if defined(DART_USE_INTERPRETER)
+        // TODO(regis): Revisit.
+        // Do not compile function if its bytecode is already loaded.
+        !func.HasBytecode() &&
+#endif
+        !func.is_abstract() && !func.IsRedirectingFactory()) {
       if ((cls.is_mixin_app_alias() || cls.IsMixinApplication()) &&
           func.HasOptionalParameters()) {
         // Skipping optional parameters in mixin application.
@@ -1422,7 +1417,13 @@ RawError* Compiler::CompileAllFunctions(const Class& cls) {
       if (result.IsError()) {
         return Error::Cast(result).raw();
       }
+#if defined(DART_USE_INTERPRETER)
+      // TODO(regis): Revisit.
+      // The compiler may load bytecode and return Code::null().
+      ASSERT(!result.IsNull() || func.HasBytecode());
+#else
       ASSERT(!result.IsNull());
+#endif
     }
   }
   return Error::null();
@@ -1462,7 +1463,8 @@ RawError* Compiler::ParseAllFunctions(const Class& cls) {
 }
 
 RawObject* Compiler::EvaluateStaticInitializer(const Field& field) {
-#ifdef DART_PRECOMPILER
+#if defined(DART_PRECOMPILER) && !defined(TARGET_ARCH_DBC) &&                  \
+    !defined(TARGET_ARCH_IA32)
   if (FLAG_precompiled_mode) {
     return Precompiler::EvaluateStaticInitializer(field);
   }
@@ -1530,7 +1532,8 @@ RawObject* Compiler::EvaluateStaticInitializer(const Field& field) {
 }
 
 RawObject* Compiler::ExecuteOnce(SequenceNode* fragment) {
-#ifdef DART_PRECOMPILER
+#if defined(DART_PRECOMPILER) && !defined(TARGET_ARCH_DBC) &&                  \
+    !defined(TARGET_ARCH_IA32)
   if (FLAG_precompiled_mode) {
     return Precompiler::ExecuteOnce(fragment);
   }

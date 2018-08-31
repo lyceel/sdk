@@ -190,7 +190,7 @@ final ResultDescriptor<ConstantEvaluationTarget> CONSTANT_VALUE =
  * The result is only available for [Source]s representing a compilation unit.
  */
 final ListResultDescriptor<Source> CONTAINING_LIBRARIES =
-    new ListResultDescriptor<Source>('CONTAINING_LIBRARIES', Source.EMPTY_LIST);
+    new ListResultDescriptor<Source>('CONTAINING_LIBRARIES', const <Source>[]);
 
 /**
  * The flag specifying that [RESOLVED_UNIT] has been been computed for this
@@ -575,7 +575,7 @@ final ResultDescriptor<bool> LIBRARY_ERRORS_READY =
  */
 final ListResultDescriptor<LibrarySpecificUnit> LIBRARY_SPECIFIC_UNITS =
     new ListResultDescriptor<LibrarySpecificUnit>(
-        'LIBRARY_SPECIFIC_UNITS', LibrarySpecificUnit.EMPTY_LIST);
+        'LIBRARY_SPECIFIC_UNITS', const <LibrarySpecificUnit>[]);
 
 /**
  * The analysis errors associated with a compilation unit in a specific library.
@@ -662,7 +662,7 @@ final ResultDescriptor<bool> READY_RESOLVED_UNIT =
  * The result is only available for [Source]s representing a library.
  */
 final ListResultDescriptor<Source> REFERENCED_SOURCES =
-    new ListResultDescriptor<Source>('REFERENCED_SOURCES', Source.EMPTY_LIST);
+    new ListResultDescriptor<Source>('REFERENCED_SOURCES', const <Source>[]);
 
 /**
  * The list of [ConstantEvaluationTarget]s on which error verification depends.
@@ -1493,7 +1493,7 @@ class BuildLibraryElementTask extends SourceBasedAnalysisTask {
     // Process inputs.
     //
     CompilationUnitElementImpl definingCompilationUnitElement =
-        definingCompilationUnit.element;
+        definingCompilationUnit.declaredElement;
     Map<Source, CompilationUnit> partUnitMap =
         new HashMap<Source, CompilationUnit>();
     int partLength = partUnits.length;
@@ -1526,7 +1526,7 @@ class BuildLibraryElementTask extends SourceBasedAnalysisTask {
         Source partSource = directive.uriSource;
         CompilationUnit partUnit = partUnitMap[partSource];
         if (partUnit != null) {
-          CompilationUnitElementImpl partElement = partUnit.element;
+          CompilationUnitElementImpl partElement = partUnit.declaredElement;
           partElement.uriOffset = partUri.offset;
           partElement.uriEnd = partUri.end;
           partElement.uri = directive.uriContent;
@@ -2668,7 +2668,7 @@ class GatherUsedImportedElementsTask extends SourceBasedAnalysisTask {
   @override
   void internalPerform() {
     CompilationUnit unit = getRequiredInput(UNIT_INPUT);
-    CompilationUnitElement unitElement = unit.element;
+    CompilationUnitElement unitElement = unit.declaredElement;
     LibraryElement libraryElement = unitElement.library;
     //
     // Prepare used imported elements.
@@ -2730,7 +2730,7 @@ class GatherUsedLocalElementsTask extends SourceBasedAnalysisTask {
   @override
   void internalPerform() {
     CompilationUnit unit = getRequiredInput(UNIT_INPUT);
-    CompilationUnitElement unitElement = unit.element;
+    CompilationUnitElement unitElement = unit.declaredElement;
     LibraryElement libraryElement = unitElement.library;
     //
     // Prepare used local elements.
@@ -2821,7 +2821,7 @@ class GenerateHintsTask extends SourceBasedAnalysisTask {
         getRequiredInput(USED_IMPORTED_ELEMENTS_INPUT);
     List<UsedLocalElements> usedLocalElementsList =
         getRequiredInput(USED_LOCAL_ELEMENTS_INPUT);
-    CompilationUnitElement unitElement = unit.element;
+    CompilationUnitElement unitElement = unit.declaredElement;
     LibraryElement libraryElement = unitElement.library;
     TypeSystem typeSystem = context.typeSystem;
 
@@ -3153,7 +3153,7 @@ class InferInstanceMembersInUnitTask extends SourceBasedAnalysisTask {
     InstanceMemberInferrer inferrer = new InstanceMemberInferrer(
         typeProvider, (_) => inheritanceManager,
         typeSystem: context.typeSystem);
-    inferrer.inferCompilationUnit(unit.element);
+    inferrer.inferCompilationUnit(unit.declaredElement);
     //
     // Record outputs.
     //
@@ -3760,8 +3760,7 @@ class ParseDartTask extends SourceBasedAnalysisTask {
         new Parser(_source, errorListener, useFasta: options.useFastaParser);
     parser.parseFunctionBodies =
         options.analyzeFunctionBodiesPredicate(_source);
-    parser.parseGenericMethodComments = true;
-    parser.enableOptionalNewAndConst = options.previewDart2;
+    parser.enableOptionalNewAndConst = true;
     CompilationUnit unit = parser.parseCompilationUnit(tokenStream);
     unit.lineInfo = lineInfo;
 
@@ -3769,7 +3768,7 @@ class ParseDartTask extends SourceBasedAnalysisTask {
       var resourceProvider =
           (context.sourceFactory.dartSdk as FolderBasedDartSdk)
               .resourceProvider;
-      new SdkPatcher().patch(resourceProvider, true,
+      new SdkPatcher().patch(resourceProvider,
           context.analysisOptions.patchPaths, errorListener, _source, unit);
     }
 
@@ -4017,7 +4016,7 @@ class PartiallyResolveUnitReferencesTask extends SourceBasedAnalysisTask {
     //
     LibraryElement libraryElement = getRequiredInput(LIBRARY_INPUT);
     CompilationUnit unit = getRequiredInput(UNIT_INPUT);
-    CompilationUnitElement unitElement = unit.element;
+    CompilationUnitElement unitElement = unit.declaredElement;
     TypeProvider typeProvider = getRequiredInput(TYPE_PROVIDER_INPUT);
     //
     // Resolve references and record outputs.
@@ -4552,7 +4551,7 @@ class ResolveInstanceFieldsInUnitTask extends SourceBasedAnalysisTask {
     CompilationUnit unit = getRequiredInput(UNIT_INPUT);
     TypeProvider typeProvider = getRequiredInput(TYPE_PROVIDER_INPUT);
 
-    CompilationUnitElement unitElement = unit.element;
+    CompilationUnitElement unitElement = unit.declaredElement;
     //
     // Resolve references.
     //
@@ -4902,7 +4901,7 @@ class ResolveTopLevelUnitTypeBoundsTask extends SourceBasedAnalysisTask {
     //
     LibraryElement library = getRequiredInput(LIBRARY_INPUT);
     CompilationUnit unit = getRequiredInput(UNIT_INPUT);
-    CompilationUnitElement unitElement = unit.element;
+    CompilationUnitElement unitElement = unit.declaredElement;
     //
     // Resolve TypeName nodes.
     //
@@ -4996,7 +4995,7 @@ class ResolveUnitTask extends SourceBasedAnalysisTask {
     //
     // Resolve everything.
     //
-    CompilationUnitElement unitElement = unit.element;
+    CompilationUnitElement unitElement = unit.declaredElement;
     RecordingErrorListener errorListener = new RecordingErrorListener();
     ResolverVisitor visitor = new ResolverVisitor(
         libraryElement, unitElement.source, typeProvider, errorListener);
@@ -5098,7 +5097,7 @@ class ResolveUnitTypeNamesTask extends SourceBasedAnalysisTask {
     //
     LibraryElement library = getRequiredInput(LIBRARY_INPUT);
     CompilationUnit unit = getRequiredInput(UNIT_INPUT);
-    CompilationUnitElement unitElement = unit.element;
+    CompilationUnitElement unitElement = unit.declaredElement;
     TypeProvider typeProvider = getRequiredInput(TYPE_PROVIDER_INPUT);
     //
     // Resolve TypeName nodes.
@@ -5110,14 +5109,12 @@ class ResolveUnitTypeNamesTask extends SourceBasedAnalysisTask {
     //
     // Re-write the AST to handle the optional new and const feature.
     //
-    if (library.context.analysisOptions.previewDart2) {
-      unit.accept(new AstRewriteVisitor(
-          context.typeSystem,
-          library,
-          unit.element.source,
-          typeProvider,
-          AnalysisErrorListener.NULL_LISTENER));
-    }
+    unit.accept(new AstRewriteVisitor(
+        context.typeSystem,
+        library,
+        unit.declaredElement.source,
+        typeProvider,
+        AnalysisErrorListener.NULL_LISTENER));
     //
     // Record outputs.
     //
@@ -5199,7 +5196,7 @@ class ResolveVariableReferencesTask extends SourceBasedAnalysisTask {
     //
     LibraryElement libraryElement = getRequiredInput(LIBRARY_INPUT);
     CompilationUnit unit = getRequiredInput(UNIT_INPUT);
-    CompilationUnitElement unitElement = unit.element;
+    CompilationUnitElement unitElement = unit.declaredElement;
     TypeProvider typeProvider = getRequiredInput(TYPE_PROVIDER_INPUT);
     //
     // Resolve local variables.
@@ -5316,7 +5313,6 @@ class ScanDartTask extends SourceBasedAnalysisTask {
           errorListener);
       scanner.setSourceStart(fragment.line, fragment.column);
       scanner.preserveComments = context.analysisOptions.preserveComments;
-      scanner.scanGenericMethodComments = true;
       scanner.scanLazyAssignmentOperators =
           context.analysisOptions.enableLazyAssignmentOperators;
 
@@ -5333,7 +5329,6 @@ class ScanDartTask extends SourceBasedAnalysisTask {
       Scanner scanner =
           new Scanner(source, new CharSequenceReader(content), errorListener);
       scanner.preserveComments = context.analysisOptions.preserveComments;
-      scanner.scanGenericMethodComments = true;
       scanner.scanLazyAssignmentOperators =
           context.analysisOptions.enableLazyAssignmentOperators;
 
@@ -5539,7 +5534,7 @@ class VerifyUnitTask extends SourceBasedAnalysisTask {
     // Prepare inputs.
     //
     CompilationUnit unit = getRequiredInput(UNIT_INPUT);
-    CompilationUnitElement unitElement = unit.element;
+    CompilationUnitElement unitElement = unit.declaredElement;
     LibraryElement libraryElement = unitElement.library;
     if (libraryElement == null) {
       throw new AnalysisException(

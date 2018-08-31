@@ -297,6 +297,19 @@ class HintCode extends ErrorCode {
       correction: "Remove @required.");
 
   /**
+   * This hint is generated anywhere where `@sealed` annotates something other
+   * than a class or mixin.
+   *
+   * Parameters:
+   * 0: the name of the member
+   */
+  static const HintCode INVALID_SEALED_ANNOTATION = const HintCode(
+      'INVALID_SEALED_ANNOTATION',
+      "The member '{0}' is annotated with @sealed but only classes and mixins "
+      "can be annotated with it.",
+      correction: "Remove @sealed.");
+
+  /**
    * This hint is generated anywhere where a member annotated with `@protected`
    * is used outside an instance member of a subclass.
    *
@@ -308,6 +321,16 @@ class HintCode extends ErrorCode {
       'INVALID_USE_OF_PROTECTED_MEMBER',
       "The member '{0}' can only be used within instance members of subclasses "
       "of '{1}'.");
+
+  /// This hint is generated anywhere where a member annotated with
+  /// `@visibleForTemplate` is used outside of a "template" Dart file.
+  ///
+  /// Parameters:
+  /// 0: the name of the member
+  /// 1: the name of the defining class
+  static const HintCode INVALID_USE_OF_VISIBLE_FOR_TEMPLATE_MEMBER =
+      const HintCode('INVALID_USE_OF_VISIBLE_FOR_TEMPLATE_MEMBER',
+          "The member '{0}' can only be used within '{1}' or a template library.");
 
   /// This hint is generated anywhere where a member annotated with
   /// `@visibleForTesting` is used outside the defining library, or a test.

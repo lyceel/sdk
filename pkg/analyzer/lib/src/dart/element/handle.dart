@@ -56,6 +56,9 @@ class ClassElementHandle extends ElementHandle implements ClassElement {
   bool get hasRequired => actualElement.hasRequired;
 
   @override
+  bool get hasSealed => actualElement.hasSealed;
+
+  @override
   bool get hasStaticMember => actualElement.hasStaticMember;
 
   @override
@@ -69,6 +72,9 @@ class ClassElementHandle extends ElementHandle implements ClassElement {
 
   @override
   bool get isJS => actualElement.hasJS;
+
+  @override
+  bool get isMixin => actualElement.isMixin;
 
   @override
   bool get isMixinApplication => actualElement.isMixinApplication;
@@ -93,6 +99,10 @@ class ClassElementHandle extends ElementHandle implements ClassElement {
 
   @override
   List<InterfaceType> get mixins => actualElement.mixins;
+
+  @override
+  List<InterfaceType> get superclassConstraints =>
+      actualElement.superclassConstraints;
 
   @override
   InterfaceType get supertype => actualElement.supertype;
@@ -216,6 +226,9 @@ class CompilationUnitElementHandle extends ElementHandle
 
   @override
   LineInfo get lineInfo => actualElement.lineInfo;
+
+  @override
+  List<ClassElement> get mixins => actualElement.mixins;
 
   @override
   Source get source => actualElement.source;
@@ -379,6 +392,12 @@ abstract class ElementHandle implements Element {
 
   @override
   bool get hasRequired => actualElement.hasRequired;
+
+  @override
+  bool get hasSealed => actualElement.hasSealed;
+
+  @override
+  bool get hasVisibleForTemplate => actualElement.hasVisibleForTemplate;
 
   @override
   bool get hasVisibleForTesting => actualElement.hasVisibleForTesting;
@@ -1029,7 +1048,7 @@ class PrefixElementHandle extends ElementHandle implements PrefixElement {
       super.enclosingElement as LibraryElement;
 
   @override
-  List<LibraryElement> get importedLibraries => LibraryElement.EMPTY_LIST;
+  List<LibraryElement> get importedLibraries => const <LibraryElement>[];
 
   @override
   ElementKind get kind => ElementKind.PREFIX;

@@ -58,6 +58,13 @@ typedef void _TimerCallback();
  * If a listener is added to a broadcast stream while an event is being fired,
  * that listener will not receive the event currently being fired.
  * If a listener is canceled, it immediately stops receiving events.
+ * Listening on a broadcast stream can be treated as listening on a new stream
+ * containing only the events that have not yet been emitted when the [listen]
+ * call occurs.
+ * For example, the [first] getter listens to the stream, then returns the first
+ * event that listener receives.
+ * This is not necessarily the first even emitted by the stream, but the first
+ * of the *remaining* events of the broadcast stream.
  *
  * When the "done" event is fired, subscribers are unsubscribed before
  * receiving the event. After the event has been sent, the stream has no
@@ -159,19 +166,21 @@ abstract class Stream<T> {
   }
 
   /**
-   * Creates a single-subscription stream that gets its data from [data].
+   * Creates a single-subscription stream that gets its data from [elements].
    *
    * The iterable is iterated when the stream receives a listener, and stops
-   * iterating if the listener cancels the subscription.
+   * iterating if the listener cancels the subscription, or if the
+   * [Iterator.moveNext] method returns `false` or throws.
+   * Iteration is suspended whild the stream subscription is paused.
    *
-   * If iterating [data] throws an error, the stream ends immediately with
-   * that error. No done event will be sent (iteration is not complete), but no
-   * further data events will be generated either, since iteration cannot
-   * continue.
+   * If calling [Iterator.moveNext] on `elements.iterator` throws,
+   * the stream emits that error and then it closes.
+   * If reading [Iterator.current] on `elements.iterator` throws,
+   * the stream emits that error, but keeps iterating.
    */
-  factory Stream.fromIterable(Iterable<T> data) {
+  factory Stream.fromIterable(Iterable<T> elements) {
     return new _GeneratedStreamImpl<T>(
-        () => new _IterablePendingEvents<T>(data));
+        () => new _IterablePendingEvents<T>(elements));
   }
 
   /**
@@ -967,11 +976,18 @@ abstract class Stream<T> {
   /**
    * Collects the data of this stream in a [Set].
    *
+   * Creates a `Set<T>` and adds all elements of the stream to the set.
+   * in the order they arrive.
+   * When the stream ends, the returned future is completed with that set.
+   *
    * The returned set is the same type as returned by `new Set<T>()`.
    * If another type of set is needed, either use [forEach] to add each
    * element to the set, or use
    * `toList().then((list) => new SomeOtherSet.from(list))`
    * to create the set.
+   *
+   * If the stream contains an error, the returned future is completed
+   * with that error, and processing stops.
    */
   Future<Set<T>> toSet() {
     Set<T> result = new Set<T>();
@@ -1626,6 +1642,13 @@ abstract class StreamSubscription<T> {
    *
    * If the subscription is paused more than once, an equal number
    * of resumes must be performed to resume the stream.
+   * Calls to [resume] and the completion of a [resumeSignal] are
+   * interchangeable - the [pause] which was passed a [resumeSignal] may be
+   * ended by a call to [resume], and completing the [resumeSignal] may end a
+   * different [pause].
+   *
+   * It is safe to [resume] or complete a [resumeSignal] even when the
+   * subscription is not paused, and the resume will have no effect.
    *
    * Currently DOM streams silently drop events when the stream is paused. This
    * is a bug and will be fixed.
@@ -1639,6 +1662,9 @@ abstract class StreamSubscription<T> {
    * When all previously calls to [pause] have been matched by a calls to
    * [resume], possibly through a `resumeSignal` passed to [pause],
    * the stream subscription may emit events again.
+   *
+   * It is safe to [resume] even when the subscription is not paused, and the
+   * resume will have no effect.
    */
   void resume();
 
@@ -1990,8 +2016,11 @@ abstract class StreamTransformer<S, T> {
    * Returns a new stream with events that are computed from events of the
    * provided [stream].
    *
-   * Implementors of the [StreamTransformer] interface should document
-   * differences from the following expected behavior:
+   * The [StreamTransformer] interface is completely generic,
+   * so it cannot say what subclasses do.
+   * Each [StreamTransformer] should document clearly how it transforms the
+   * stream (on the class or variable used to access the transformer),
+   * as well as any differences from the following typical behavior:
    *
    * * When the returned stream is listened to, it starts listening to the
    *   input [stream].
@@ -2004,11 +2033,16 @@ abstract class StreamTransformer<S, T> {
    * "Reasonable time" depends on the transformer and stream. Some transformers,
    * like a "timeout" transformer, might make these operations depend on a
    * duration. Others might not delay them at all, or just by a microtask.
+   *
+   * Transformers are free to handle errors in any way.
+   * A transformer implementation may choose to propagate errors,
+   * or convert them to other events, or ignore them completely,
+   * but if errors are ignored, it should be documented explicitly.
    */
   Stream<T> bind(Stream<S> stream);
 
   /**
-   * Provides a `StreamTrasformer<RS, RT>` view of this stream transformer.
+   * Provides a `StreamTransformer<RS, RT>` view of this stream transformer.
    *
    * The resulting transformer will check at run-time that all data events
    * of the stream it transforms are actually instances of [S],

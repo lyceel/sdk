@@ -179,6 +179,7 @@ ParsedFunction::ParsedFunction(Thread* thread, const Function& function)
       current_context_var_(NULL),
       arg_desc_var_(NULL),
       expression_temp_var_(NULL),
+      entry_points_temp_var_(NULL),
       finally_return_temp_var_(NULL),
       deferred_prefixes_(new ZoneGrowableArray<const LibraryPrefix*>()),
       guarded_fields_(new ZoneGrowableArray<const Field*>()),
@@ -269,6 +270,18 @@ LocalVariable* ParsedFunction::EnsureExpressionTemp() {
   }
   ASSERT(has_expression_temp_var());
   return expression_temp_var();
+}
+
+LocalVariable* ParsedFunction::EnsureEntryPointsTemp() {
+  if (!has_entry_points_temp_var()) {
+    LocalVariable* temp = new (Z)
+        LocalVariable(function_.token_pos(), function_.token_pos(),
+                      Symbols::EntryPointsTemp(), Object::dynamic_type());
+    ASSERT(temp != NULL);
+    set_entry_points_temp_var(temp);
+  }
+  ASSERT(has_entry_points_temp_var());
+  return entry_points_temp_var();
 }
 
 void ParsedFunction::EnsureFinallyReturnTemp(bool is_async) {
@@ -658,7 +671,6 @@ class TopLevelParsingScope : public StackResource {
 void Parser::ParseCompilationUnit(const Library& library,
                                   const Script& script) {
   Thread* thread = Thread::Current();
-  ASSERT(thread->long_jump_base()->IsSafeToJump());
   CSTAT_TIMER_SCOPE(thread, parser_timer);
 #ifndef PRODUCT
   VMTagScope tagScope(thread, VMTag::kCompileTopLevelTagId);
@@ -996,14 +1008,12 @@ void Parser::ParseClass(const Class& cls) {
   }
 #endif
   if (!cls.is_synthesized_class()) {
-    ASSERT(thread->long_jump_base()->IsSafeToJump());
     CSTAT_TIMER_SCOPE(thread, parser_timer);
     const Script& script = Script::Handle(zone, cls.script());
     const Library& lib = Library::Handle(zone, cls.library());
     Parser parser(script, lib, cls.token_pos());
     parser.ParseClassDefinition(cls);
   } else if (cls.is_enum_class()) {
-    ASSERT(thread->long_jump_base()->IsSafeToJump());
     CSTAT_TIMER_SCOPE(thread, parser_timer);
     const Script& script = Script::Handle(zone, cls.script());
     const Library& lib = Library::Handle(zone, cls.library());
@@ -1152,7 +1162,6 @@ void Parser::ParseFunction(ParsedFunction* parsed_function) {
   TimelineDurationScope tds(thread, Timeline::GetCompilerStream(),
                             "ParseFunction");
 #endif  // !PRODUCT
-  ASSERT(thread->long_jump_base()->IsSafeToJump());
   ASSERT(parsed_function != NULL);
   const Function& func = parsed_function->function();
   const Script& script = Script::Handle(zone, func.script());
@@ -4006,6 +4015,7 @@ void Parser::ParseMethodOrConstructor(ClassDesc* members, MemberDesc* method) {
                     method->has_external,
                     method->has_native,  // May change.
                     current_class(), method->decl_begin_pos));
+  func.set_has_pragma(IsPragmaAnnotation(method->metadata_pos));
 
   ASSERT(innermost_function().IsNull());
   innermost_function_ = func.raw();
@@ -4408,6 +4418,9 @@ void Parser::ParseFieldDefinition(ClassDesc* members, MemberDesc* field) {
     class_field.set_has_initializer(has_initializer);
     members->AddField(class_field);
     field->field_ = &class_field;
+    if (IsPragmaAnnotation(field->metadata_pos)) {
+      current_class().set_has_pragma(true);
+    }
     if (is_patch_source() && IsPatchAnnotation(field->metadata_pos)) {
       // Currently, we just ignore the patch annotation on fields.
       // All fields in the patch class are added to the patched class.
@@ -4811,6 +4824,7 @@ void Parser::ParseClassDeclaration(const GrowableObjectArray& pending_classes,
   bool is_abstract = false;
   TokenPosition declaration_pos =
       metadata_pos.IsReal() ? metadata_pos : TokenPos();
+  const bool is_pragma = IsPragmaAnnotation(metadata_pos);
   if (is_patch_source() && IsPatchAnnotation(metadata_pos)) {
     is_patch = true;
     metadata_pos = TokenPosition::kNoSource;
@@ -4858,6 +4872,9 @@ void Parser::ParseClassDeclaration(const GrowableObjectArray& pending_classes,
       cls.set_script(script_);
       cls.set_token_pos(declaration_pos);
     }
+  }
+  if (is_pragma) {
+    cls.set_has_pragma(true);
   }
   ASSERT(!cls.IsNull());
   ASSERT(cls.functions() == Object::empty_array().raw());
@@ -5574,8 +5591,12 @@ bool Parser::IsPatchAnnotation(TokenPosition pos) {
   }
   TokenPosScope saved_pos(this);
   SetPosition(pos);
-  ExpectToken(Token::kAT);
-  return IsSymbol(Symbols::Patch());
+  while (CurrentToken() == Token::kAT) {
+    ConsumeToken();
+    if (IsSymbol(Symbols::Patch())) return true;
+    SkipOneMetadata();
+  }
+  return false;
 }
 
 bool Parser::IsPragmaAnnotation(TokenPosition pos) {
@@ -5584,8 +5605,27 @@ bool Parser::IsPragmaAnnotation(TokenPosition pos) {
   }
   TokenPosScope saved_pos(this);
   SetPosition(pos);
-  ExpectToken(Token::kAT);
-  return IsSymbol(Symbols::Pragma());
+  while (CurrentToken() == Token::kAT) {
+    ConsumeToken();
+    if (IsSymbol(Symbols::Pragma())) return true;
+    SkipOneMetadata();
+  }
+  return false;
+}
+
+void Parser::SkipOneMetadata() {
+  ExpectIdentifier("identifier expected");
+  if (CurrentToken() == Token::kPERIOD) {
+    ConsumeToken();
+    ExpectIdentifier("identifier expected");
+    if (CurrentToken() == Token::kPERIOD) {
+      ConsumeToken();
+      ExpectIdentifier("identifier expected");
+    }
+  }
+  if (CurrentToken() == Token::kLPAREN) {
+    SkipToMatchingParenthesis();
+  }
 }
 
 TokenPosition Parser::SkipMetadata() {
@@ -5595,18 +5635,7 @@ TokenPosition Parser::SkipMetadata() {
   TokenPosition metadata_pos = TokenPos();
   while (CurrentToken() == Token::kAT) {
     ConsumeToken();
-    ExpectIdentifier("identifier expected");
-    if (CurrentToken() == Token::kPERIOD) {
-      ConsumeToken();
-      ExpectIdentifier("identifier expected");
-      if (CurrentToken() == Token::kPERIOD) {
-        ConsumeToken();
-        ExpectIdentifier("identifier expected");
-      }
-    }
-    if (CurrentToken() == Token::kLPAREN) {
-      SkipToMatchingParenthesis();
-    }
+    SkipOneMetadata();
   }
   return metadata_pos;
 }
@@ -5899,6 +5928,11 @@ void Parser::ParseTopLevelVariable(TopLevel* top_level,
     if (metadata_pos.IsReal()) {
       library_.AddFieldMetadata(field, metadata_pos);
     }
+    if (IsPragmaAnnotation(metadata_pos)) {
+      Class& toplevel = Class::Handle(library_.toplevel_class());
+      ASSERT(!toplevel.IsNull());
+      toplevel.set_has_pragma(true);
+    }
 
     if (has_initializer) {
       field.SetStaticValue(field_value, true);
@@ -6061,7 +6095,9 @@ void Parser::ParseTopLevelFunction(TopLevel* top_level,
   result_type.SetScopeFunction(func);
   func.set_end_token_pos(function_end_pos);
   func.set_modifier(func_modifier);
-  if (library_.is_dart_scheme() && library_.IsPrivate(func_name)) {
+  if (library_.is_dart_scheme() &&
+      (library_.IsPrivate(func_name) ||
+       library_.raw() == Library::InternalLibrary())) {
     func.set_is_reflectable(false);
   }
   if (is_native) {
@@ -11720,6 +11756,11 @@ AstNode* Parser::ParseStaticCall(const Class& cls,
                                   InvocationMirror::kMethod,
                                   NULL,  // No existing function.
                                   prefix);
+  } else if (cls.IsTopLevel() &&
+             (cls.library() == Library::InternalLibrary()) &&
+             (func.name() == Symbols::UnsafeCast().raw())) {
+    ASSERT(num_arguments == 1);
+    return arguments->NodeAt(0);
   } else if (cls.IsTopLevel() && (cls.library() == Library::CoreLibrary()) &&
              (func.name() == Symbols::Identical().raw()) &&
              func_type_args.IsNull()) {

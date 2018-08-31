@@ -52,6 +52,7 @@ enum NullValue {
   IdentifierList,
   Initializers,
   Metadata,
+  MetadataToken,
   Modifiers,
   ParameterDefaultValue,
   Prefix,
@@ -204,7 +205,8 @@ abstract class StackListener extends Listener {
   }
 
   @override
-  void handleClassImplements(Token implementsKeyword, int interfacesCount) {
+  void handleClassOrMixinImplements(
+      Token implementsKeyword, int interfacesCount) {
     debugEvent("ClassImplements");
   }
 

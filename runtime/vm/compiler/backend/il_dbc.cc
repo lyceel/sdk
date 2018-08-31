@@ -30,19 +30,21 @@ DECLARE_FLAG(int, optimization_counter_threshold);
 
 // List of instructions that are still unimplemented by DBC backend.
 #define FOR_EACH_UNIMPLEMENTED_INSTRUCTION(M)                                  \
-  M(LoadCodeUnits)                                                             \
   M(BinaryInt32Op)                                                             \
-  M(Int32ToDouble)                                                             \
-  M(DoubleToInteger)                                                           \
+  M(BinaryUint32Op)                                                            \
   M(BoxInt64)                                                                  \
-  M(TruncDivMod)                                                               \
+  M(CheckCondition)                                                            \
+  M(DoubleToInteger)                                                           \
+  M(ExtractNthOutput)                                                          \
   M(GuardFieldClass)                                                           \
   M(GuardFieldLength)                                                          \
+  M(GuardFieldType)                                                            \
   M(IfThenElse)                                                                \
-  M(ExtractNthOutput)                                                          \
-  M(BinaryUint32Op)                                                            \
+  M(Int32ToDouble)                                                             \
+  M(LoadCodeUnits)                                                             \
   M(ShiftUint32Op)                                                             \
   M(SpeculativeShiftUint32Op)                                                  \
+  M(TruncDivMod)                                                               \
   M(UnaryUint32Op)                                                             \
   M(UnboxedIntConverter)
 
@@ -330,13 +332,15 @@ EMIT_NATIVE_CODE(PushArgument, 1) {
 
 EMIT_NATIVE_CODE(LoadLocal, 0) {
   ASSERT(!compiler->is_optimizing());
-  const intptr_t slot_index = FrameSlotForVariable(&local());
+  const intptr_t slot_index =
+      compiler_frame_layout.FrameSlotForVariable(&local());
   __ Push(LocalVarIndex(0, slot_index));
 }
 
 EMIT_NATIVE_CODE(StoreLocal, 0) {
   ASSERT(!compiler->is_optimizing());
-  const intptr_t slot_index = FrameSlotForVariable(&local());
+  const intptr_t slot_index =
+      compiler_frame_layout.FrameSlotForVariable(&local());
   if (HasTemp()) {
     __ StoreLocal(LocalVarIndex(0, slot_index));
   } else {
@@ -388,8 +392,10 @@ EMIT_NATIVE_CODE(Return, 1) {
   }
 }
 
-LocationSummary* StoreStaticFieldInstr::MakeLocationSummary(Zone* zone,
-                                                            bool opt) const {
+LocationSummary* StoreStaticFieldInstr::MakeLocationSummary(
+
+    Zone* zone,
+    bool opt) const {
   const intptr_t kNumInputs = 1;
   const intptr_t kNumTemps = 1;
   LocationSummary* locs = new (zone)
@@ -598,7 +604,10 @@ void ComparisonInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   }
 }
 
-LocationSummary* BranchInstr::MakeLocationSummary(Zone* zone, bool opt) const {
+LocationSummary* BranchInstr::MakeLocationSummary(
+
+    Zone* zone,
+    bool opt) const {
   comparison()->InitializeLocationSummary(zone, opt);
   if (!comparison()->HasLocs()) {
     return NULL;
@@ -973,11 +982,11 @@ EMIT_NATIVE_CODE(NativeCall,
 
   const ExternalLabel trampoline_label(reinterpret_cast<uword>(trampoline));
   const intptr_t trampoline_kidx =
-      __ object_pool_wrapper().FindNativeFunctionWrapper(&trampoline_label,
-                                                         kPatchable);
+      __ object_pool_wrapper().FindNativeFunctionWrapper(
+          &trampoline_label, ObjectPool::kPatchable);
   const ExternalLabel label(reinterpret_cast<uword>(function));
-  const intptr_t target_kidx =
-      __ object_pool_wrapper().FindNativeFunction(&label, kPatchable);
+  const intptr_t target_kidx = __ object_pool_wrapper().FindNativeFunction(
+      &label, ObjectPool::kPatchable);
   const intptr_t argc_tag_kidx =
       __ object_pool_wrapper().FindImmediate(static_cast<uword>(argc_tag));
   __ NativeCall(trampoline_kidx, target_kidx, argc_tag_kidx);
@@ -1188,12 +1197,15 @@ EMIT_NATIVE_CODE(CatchBlockEntry, 0) {
 
   if (!compiler->is_optimizing()) {
     if (raw_exception_var_ != nullptr) {
-      __ MoveSpecial(LocalVarIndex(0, FrameSlotForVariable(raw_exception_var_)),
-                     Simulator::kExceptionSpecialIndex);
+      __ MoveSpecial(
+          LocalVarIndex(0, compiler_frame_layout.FrameSlotForVariable(
+                               raw_exception_var_)),
+          Simulator::kExceptionSpecialIndex);
     }
     if (raw_stacktrace_var_ != nullptr) {
       __ MoveSpecial(
-          LocalVarIndex(0, FrameSlotForVariable(raw_stacktrace_var_)),
+          LocalVarIndex(0, compiler_frame_layout.FrameSlotForVariable(
+                               raw_stacktrace_var_)),
           Simulator::kStackTraceSpecialIndex);
     }
   }

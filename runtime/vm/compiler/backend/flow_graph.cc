@@ -407,7 +407,9 @@ void FlowGraph::ComputeIsReceiver(PhiInstr* phi) const {
 bool FlowGraph::IsReceiver(Definition* def) const {
   def = def->OriginalDefinition();  // Could be redefined.
   if (def->IsParameter()) return (def->AsParameter()->index() == 0);
-  if (!def->IsPhi() || graph_entry()->catch_entries().is_empty()) return false;
+  if (!def->IsPhi() || graph_entry()->HasSingleEntryPoint()) {
+    return false;
+  }
   PhiInstr* phi = def->AsPhi();
   if (phi->is_receiver() != PhiInstr::kUnknownReceiver) {
     return (phi->is_receiver() == PhiInstr::kReceiver);
@@ -433,7 +435,7 @@ FlowGraph::ToCheck FlowGraph::CheckForInstanceCall(
   if (function().IsDynamicFunction() && IsReceiver(receiver->definition())) {
     // Call receiver is callee receiver: calling "this.g()" in f().
     receiver_class = function().Owner();
-  } else if (FLAG_use_strong_mode_types && isolate()->strong()) {
+  } else if (isolate()->can_use_strong_mode_types()) {
     // In strong mode, get the receiver's compile type. Note that
     // we allow nullable types, which may result in just generating
     // a null check rather than the more elaborate class check
@@ -531,6 +533,30 @@ Instruction* FlowGraph::CreateCheckClass(Definition* to_check,
   }
   return new (zone())
       CheckClassInstr(new (zone()) Value(to_check), deopt_id, cids, token_pos);
+}
+
+void FlowGraph::AddExactnessGuard(InstanceCallInstr* call,
+                                  intptr_t receiver_cid) {
+  const Class& cls = Class::Handle(
+      zone(), Isolate::Current()->class_table()->At(receiver_cid));
+
+  Definition* load_type_args = new (zone())
+      LoadFieldInstr(call->Receiver()->CopyWithType(),
+                     NativeFieldDesc::GetTypeArgumentsFieldFor(zone(), cls),
+                     call->token_pos());
+  InsertBefore(call, load_type_args, call->env(), FlowGraph::kValue);
+
+  const AbstractType& type =
+      AbstractType::Handle(zone(), call->ic_data()->StaticReceiverType());
+  ASSERT(!type.IsNull());
+  const TypeArguments& args = TypeArguments::Handle(zone(), type.arguments());
+  Instruction* guard = new (zone()) CheckConditionInstr(
+      new StrictCompareInstr(call->token_pos(), Token::kEQ_STRICT,
+                             new (zone()) Value(load_type_args),
+                             new (zone()) Value(GetConstant(args)),
+                             /*needs_number_check=*/false, call->deopt_id()),
+      call->deopt_id());
+  InsertBefore(call, guard, call->env(), FlowGraph::kEffect);
 }
 
 bool FlowGraph::VerifyUseLists() {
@@ -1288,8 +1314,7 @@ void FlowGraph::RenameRecursive(BlockEntryInstr* block_entry,
           captured_parameters_->Add(index);
         }
 
-        if ((phi != NULL) && isolate()->strong() &&
-            FLAG_use_strong_mode_types) {
+        if ((phi != NULL) && isolate()->can_use_strong_mode_types()) {
           // Assign type to Phi if it doesn't have a type yet.
           // For a Phi to appear in the local variable it either was placed
           // there as incoming value by renaming or it was stored there by
@@ -1405,7 +1430,7 @@ void FlowGraph::RenameRecursive(BlockEntryInstr* block_entry,
 void FlowGraph::RemoveDeadPhis(GrowableArray<PhiInstr*>* live_phis) {
   // Augment live_phis with those that have implicit real used at
   // potentially throwing instructions if there is a try-catch in this graph.
-  if (graph_entry()->SuccessorCount() > 1) {
+  if (!graph_entry()->catch_entries().is_empty()) {
     for (BlockIterator it(postorder_iterator()); !it.Done(); it.Advance()) {
       JoinEntryInstr* join = it.Current()->AsJoinEntry();
       if (join == NULL) continue;
@@ -1691,7 +1716,7 @@ void FlowGraph::InsertConversionsFor(Definition* def) {
     ConvertUse(it.Current(), from_rep);
   }
 
-  if (graph_entry()->SuccessorCount() > 1) {
+  if (!graph_entry()->catch_entries().is_empty()) {
     for (Value::Iterator it(def->env_use_list()); !it.Done(); it.Advance()) {
       Value* use = it.Current();
       if (use->instruction()->MayThrow() &&
@@ -1730,9 +1755,9 @@ static void UnboxPhi(PhiInstr* phi) {
       break;
   }
 
-  if ((kSmiBits < 32) && (unboxed == kTagged) && phi->Type()->IsInt() &&
+  if ((unboxed == kTagged) && phi->Type()->IsInt() &&
       RangeUtils::Fits(phi->range(), RangeBoundary::kRangeBoundaryInt64)) {
-    // On 32-bit platforms conservatively unbox phis that:
+    // Conservatively unbox phis that:
     //   - are proven to be of type Int;
     //   - fit into 64bits range;
     //   - have either constants or Box() operations as inputs;

@@ -1643,7 +1643,7 @@ class ChildEntities extends Object
  *        [ImplementsClause]?
  *        '{' [ClassMember]* '}'
  */
-class ClassDeclarationImpl extends NamedCompilationUnitMemberImpl
+class ClassDeclarationImpl extends ClassOrMixinDeclarationImpl
     implements ClassDeclaration {
   /**
    * The 'abstract' keyword, or `null` if the keyword was absent.
@@ -1658,12 +1658,6 @@ class ClassDeclarationImpl extends NamedCompilationUnitMemberImpl
   Token classKeyword;
 
   /**
-   * The type parameters for the class, or `null` if the class does not have any
-   * type parameters.
-   */
-  TypeParameterListImpl _typeParameters;
-
-  /**
    * The extends clause for the class, or `null` if the class does not extend
    * any other class.
    */
@@ -1676,33 +1670,10 @@ class ClassDeclarationImpl extends NamedCompilationUnitMemberImpl
   WithClauseImpl _withClause;
 
   /**
-   * The implements clause for the class, or `null` if the class does not
-   * implement any interfaces.
-   */
-  ImplementsClauseImpl _implementsClause;
-
-  /**
    * The native clause for the class, or `null` if the class does not have a
    * native clause.
    */
   NativeClauseImpl _nativeClause;
-
-  /**
-   * The left curly bracket.
-   */
-  @override
-  Token leftBracket;
-
-  /**
-   * The members defined by the class.
-   */
-  NodeList<ClassMember> _members;
-
-  /**
-   * The right curly bracket.
-   */
-  @override
-  Token rightBracket;
 
   /**
    * Initialize a newly created class declaration. Either or both of the
@@ -1724,15 +1695,13 @@ class ClassDeclarationImpl extends NamedCompilationUnitMemberImpl
       ExtendsClauseImpl extendsClause,
       WithClauseImpl withClause,
       ImplementsClauseImpl implementsClause,
-      this.leftBracket,
+      Token leftBracket,
       List<ClassMember> members,
-      this.rightBracket)
-      : super(comment, metadata, name) {
-    _typeParameters = _becomeParentOf(typeParameters);
+      Token rightBracket)
+      : super(comment, metadata, name, typeParameters, implementsClause,
+            leftBracket, members, rightBracket) {
     _extendsClause = _becomeParentOf(extendsClause);
     _withClause = _becomeParentOf(withClause);
-    _implementsClause = _becomeParentOf(implementsClause);
-    _members = new NodeListImpl<ClassMember>(this, members);
   }
 
   @override
@@ -1750,10 +1719,11 @@ class ClassDeclarationImpl extends NamedCompilationUnitMemberImpl
     ..add(rightBracket);
 
   @override
-  ClassElement get element => _name?.staticElement as ClassElement;
+  ClassElement get declaredElement => _name?.staticElement as ClassElement;
 
+  @deprecated
   @override
-  Token get endToken => rightBracket;
+  ClassElement get element => declaredElement;
 
   @override
   ExtendsClause get extendsClause => _extendsClause;
@@ -1772,19 +1742,7 @@ class ClassDeclarationImpl extends NamedCompilationUnitMemberImpl
   }
 
   @override
-  ImplementsClause get implementsClause => _implementsClause;
-
-  @override
-  void set implementsClause(ImplementsClause implementsClause) {
-    _implementsClause =
-        _becomeParentOf(implementsClause as ImplementsClauseImpl);
-  }
-
-  @override
   bool get isAbstract => abstractKeyword != null;
-
-  @override
-  NodeList<ClassMember> get members => _members;
 
   @override
   NativeClause get nativeClause => _nativeClause;
@@ -1792,14 +1750,6 @@ class ClassDeclarationImpl extends NamedCompilationUnitMemberImpl
   @override
   void set nativeClause(NativeClause nativeClause) {
     _nativeClause = _becomeParentOf(nativeClause as NativeClauseImpl);
-  }
-
-  @override
-  TypeParameterList get typeParameters => _typeParameters;
-
-  @override
-  void set typeParameters(TypeParameterList typeParameters) {
-    _typeParameters = _becomeParentOf(typeParameters as TypeParameterListImpl);
   }
 
   @override
@@ -1833,44 +1783,6 @@ class ClassDeclarationImpl extends NamedCompilationUnitMemberImpl
   }
 
   @override
-  VariableDeclaration getField(String name) {
-    int memberLength = _members.length;
-    for (int i = 0; i < memberLength; i++) {
-      ClassMember classMember = _members[i];
-      if (classMember is FieldDeclaration) {
-        FieldDeclaration fieldDeclaration = classMember;
-        NodeList<VariableDeclaration> fields =
-            fieldDeclaration.fields.variables;
-        int fieldLength = fields.length;
-        for (int i = 0; i < fieldLength; i++) {
-          VariableDeclaration field = fields[i];
-          SimpleIdentifier fieldName = field.name;
-          if (fieldName != null && name == fieldName.name) {
-            return field;
-          }
-        }
-      }
-    }
-    return null;
-  }
-
-  @override
-  MethodDeclaration getMethod(String name) {
-    int length = _members.length;
-    for (int i = 0; i < length; i++) {
-      ClassMember classMember = _members[i];
-      if (classMember is MethodDeclaration) {
-        MethodDeclaration method = classMember;
-        SimpleIdentifier methodName = method.name;
-        if (methodName != null && name == methodName.name) {
-          return method;
-        }
-      }
-    }
-    return null;
-  }
-
-  @override
   void visitChildren(AstVisitor visitor) {
     super.visitChildren(visitor);
     _name?.accept(visitor);
@@ -1894,6 +1806,104 @@ abstract class ClassMemberImpl extends DeclarationImpl implements ClassMember {
    */
   ClassMemberImpl(CommentImpl comment, List<Annotation> metadata)
       : super(comment, metadata);
+}
+
+abstract class ClassOrMixinDeclarationImpl
+    extends NamedCompilationUnitMemberImpl {
+  /**
+   * The type parameters for the class or mixin,
+   * or `null` if the declaration does not have any type parameters.
+   */
+  TypeParameterListImpl _typeParameters;
+
+  /**
+   * The implements clause for the class or mixin,
+   * or `null` if the declaration does not implement any interfaces.
+   */
+  ImplementsClauseImpl _implementsClause;
+
+  /**
+   * The left curly bracket.
+   */
+  Token leftBracket;
+
+  /**
+   * The members defined by the class or mixin.
+   */
+  NodeList<ClassMember> _members;
+
+  /**
+   * The right curly bracket.
+   */
+  Token rightBracket;
+
+  ClassOrMixinDeclarationImpl(
+      CommentImpl comment,
+      List<Annotation> metadata,
+      SimpleIdentifierImpl name,
+      TypeParameterListImpl typeParameters,
+      ImplementsClauseImpl implementsClause,
+      this.leftBracket,
+      List<ClassMember> members,
+      this.rightBracket)
+      : super(comment, metadata, name) {
+    _typeParameters = _becomeParentOf(typeParameters);
+    _implementsClause = _becomeParentOf(implementsClause);
+    _members = new NodeListImpl<ClassMember>(this, members);
+  }
+
+  Token get endToken => rightBracket;
+
+  ImplementsClause get implementsClause => _implementsClause;
+
+  void set implementsClause(ImplementsClause implementsClause) {
+    _implementsClause =
+        _becomeParentOf(implementsClause as ImplementsClauseImpl);
+  }
+
+  NodeList<ClassMember> get members => _members;
+
+  TypeParameterList get typeParameters => _typeParameters;
+
+  void set typeParameters(TypeParameterList typeParameters) {
+    _typeParameters = _becomeParentOf(typeParameters as TypeParameterListImpl);
+  }
+
+  VariableDeclaration getField(String name) {
+    int memberLength = _members.length;
+    for (int i = 0; i < memberLength; i++) {
+      ClassMember classMember = _members[i];
+      if (classMember is FieldDeclaration) {
+        FieldDeclaration fieldDeclaration = classMember;
+        NodeList<VariableDeclaration> fields =
+            fieldDeclaration.fields.variables;
+        int fieldLength = fields.length;
+        for (int i = 0; i < fieldLength; i++) {
+          VariableDeclaration field = fields[i];
+          SimpleIdentifier fieldName = field.name;
+          if (fieldName != null && name == fieldName.name) {
+            return field;
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  MethodDeclaration getMethod(String name) {
+    int length = _members.length;
+    for (int i = 0; i < length; i++) {
+      ClassMember classMember = _members[i];
+      if (classMember is MethodDeclaration) {
+        MethodDeclaration method = classMember;
+        SimpleIdentifier methodName = method.name;
+        if (methodName != null && name == methodName.name) {
+          return method;
+        }
+      }
+    }
+    return null;
+  }
 }
 
 /**
@@ -1981,7 +1991,11 @@ class ClassTypeAliasImpl extends TypeAliasImpl implements ClassTypeAlias {
     ..add(semicolon);
 
   @override
-  ClassElement get element => _name?.staticElement as ClassElement;
+  ClassElement get declaredElement => _name?.staticElement as ClassElement;
+
+  @deprecated
+  @override
+  ClassElement get element => declaredElement;
 
   @override
   Token get firstTokenAfterCommentAndMetadata {
@@ -2198,7 +2212,7 @@ class CommentReferenceImpl extends AstNodeImpl implements CommentReference {
   }
 
   @override
-  Token get beginToken => _identifier.beginToken;
+  Token get beginToken => newKeyword ?? _identifier.beginToken;
 
   @override
   Iterable<SyntacticEntity> get childEntities =>
@@ -2316,7 +2330,7 @@ class CompilationUnitImpl extends AstNodeImpl implements CompilationUnit {
    * structure has not been resolved.
    */
   @override
-  CompilationUnitElement element;
+  CompilationUnitElement declaredElement;
 
   /**
    * The line information for this compilation unit.
@@ -2360,6 +2374,15 @@ class CompilationUnitImpl extends AstNodeImpl implements CompilationUnit {
 
   @override
   NodeList<Directive> get directives => _directives;
+
+  @deprecated
+  @override
+  CompilationUnitElement get element => declaredElement;
+
+  @override
+  set element(CompilationUnitElement element) {
+    declaredElement = element;
+  }
 
   @override
   int get length {
@@ -2788,7 +2811,7 @@ class ConstructorDeclarationImpl extends ClassMemberImpl
    * resolved.
    */
   @override
-  ConstructorElement element;
+  ConstructorElement declaredElement;
 
   /**
    * Initialize a newly created constructor declaration. The [externalKeyword]
@@ -2850,6 +2873,16 @@ class ConstructorDeclarationImpl extends ClassMemberImpl
     ..addAll(initializers)
     ..add(_redirectedConstructor)
     ..add(_body);
+
+  @deprecated
+  @override
+  ConstructorElement get element => declaredElement;
+
+  @deprecated
+  @override
+  set element(ConstructorElement element) {
+    declaredElement = element;
+  }
 
   @override
   Token get endToken {
@@ -3241,12 +3274,15 @@ class DeclaredIdentifierImpl extends DeclarationImpl
       super._childEntities..add(keyword)..add(_type)..add(_identifier);
 
   @override
-  LocalVariableElement get element {
+  LocalVariableElement get declaredElement {
     if (_identifier == null) {
       return null;
     }
     return _identifier.staticElement as LocalVariableElement;
   }
+
+  @override
+  LocalVariableElement get element => declaredElement;
 
   @override
   Token get endToken => _identifier.endToken;
@@ -3750,7 +3786,11 @@ class EnumConstantDeclarationImpl extends DeclarationImpl
       super._childEntities..add(_name);
 
   @override
-  FieldElement get element => _name?.staticElement as FieldElement;
+  FieldElement get declaredElement => _name?.staticElement as FieldElement;
+
+  @deprecated
+  @override
+  FieldElement get element => declaredElement;
 
   @override
   Token get endToken => _name.endToken;
@@ -3839,7 +3879,11 @@ class EnumDeclarationImpl extends NamedCompilationUnitMemberImpl
   NodeList<EnumConstantDeclaration> get constants => _constants;
 
   @override
-  ClassElement get element => _name?.staticElement as ClassElement;
+  ClassElement get declaredElement => _name?.staticElement as ClassElement;
+
+  @deprecated
+  @override
+  ClassElement get element => declaredElement;
 
   @override
   Token get endToken => rightBracket;
@@ -4303,6 +4347,10 @@ class FieldDeclarationImpl extends ClassMemberImpl implements FieldDeclaration {
       super._childEntities..add(staticKeyword)..add(_fieldList)..add(semicolon);
 
   @override
+  Element get declaredElement => null;
+
+  @deprecated
+  @override
   Element get element => null;
 
   @override
@@ -4656,13 +4704,17 @@ class ForEachStatementImpl extends StatementImpl implements ForEachStatement {
 abstract class FormalParameterImpl extends AstNodeImpl
     implements FormalParameter {
   @override
-  ParameterElement get element {
+  ParameterElement get declaredElement {
     SimpleIdentifier identifier = this.identifier;
     if (identifier == null) {
       return null;
     }
     return identifier.staticElement as ParameterElement;
   }
+
+  @deprecated
+  @override
+  ParameterElement get element => declaredElement;
 
   @override
   bool get isNamed => kind == ParameterKind.NAMED;
@@ -4789,7 +4841,7 @@ class FormalParameterListImpl extends AstNodeImpl
     int count = _parameters.length;
     List<ParameterElement> types = new List<ParameterElement>(count);
     for (int i = 0; i < count; i++) {
-      types[i] = _parameters[i].element;
+      types[i] = _parameters[i].declaredElement;
     }
     return types;
   }
@@ -5103,7 +5155,12 @@ class FunctionDeclarationImpl extends NamedCompilationUnitMemberImpl
     ..add(_functionExpression);
 
   @override
-  ExecutableElement get element => _name?.staticElement as ExecutableElement;
+  ExecutableElement get declaredElement =>
+      _name?.staticElement as ExecutableElement;
+
+  @deprecated
+  @override
+  ExecutableElement get element => declaredElement;
 
   @override
   Token get endToken => _functionExpression.endToken;
@@ -5228,12 +5285,8 @@ class FunctionExpressionImpl extends ExpressionImpl
    */
   FunctionBodyImpl _body;
 
-  /**
-   * The element associated with the function, or `null` if the AST structure
-   * has not been resolved.
-   */
   @override
-  ExecutableElement element;
+  ExecutableElement declaredElement;
 
   /**
    * Initialize a newly created function declaration.
@@ -5270,6 +5323,16 @@ class FunctionExpressionImpl extends ExpressionImpl
   @override
   Iterable<SyntacticEntity> get childEntities =>
       new ChildEntities()..add(_parameters)..add(_body);
+
+  @deprecated
+  @override
+  ExecutableElement get element => declaredElement;
+
+  @deprecated
+  @override
+  set element(ExecutableElement element) {
+    declaredElement = element;
+  }
 
   @override
   Token get endToken {
@@ -5450,8 +5513,12 @@ class FunctionTypeAliasImpl extends TypeAliasImpl implements FunctionTypeAlias {
     ..add(semicolon);
 
   @override
-  FunctionTypeAliasElement get element =>
+  FunctionTypeAliasElement get declaredElement =>
       _name?.staticElement as FunctionTypeAliasElement;
+
+  @deprecated
+  @override
+  FunctionTypeAliasElement get element => declaredElement;
 
   @override
   FormalParameterList get parameters => _parameters;
@@ -5773,7 +5840,11 @@ class GenericTypeAliasImpl extends TypeAliasImpl implements GenericTypeAlias {
     ..add(_functionType);
 
   @override
-  Element get element => name.staticElement;
+  Element get declaredElement => name.staticElement;
+
+  @deprecated
+  @override
+  Element get element => declaredElement;
 
   @override
   GenericFunctionType get functionType => _functionType;
@@ -7480,7 +7551,12 @@ class MethodDeclarationImpl extends ClassMemberImpl
    * getter or a setter.
    */
   @override
-  ExecutableElement get element => _name?.staticElement as ExecutableElement;
+  ExecutableElement get declaredElement =>
+      _name?.staticElement as ExecutableElement;
+
+  @deprecated
+  @override
+  ExecutableElement get element => declaredElement;
 
   @override
   Token get endToken => _body.endToken;
@@ -7682,6 +7758,111 @@ class MethodInvocationImpl extends InvocationExpressionImpl
     _methodName?.accept(visitor);
     _typeArguments?.accept(visitor);
     _argumentList?.accept(visitor);
+  }
+}
+
+/**
+ * The declaration of a mixin.
+ *
+ *    mixinDeclaration ::=
+ *        metadata? 'mixin' [SimpleIdentifier] [TypeParameterList]?
+ *        [RequiresClause]? [ImplementsClause]? '{' [ClassMember]* '}'
+ */
+class MixinDeclarationImpl extends ClassOrMixinDeclarationImpl
+    implements MixinDeclaration {
+  @override
+  Token mixinKeyword;
+
+  /**
+   * The on clause for the mixin, or `null` if the mixin does not have any
+   * super-class constraints.
+   */
+  OnClauseImpl _onClause;
+
+  /**
+   * Initialize a newly created mixin declaration. Either or both of the
+   * [comment] and [metadata] can be `null` if the mixin does not have the
+   * corresponding attribute. The [typeParameters] can be `null` if the mixin does not
+   * have any type parameters. Either or both of the [onClause],
+   * and [implementsClause] can be `null` if the mixin does not have the
+   * corresponding clause. The list of [members] can be `null` if the mixin does
+   * not have any members.
+   */
+  MixinDeclarationImpl(
+      CommentImpl comment,
+      List<Annotation> metadata,
+      this.mixinKeyword,
+      SimpleIdentifierImpl name,
+      TypeParameterListImpl typeParameters,
+      OnClauseImpl onClause,
+      ImplementsClauseImpl implementsClause,
+      Token leftBracket,
+      List<ClassMember> members,
+      Token rightBracket)
+      : super(comment, metadata, name, typeParameters, implementsClause,
+            leftBracket, members, rightBracket) {
+    _onClause = _becomeParentOf(onClause);
+  }
+
+  @override
+  Iterable<SyntacticEntity> get childEntities => super._childEntities
+    ..add(mixinKeyword)
+    ..add(_name)
+    ..add(_typeParameters)
+    ..add(_onClause)
+    ..add(_implementsClause)
+    ..add(leftBracket)
+    ..addAll(members)
+    ..add(rightBracket);
+
+  @override
+  ClassElement get declaredElement => _name?.staticElement as ClassElement;
+
+  @deprecated
+  @override
+  Element get element => declaredElement;
+
+  @override
+  Token get firstTokenAfterCommentAndMetadata {
+    return mixinKeyword;
+  }
+
+  @override
+  ImplementsClause get implementsClause => _implementsClause;
+
+  void set implementsClause(ImplementsClause implementsClause) {
+    _implementsClause =
+        _becomeParentOf(implementsClause as ImplementsClauseImpl);
+  }
+
+  @override
+  NodeList<ClassMember> get members => _members;
+
+  @override
+  OnClause get onClause => _onClause;
+
+  void set onClause(OnClause onClause) {
+    _onClause = _becomeParentOf(onClause as OnClauseImpl);
+  }
+
+  @override
+  TypeParameterList get typeParameters => _typeParameters;
+
+  void set typeParameters(TypeParameterList typeParameters) {
+    _typeParameters = _becomeParentOf(typeParameters as TypeParameterListImpl);
+  }
+
+  @override
+  E accept<E>(AstVisitor<E> visitor) => visitor.visitMixinDeclaration(this);
+
+  @override
+  void visitChildren(AstVisitor visitor) {
+    super.visitChildren(visitor);
+    _name?.accept(visitor);
+    _typeParameters?.accept(visitor);
+    _onClause?.accept(visitor);
+    _implementsClause?.accept(visitor);
+    members.accept(visitor);
   }
 }
 
@@ -8303,6 +8484,53 @@ class NullLiteralImpl extends LiteralImpl implements NullLiteral {
   @override
   void visitChildren(AstVisitor visitor) {
     // There are no children to visit.
+  }
+}
+
+/**
+ * The "on" clause in a mixin declaration.
+ *
+ *    onClause ::=
+ *        'on' [TypeName] (',' [TypeName])*
+ */
+class OnClauseImpl extends AstNodeImpl implements OnClause {
+  @override
+  Token onKeyword;
+
+  /**
+   * The classes are super-class constraints for the mixin.
+   */
+  NodeList<TypeName> _superclassConstraints;
+
+  /**
+   * Initialize a newly created on clause.
+   */
+  OnClauseImpl(this.onKeyword, List<TypeName> superclassConstraints) {
+    _superclassConstraints =
+        new NodeListImpl<TypeName>(this, superclassConstraints);
+  }
+
+  @override
+  Token get beginToken => onKeyword;
+
+  @override
+  // TODO(paulberry): add commas.
+  Iterable<SyntacticEntity> get childEntities => new ChildEntities()
+    ..add(onKeyword)
+    ..addAll(superclassConstraints);
+
+  @override
+  Token get endToken => _superclassConstraints.endToken;
+
+  @override
+  NodeList<TypeName> get superclassConstraints => _superclassConstraints;
+
+  @override
+  E accept<E>(AstVisitor<E> visitor) => visitor.visitOnClause(this);
+
+  @override
+  void visitChildren(AstVisitor visitor) {
+    _superclassConstraints.accept(visitor);
   }
 }
 
@@ -9214,7 +9442,10 @@ class SimpleFormalParameterImpl extends NormalFormalParameterImpl
   TypeAnnotationImpl _type;
 
   @override
-  ParameterElement element;
+  // TODO(brianwilkerson) This overrides a concrete implementation in which the
+  // element is assumed to be stored in the `identifier`, but there is no
+  // corresponding inherited setter. This seems inconsistent and error prone.
+  ParameterElement declaredElement;
 
   /**
    * Initialize a newly created formal parameter. Either or both of the
@@ -10344,6 +10575,10 @@ class TopLevelVariableDeclarationImpl extends CompilationUnitMemberImpl
       super._childEntities..add(_variableList)..add(semicolon);
 
   @override
+  Element get declaredElement => null;
+
+  @deprecated
+  @override
   Element get element => null;
 
   @override
@@ -10770,8 +11005,12 @@ class TypeParameterImpl extends DeclarationImpl implements TypeParameter {
       super._childEntities..add(_name)..add(extendsKeyword)..add(_bound);
 
   @override
-  TypeParameterElement get element =>
+  TypeParameterElement get declaredElement =>
       _name?.staticElement as TypeParameterElement;
+
+  @deprecated
+  @override
+  TypeParameterElement get element => declaredElement;
 
   @override
   Token get endToken {
@@ -11024,6 +11263,10 @@ class VariableDeclarationImpl extends DeclarationImpl
   Iterable<SyntacticEntity> get childEntities =>
       super._childEntities..add(_name)..add(equals)..add(_initializer);
 
+  @override
+  VariableElement get declaredElement =>
+      _name?.staticElement as VariableElement;
+
   /**
    * This overridden implementation of [documentationComment] looks in the
    * grandparent node for Dartdoc comments if no documentation is specifically
@@ -11041,8 +11284,9 @@ class VariableDeclarationImpl extends DeclarationImpl
     return comment;
   }
 
+  @deprecated
   @override
-  VariableElement get element => _name?.staticElement as VariableElement;
+  VariableElement get element => declaredElement;
 
   @override
   Token get endToken {

@@ -6,8 +6,8 @@ library vm.bytecode.assembler;
 
 import 'dart:typed_data';
 
-import 'package:vm/bytecode/dbc.dart';
-import 'package:vm/bytecode/exceptions.dart' show ExceptionsTable;
+import 'dbc.dart';
+import 'exceptions.dart' show ExceptionsTable;
 
 class Label {
   List<int> _jumps = <int>[];
@@ -174,6 +174,11 @@ class BytecodeAssembler {
     emitWord(_encodeT(Opcode.kJumpIfNoAsserts, label.jumpOperand(offset)));
   }
 
+  void emitJumpIfNotZeroTypeArgs(Label label) {
+    emitWord(
+        _encodeT(Opcode.kJumpIfNotZeroTypeArgs, label.jumpOperand(offset)));
+  }
+
   void patchJump(int pos, int rt) {
     final Opcode opcode = Opcode.values[_getOpcodeAt(pos)];
     assert(isJump(opcode));
@@ -232,12 +237,8 @@ class BytecodeAssembler {
     emitWord(_encodeAD(Opcode.kStaticCall, ra, rd));
   }
 
-  void emitInstanceCall1(int ra, int rd) {
-    emitWord(_encodeAD(Opcode.kInstanceCall1, ra, rd));
-  }
-
-  void emitInstanceCall2(int ra, int rd) {
-    emitWord(_encodeAD(Opcode.kInstanceCall2, ra, rd));
+  void emitInstanceCall(int ra, int rd) {
+    emitWord(_encodeAD(Opcode.kInstanceCall, ra, rd));
   }
 
   void emitInstanceCall1Opt(int ra, int rd) {
@@ -776,6 +777,14 @@ class BytecodeAssembler {
     emitWord(_encodeD(Opcode.kStoreFieldTOS, rd));
   }
 
+  void emitStoreContextParent() {
+    emitWord(_encode0(Opcode.kStoreContextParent));
+  }
+
+  void emitStoreContextVar(int rd) {
+    emitWord(_encodeD(Opcode.kStoreContextVar, rd));
+  }
+
   void emitLoadField(int ra, int rb, int rc) {
     emitWord(_encodeABC(Opcode.kLoadField, ra, rb, rc));
   }
@@ -790,6 +799,18 @@ class BytecodeAssembler {
 
   void emitLoadFieldTOS(int rd) {
     emitWord(_encodeD(Opcode.kLoadFieldTOS, rd));
+  }
+
+  void emitLoadTypeArgumentsField(int rd) {
+    emitWord(_encodeD(Opcode.kLoadTypeArgumentsField, rd));
+  }
+
+  void emitLoadContextParent() {
+    emitWord(_encode0(Opcode.kLoadContextParent));
+  }
+
+  void emitLoadContextVar(int rd) {
+    emitWord(_encodeD(Opcode.kLoadContextVar, rd));
   }
 
   void emitBooleanNegateTOS() {
@@ -926,6 +947,10 @@ class BytecodeAssembler {
 
   void emitDeoptRewind() {
     emitWord(_encode0(Opcode.kDeoptRewind));
+  }
+
+  void emitEntryFixed(int ra, int rd) {
+    emitWord(_encodeAD(Opcode.kEntryFixed, ra, rd));
   }
 
   void emitEntryOptional(int ra, int rb, int rc) {

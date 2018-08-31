@@ -12,8 +12,8 @@ import '../../../abstract_single_unit.dart';
 
 main() {
   defineReflectiveSuite(() {
-    defineReflectiveTests(_DeclarationCompletionTest);
     defineReflectiveTests(_ControlFlowCompletionTest);
+    defineReflectiveTests(_DeclarationCompletionTest);
     defineReflectiveTests(_DoCompletionTest);
     defineReflectiveTests(_ExpressionCompletionTest);
     defineReflectiveTests(_ForCompletionTest);

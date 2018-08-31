@@ -28,7 +28,6 @@ isolate/browser/*: Skip # TODO(ahe): Make dart:html available.
 js/*: Skip # TODO(ahe): Make dart:js available.
 
 [ $fasta ]
-isolate/compile_time_error_test/01: MissingCompileTimeError
 mirrors/deferred_constraints_constants_test/default_argument2: MissingCompileTimeError
 mirrors/generic_bounded_by_type_parameter_test/02: MissingCompileTimeError
 mirrors/generic_bounded_test/01: MissingCompileTimeError
@@ -40,7 +39,6 @@ mirrors/reflected_type_classes_test/02: MissingCompileTimeError
 mirrors/reflected_type_classes_test/03: MissingCompileTimeError
 mirrors/reflected_type_test/02: MissingCompileTimeError
 mirrors/reflected_type_test/03: MissingCompileTimeError
-mirrors/variable_is_const_test/01: MissingCompileTimeError
 
 [ $arch == simarm64 && $strong && ($compiler == dartk || $compiler == dartkb) ]
 isolate/mint_maker_test: Timeout # Please triage.
@@ -80,7 +78,6 @@ async/slow_consumer2_test: RuntimeError # Issue 31402 (Invocation arguments)
 async/stream_distinct_test: RuntimeError
 async/timer_not_available_test: RuntimeError
 html/*: SkipByDesign # dart:html not supported on VM.
-isolate/compile_time_error_test/01: Crash
 isolate/deferred_in_isolate2_test: Skip # Times out. Deferred loading kernel issue 28335.
 isolate/deferred_in_isolate_test: Skip # Times out. Deferred loading kernel issue 28335.
 isolate/issue_21398_parent_isolate2_test/01: Skip # Times out. Deferred loading kernel issue 28335.
@@ -113,9 +110,6 @@ mirrors/other_declarations_location_test: Crash # Issue 33325 (assertion error, 
 
 [ $mode == debug && $hot_reload_rollback && ($compiler == dartk || $compiler == dartkb) ]
 isolate/message3_test/constList_identical: Skip # Timeout
-
-[ $mode == debug && $strong && ($compiler == dartk || $compiler == dartkb) ]
-mirrors/variable_is_const_test/01: Crash # Issue 32326
 
 [ $runtime == vm && $checked && $strong && ($compiler == dartk || $compiler == dartkb) ]
 mirrors/redirecting_factory_different_type_test/01: MissingCompileTimeError # Issue 28424

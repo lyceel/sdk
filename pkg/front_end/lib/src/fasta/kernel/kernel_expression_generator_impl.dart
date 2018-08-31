@@ -17,11 +17,12 @@ part of 'kernel_expression_generator.dart';
 
 class ThisAccessGenerator extends KernelGenerator {
   final bool isInitializer;
+  final bool inFieldInitializer;
 
   final bool isSuper;
 
-  ThisAccessGenerator(
-      ExpressionGeneratorHelper helper, Token token, this.isInitializer,
+  ThisAccessGenerator(ExpressionGeneratorHelper helper, Token token,
+      this.isInitializer, this.inFieldInitializer,
       {this.isSuper: false})
       : super(helper, token);
 
@@ -34,7 +35,11 @@ class ThisAccessGenerator extends KernelGenerator {
 
   Expression buildSimpleRead() {
     if (!isSuper) {
-      return forest.thisExpression(token);
+      if (inFieldInitializer) {
+        return buildFieldInitializerError();
+      } else {
+        return forest.thisExpression(token);
+      }
     } else {
       return new SyntheticExpressionJudgment(helper.buildCompileTimeError(
           messageSuperAsExpression,
@@ -44,15 +49,13 @@ class ThisAccessGenerator extends KernelGenerator {
   }
 
   @override
-  Initializer buildFieldInitializer(Map<String, int> initializedFields) {
+  Expression buildFieldInitializerError() {
     String keyword = isSuper ? "super" : "this";
     int offset = offsetForToken(token);
-    return helper.buildInvalidInitializer(
-        helper.buildCompileTimeError(
-            templateThisOrSuperAccessInFieldInitializer.withArguments(keyword),
-            offset,
-            keyword.length),
-        offset);
+    return helper.buildCompileTimeErrorExpression(
+        templateThisOrSuperAccessInFieldInitializer.withArguments(keyword),
+        offset,
+        length: keyword.length);
   }
 
   buildPropertyAccess(
@@ -66,6 +69,9 @@ class ThisAccessGenerator extends KernelGenerator {
             messageInvalidUseOfNullAwareAccess, operatorOffset, 2);
       }
       return buildConstructorInitializer(offset, name, arguments);
+    }
+    if (inFieldInitializer && !isInitializer) {
+      return buildFieldInitializerError();
     }
     Member getter = helper.lookupInstanceMember(name, isSuper: isSuper);
     if (send is SendAccessGenerator) {
@@ -129,7 +135,8 @@ class ThisAccessGenerator extends KernelGenerator {
     }
   }
 
-  Expression buildAssignment(Expression value, {bool voidContext: false}) {
+  Expression buildAssignment(Expression value,
+      {bool voidContext: false, int offset: -1}) {
     return buildAssignmentError();
   }
 
@@ -163,10 +170,10 @@ class ThisAccessGenerator extends KernelGenerator {
   }
 
   Expression buildAssignmentError() {
-    String message =
-        isSuper ? "Can't assign to 'super'." : "Can't assign to 'this'.";
-    return helper.deprecated_buildCompileTimeError(
-        message, offsetForToken(token));
+    return helper.buildCompileTimeError(
+        isSuper ? messageCannotAssignToSuper : messageNotAnLvalue,
+        offsetForToken(token),
+        token.length);
   }
 
   @override
@@ -223,7 +230,7 @@ class IncompleteErrorGenerator extends IncompleteSendGenerator
 
   @override
   Expression buildSimpleRead() {
-    var error = buildError(forest.argumentsEmpty(token), isGetter: true);
+    var error = buildError(forest.argumentsEmpty(token, token), isGetter: true);
     return new InvalidPropertyGetJudgment(error, member)
       ..fileOffset = offsetForToken(token);
   }
@@ -254,7 +261,8 @@ class SendAccessGenerator extends IncompleteSendGenerator {
     return unsupported("buildSimpleRead", offsetForToken(token), uri);
   }
 
-  Expression buildAssignment(Expression value, {bool voidContext: false}) {
+  Expression buildAssignment(Expression value,
+      {bool voidContext: false, int offset: -1}) {
     return unsupported("buildAssignment", offsetForToken(token), uri);
   }
 
@@ -325,7 +333,8 @@ class IncompletePropertyAccessGenerator extends IncompleteSendGenerator {
     return unsupported("buildSimpleRead", offsetForToken(token), uri);
   }
 
-  Expression buildAssignment(Expression value, {bool voidContext: false}) {
+  Expression buildAssignment(Expression value,
+      {bool voidContext: false, int offset: -1}) {
     return unsupported("buildAssignment", offsetForToken(token), uri);
   }
 
@@ -367,6 +376,26 @@ class IncompletePropertyAccessGenerator extends IncompleteSendGenerator {
 
   Expression doInvocation(int offset, Arguments arguments) {
     return unsupported("doInvocation", offset, uri);
+  }
+}
+
+class KernelNonLValueGenerator extends KernelReadOnlyAccessGenerator {
+  KernelNonLValueGenerator(
+      ExpressionGeneratorHelper helper, Token token, Expression expression)
+      : super(helper, token, expression, null);
+
+  String get debugName => "KernelNonLValueGenerator";
+
+  @override
+  ComplexAssignmentJudgment startComplexAssignment(Expression rhs) {
+    return new IllegalAssignmentJudgment(rhs,
+        assignmentOffset: offsetForToken(token));
+  }
+
+  Expression makeInvalidWrite(Expression value) {
+    var error = helper.buildCompileTimeError(
+        messageNotAnLvalue, offsetForToken(token), lengthForToken(token));
+    return new InvalidWriteJudgment(error, expression);
   }
 }
 

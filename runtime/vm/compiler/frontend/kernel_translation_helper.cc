@@ -1607,17 +1607,18 @@ InferredTypeMetadata InferredTypeMetadataHelper::GetInferredType(
     intptr_t node_offset) {
   const intptr_t md_offset = GetNextMetadataPayloadOffset(node_offset);
   if (md_offset < 0) {
-    return InferredTypeMetadata(kDynamicCid, true);
+    return InferredTypeMetadata(kDynamicCid,
+                                InferredTypeMetadata::kFlagNullable);
   }
 
   AlternativeReadingScope alt(&helper_->reader_, &H.metadata_payloads(),
                               md_offset);
 
   const NameIndex kernel_name = helper_->ReadCanonicalNameReference();
-  const bool nullable = helper_->ReadBool();
+  const uint8_t flags = helper_->ReadByte();
 
   if (H.IsRoot(kernel_name)) {
-    return InferredTypeMetadata(kDynamicCid, nullable);
+    return InferredTypeMetadata(kDynamicCid, flags);
   }
 
   const Class& klass =
@@ -1631,7 +1632,7 @@ InferredTypeMetadata InferredTypeMetadataHelper::GetInferredType(
     cid = kDynamicCid;
   }
 
-  return InferredTypeMetadata(cid, nullable);
+  return InferredTypeMetadata(cid, flags);
 }
 
 ProcedureAttributesMetadataHelper::ProcedureAttributesMetadataHelper(
@@ -1665,6 +1666,34 @@ ProcedureAttributesMetadata
 ProcedureAttributesMetadataHelper::GetProcedureAttributes(
     intptr_t node_offset) {
   ProcedureAttributesMetadata metadata;
+  ReadMetadata(node_offset, &metadata);
+  return metadata;
+}
+
+CallSiteAttributesMetadataHelper::CallSiteAttributesMetadataHelper(
+    KernelReaderHelper* helper,
+    TypeTranslator* type_translator)
+    : MetadataHelper(helper, tag(), /* precompiler_only = */ false),
+      type_translator_(*type_translator) {}
+
+bool CallSiteAttributesMetadataHelper::ReadMetadata(
+    intptr_t node_offset,
+    CallSiteAttributesMetadata* metadata) {
+  intptr_t md_offset = GetNextMetadataPayloadOffset(node_offset);
+  if (md_offset < 0) {
+    return false;
+  }
+
+  AlternativeReadingScope alt(&helper_->reader_, &H.metadata_payloads(),
+                              md_offset);
+
+  metadata->receiver_type = &type_translator_.BuildType();
+  return true;
+}
+
+CallSiteAttributesMetadata
+CallSiteAttributesMetadataHelper::GetCallSiteAttributes(intptr_t node_offset) {
+  CallSiteAttributesMetadata metadata;
   ReadMetadata(node_offset, &metadata);
   return metadata;
 }
@@ -1886,8 +1915,6 @@ void KernelReaderHelper::SkipFunctionType(bool simple) {
       SkipDartType();  // read named_parameters[i].type.
     }
   }
-
-  SkipListOfStrings();  // read positional parameter names.
 
   if (!simple) {
     SkipCanonicalNameReference();  // read typedef reference.
@@ -2377,13 +2404,16 @@ void KernelReaderHelper::SkipLibraryPart() {
 }
 
 void KernelReaderHelper::SkipLibraryTypedef() {
-  SkipCanonicalNameReference();  // read canonical name.
-  ReadUInt();                    // read source_uri_index.
-  ReadPosition();                // read position.
-  SkipStringReference();         // read name index.
-  SkipListOfExpressions();       // read annotations.
-  SkipTypeParametersList();      // read type parameters.
-  SkipDartType();                // read type.
+  SkipCanonicalNameReference();      // read canonical name.
+  ReadUInt();                        // read source_uri_index.
+  ReadPosition();                    // read position.
+  SkipStringReference();             // read name index.
+  SkipListOfExpressions();           // read annotations.
+  SkipTypeParametersList();          // read type parameters.
+  SkipDartType();                    // read type.
+  SkipTypeParametersList();          // read type parameters of function type.
+  SkipListOfVariableDeclarations();  // read positional parameters.
+  SkipListOfVariableDeclarations();  // read named parameters.
 }
 
 TokenPosition KernelReaderHelper::ReadPosition(bool record) {
@@ -2763,8 +2793,6 @@ void TypeTranslator::BuildFunctionType(bool simple) {
     }
   }
 
-  helper_->SkipListOfStrings();  // read positional parameter names.
-
   if (!simple) {
     helper_->SkipCanonicalNameReference();  // read typedef reference.
   }
@@ -2841,6 +2869,10 @@ void TypeTranslator::BuildTypeParameterType() {
           result_ ^=
               TypeArguments::Handle(Z, active_class_->member->type_parameters())
                   .TypeAt(parameter_index);
+          if (finalize_) {
+            result_ =
+                ClassFinalizer::FinalizeType(*active_class_->klass, result_);
+          }
         } else {
           result_ ^= Type::DynamicType();
         }
@@ -2857,6 +2889,9 @@ void TypeTranslator::BuildTypeParameterType() {
             active_class_->local_type_parameters->TypeAt(parameter_index);
       } else {
         result_ ^= Type::DynamicType();
+      }
+      if (finalize_) {
+        result_ = ClassFinalizer::FinalizeType(*active_class_->klass, result_);
       }
       return;
     }

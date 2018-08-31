@@ -24,13 +24,13 @@ abstract class ParserAdapter implements Parser {
   final AstBuilder astBuilder;
 
   ParserAdapter(this.currentToken, ErrorReporter errorReporter, Uri fileUri,
-      {bool allowNativeClause: false, bool enableGenericMethodComments: false})
+      {bool allowNativeClause: false})
       : fastaParser = new fasta.Parser(null),
         astBuilder = new AstBuilder(errorReporter, fileUri, true) {
+    fastaParser.isMixinSupportEnabled = true;
     fastaParser.listener = astBuilder;
     astBuilder.parser = fastaParser;
     astBuilder.allowNativeClause = allowNativeClause;
-    astBuilder.parseGenericMethodComments = enableGenericMethodComments;
   }
 
   @override
@@ -50,11 +50,18 @@ abstract class ParserAdapter implements Parser {
   }
 
   @override
-  bool get parseGenericMethodComments => astBuilder.parseGenericMethodComments;
+  set parseGenericMethods(_) {}
 
-  @override
-  set parseGenericMethodComments(bool value) {
-    astBuilder.parseGenericMethodComments = value;
+  /// Append the given token to the end of the token stream,
+  /// and update the token's offset.
+  appendToken(Token token, Token newToken) {
+    while (!token.next.isEof) {
+      token = token.next;
+    }
+    newToken
+      ..offset = token.end
+      ..setNext(token.next);
+    token.setNext(newToken);
   }
 
   @override
@@ -66,6 +73,18 @@ abstract class ParserAdapter implements Parser {
         .parseMetadata(fastaParser.syntheticPreviousToken(currentToken))
         .next;
     return astBuilder.pop();
+  }
+
+  @override
+  Expression parseArgument() {
+    currentToken = new SimpleToken(TokenType.OPEN_PAREN, 0)
+      ..setNext(currentToken);
+    appendToken(currentToken, new SimpleToken(TokenType.CLOSE_PAREN, 0));
+    currentToken = fastaParser
+        .parseArguments(fastaParser.syntheticPreviousToken(currentToken))
+        .next;
+    MethodInvocation invocation = astBuilder.pop();
+    return invocation.argumentList.arguments[0];
   }
 
   @override
@@ -107,7 +126,7 @@ abstract class ParserAdapter implements Parser {
       <ClassMember>[],
       null /* rightBracket */,
     );
-    currentToken = fastaParser.parseClassMember(currentToken);
+    currentToken = fastaParser.parseClassOrMixinMember(currentToken);
     ClassDeclaration declaration = astBuilder.classDeclaration;
     astBuilder.classDeclaration = null;
     return declaration.members.isNotEmpty ? declaration.members[0] : null;
@@ -339,18 +358,6 @@ abstract class ParserAdapter implements Parser {
 
   @override
   Expression parseUnaryExpression() => parseExpression2();
-
-  /// Append the given token to the end of the token stream,
-  /// and update the token's offset.
-  appendToken(Token token, Token newToken) {
-    while (!token.next.isEof) {
-      token = token.next;
-    }
-    newToken
-      ..offset = token.end
-      ..setNext(token.next);
-    token.setNext(newToken);
-  }
 }
 
 /**

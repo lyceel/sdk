@@ -20,8 +20,8 @@
 #include "vm/deopt_instructions.h"
 #include "vm/flags.h"
 #include "vm/heap/heap.h"
+#include "vm/heap/pointer_block.h"
 #include "vm/heap/safepoint.h"
-#include "vm/heap/store_buffer.h"
 #include "vm/heap/verifier.h"
 #include "vm/image_snapshot.h"
 #include "vm/interpreter.h"
@@ -643,7 +643,7 @@ MessageHandler::MessageStatus IsolateMessageHandler::HandleMessage(
 
 #ifndef PRODUCT
 void IsolateMessageHandler::NotifyPauseOnStart() {
-  if (!FLAG_support_service) {
+  if (!FLAG_support_service || Isolate::IsVMInternalIsolate(I)) {
     return;
   }
   if (Service::debug_stream.enabled() || FLAG_warn_on_pause_with_no_debugger) {
@@ -659,7 +659,7 @@ void IsolateMessageHandler::NotifyPauseOnStart() {
 }
 
 void IsolateMessageHandler::NotifyPauseOnExit() {
-  if (!FLAG_support_service) {
+  if (!FLAG_support_service || Isolate::IsVMInternalIsolate(I)) {
     return;
   }
   if (Service::debug_stream.enabled() || FLAG_warn_on_pause_with_no_debugger) {
@@ -929,6 +929,7 @@ Isolate::Isolate(const Dart_IsolateFlags& api_flags)
       tag_table_(GrowableObjectArray::null()),
       deoptimized_code_array_(GrowableObjectArray::null()),
       sticky_error_(Error::null()),
+      reloaded_kernel_blobs_(GrowableObjectArray::null()),
       next_(NULL),
       loading_invalidation_gen_(kInvalidGen),
       top_level_parsing_count_(0),
@@ -1054,10 +1055,17 @@ Isolate* Isolate::Init(const char* name_prefix,
 #undef ISOLATE_METRIC_INIT
 #endif  // !defined(PRODUCT)
 
-  bool is_service_or_kernel_isolate = ServiceIsolate::NameEquals(name_prefix);
+  bool is_service_or_kernel_isolate = false;
+  if (ServiceIsolate::NameEquals(name_prefix)) {
+    ASSERT(!ServiceIsolate::Exists());
+    is_service_or_kernel_isolate = true;
+  }
 #if !defined(DART_PRECOMPILED_RUNTIME)
-  is_service_or_kernel_isolate =
-      is_service_or_kernel_isolate || KernelIsolate::NameEquals(name_prefix);
+  if (KernelIsolate::NameEquals(name_prefix)) {
+    ASSERT(!KernelIsolate::Exists());
+    KernelIsolate::SetKernelIsolate(result);
+    is_service_or_kernel_isolate = true;
+  }
 #endif  // !defined(DART_PRECOMPILED_RUNTIME)
 
   Heap::Init(result,
@@ -1121,11 +1129,25 @@ Isolate* Isolate::Init(const char* name_prefix,
   if (!AddIsolateToList(result)) {
     result->LowLevelShutdown();
     Thread::ExitIsolate();
+    if (KernelIsolate::IsKernelIsolate(result)) {
+      KernelIsolate::SetKernelIsolate(NULL);
+    }
+    if (ServiceIsolate::IsServiceIsolate(result)) {
+      ServiceIsolate::SetServiceIsolate(NULL);
+    }
     delete result;
     return NULL;
   }
 
   return result;
+}
+
+void Isolate::RetainKernelBlob(const ExternalTypedData& kernel_blob) {
+  if (reloaded_kernel_blobs_ == Object::null()) {
+    reloaded_kernel_blobs_ = GrowableObjectArray::New();
+  }
+  auto& kernel_blobs = GrowableObjectArray::Handle(reloaded_kernel_blobs_);
+  kernel_blobs.Add(kernel_blob);
 }
 
 Thread* Isolate::mutator_thread() const {
@@ -1212,7 +1234,7 @@ void Isolate::DoneLoading() {
 
 #if !defined(PRODUCT) && !defined(DART_PRECOMPILED_RUNTIME)
 bool Isolate::CanReload() const {
-  return !ServiceIsolate::IsServiceIsolateDescendant(this) && is_runnable() &&
+  return !Isolate::IsVMInternalIsolate(this) && is_runnable() &&
          !IsReloading() &&
          (AtomicOperations::LoadRelaxed(&no_reload_scope_depth_) == 0) &&
          IsolateCreationEnabled() &&
@@ -1266,7 +1288,7 @@ const char* Isolate::MakeRunnable() {
   ASSERT(object_store()->root_library() != Library::null());
   set_is_runnable(true);
 #ifndef PRODUCT
-  if (!ServiceIsolate::IsServiceIsolate(this)) {
+  if (!Isolate::IsVMInternalIsolate(this)) {
     debugger()->OnIsolateRunnable();
     if (FLAG_pause_isolates_on_unhandled_exceptions) {
       debugger()->SetExceptionPauseInfo(kPauseOnUnhandledExceptions);
@@ -1288,7 +1310,8 @@ const char* Isolate::MakeRunnable() {
       event->Complete();
     }
   }
-  if (FLAG_support_service && Service::isolate_stream.enabled()) {
+  if (FLAG_support_service && !Isolate::IsVMInternalIsolate(this) &&
+      Service::isolate_stream.enabled()) {
     ServiceEvent runnableEvent(this, ServiceEvent::kIsolateRunnable);
     Service::HandleEvent(&runnableEvent);
   }
@@ -1824,8 +1847,7 @@ void Isolate::Shutdown() {
 
     // Write compiler stats data if enabled.
     if (FLAG_support_compiler_stats && FLAG_compiler_stats &&
-        !ServiceIsolate::IsServiceIsolateDescendant(this) &&
-        (this != Dart::vm_isolate())) {
+        !Isolate::IsVMInternalIsolate(this)) {
       OS::PrintErr("%s", aggregate_compiler_stats()->PrintToZone());
     }
   }
@@ -1833,6 +1855,14 @@ void Isolate::Shutdown() {
   // Remove this isolate from the list *before* we start tearing it down, to
   // avoid exposing it in a state of decay.
   RemoveIsolateFromList(this);
+
+  {
+    // After removal from isolate list. Before tearing down the heap.
+    StackZone zone(thread);
+    HandleScope handle_scope(thread);
+    ServiceIsolate::SendIsolateShutdownMessage();
+    KernelIsolate::NotifyAboutIsolateShutdown(this);
+  }
 
   if (heap_ != NULL) {
     // Wait for any concurrent GC tasks to finish before shutting down.
@@ -1845,9 +1875,8 @@ void Isolate::Shutdown() {
   }
 
 #if !defined(PRODUCT) && !defined(DART_PRECOMPILED_RUNTIME)
-  if (FLAG_check_reloaded && is_runnable() && (this != Dart::vm_isolate()) &&
-      !KernelIsolate::IsKernelIsolate(this) &&
-      !ServiceIsolate::IsServiceIsolateDescendant(this)) {
+  if (FLAG_check_reloaded && is_runnable() &&
+      !Isolate::IsVMInternalIsolate(this)) {
     if (!HasAttemptedReload()) {
       FATAL(
           "Isolate did not reload before exiting and "
@@ -1855,9 +1884,6 @@ void Isolate::Shutdown() {
     }
   }
 
-  // TODO(33514): Ideally this should be moved to Dart_ShutdownIsolate,
-  // next to ServiceIsolate::SendIsolateShutdownMessage().
-  KernelIsolate::NotifyAboutIsolateShutdown(Isolate::Current());
 #endif  // !defined(PRODUCT) && !defined(DART_PRECOMPILED_RUNTIME)
 
   // Then, proceed with low-level teardown.
@@ -1916,6 +1942,7 @@ void Isolate::VisitObjectPointers(ObjectPointerVisitor* visitor,
   visitor->VisitPointer(
       reinterpret_cast<RawObject**>(&deoptimized_code_array_));
   visitor->VisitPointer(reinterpret_cast<RawObject**>(&sticky_error_));
+  visitor->VisitPointer(reinterpret_cast<RawObject**>(&reloaded_kernel_blobs_));
 #if !defined(PRODUCT)
   visitor->VisitPointer(
       reinterpret_cast<RawObject**>(&pending_service_extension_calls_));
@@ -2412,7 +2439,7 @@ void Isolate::AppendServiceExtensionCall(const Instance& closure,
 // done atomically.
 void Isolate::RegisterServiceExtensionHandler(const String& name,
                                               const Instance& closure) {
-  if (!FLAG_support_service) {
+  if (!FLAG_support_service || Isolate::IsVMInternalIsolate(this)) {
     return;
   }
   GrowableObjectArray& handlers =
@@ -2605,7 +2632,7 @@ bool Isolate::IsolateCreationEnabled() {
   return creation_enabled_;
 }
 
-bool Isolate::IsVMInternalIsolate(Isolate* isolate) {
+bool Isolate::IsVMInternalIsolate(const Isolate* isolate) {
   return (isolate == Dart::vm_isolate()) ||
          ServiceIsolate::IsServiceIsolateDescendant(isolate) ||
          KernelIsolate::IsKernelIsolate(isolate);
@@ -2743,7 +2770,8 @@ Thread* Isolate::ScheduleThread(bool is_mutator, bool bypass_safepoint) {
     thread->set_os_thread(os_thread);
     ASSERT(thread->execution_state() == Thread::kThreadInNative);
     thread->set_execution_state(Thread::kThreadInVM);
-    thread->set_safepoint_state(0);
+    thread->set_safepoint_state(
+        Thread::SetBypassSafepoints(bypass_safepoint, 0));
     thread->set_vm_tag(VMTag::kVMTagId);
     ASSERT(thread->no_safepoint_scope_depth() == 0);
     os_thread->set_thread(thread);

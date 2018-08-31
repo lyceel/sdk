@@ -450,6 +450,13 @@ class _DispatchableInvocation extends _Invocation {
         }
         _getReceiverTypeBuilder(targets, kNoSuchMethodMarker)
             .addConcreteType(receiver);
+      } else if (selector is DynamicSelector) {
+        if (kPrintTrace) {
+          tracePrint(
+              "Dynamic selector - adding noSuchMethod for receiver $receiver");
+        }
+        _getReceiverTypeBuilder(targets, kNoSuchMethodMarker)
+            .addConcreteType(receiver);
       } else {
         if (kPrintTrace) {
           tracePrint("Target is not found for receiver $receiver");
@@ -1180,7 +1187,7 @@ class TypeFlowAnalysis implements EntryPointsListener, CallHandler {
 
   TypeFlowAnalysis(Component component, CoreTypes coreTypes,
       ClosedWorldClassHierarchy hierarchy, this.environment, this.libraryIndex,
-      {List<String> entryPointsJSONFiles})
+      {List<String> entryPointsJSONFiles, EntryPointsAnnotationMatcher matcher})
       : nativeCodeOracle = new NativeCodeOracle(libraryIndex) {
     hierarchyCache = new _ClassHierarchyCache(this, hierarchy);
     summaryCollector =
@@ -1192,7 +1199,10 @@ class TypeFlowAnalysis implements EntryPointsListener, CallHandler {
       nativeCodeOracle.processEntryPointsJSONFiles(entryPointsJSONFiles, this);
     }
 
-    component.accept(new PragmaEntryPointsVisitor(coreTypes, this));
+    matcher ??= new ConstantEntryPointsAnnotationMatcher(coreTypes);
+
+    component
+        .accept(new PragmaEntryPointsVisitor(this, nativeCodeOracle, matcher));
   }
 
   _Invocation get currentInvocation => workList.callStack.last;

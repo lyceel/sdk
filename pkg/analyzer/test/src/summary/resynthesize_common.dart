@@ -285,12 +285,22 @@ abstract class AbstractResynthesizeTest extends AbstractSingleUnitTest {
     expect(resynthesized.source, original.source);
     expect(resynthesized.librarySource, original.librarySource);
     compareLineInfo(resynthesized.lineInfo, original.lineInfo);
+
     expect(resynthesized.types.length, original.types.length,
         reason: '$desc.types.length');
     for (int i = 0; i < resynthesized.types.length; i++) {
       compareClassElements(
           resynthesized.types[i], original.types[i], original.types[i].name);
     }
+
+    // TODO(scheglov) Uncomment once the tasks based implementation is ready.
+//    expect(resynthesized.mixins.length, original.mixins.length,
+//        reason: '$desc.mixins.length');
+//    for (int i = 0; i < resynthesized.mixins.length; i++) {
+//      compareClassElements(
+//          resynthesized.mixins[i], original.mixins[i], original.mixins[i].name);
+//    }
+
     expect(resynthesized.topLevelVariables.length,
         original.topLevelVariables.length,
         reason: '$desc.topLevelVariables.length');
@@ -1979,6 +1989,72 @@ class C {
 ''');
   }
 
+  test_class_documented_withMetadata() async {
+    var library = await checkLibrary('''
+/// Comment 1
+/// Comment 2
+@Annotation()
+class BeforeMeta {}
+
+/// Comment 1
+/// Comment 2
+@Annotation.named()
+class BeforeMetaNamed {}
+
+@Annotation()
+/// Comment 1
+/// Comment 2
+class AfterMeta {}
+
+/// Comment 1
+@Annotation()
+/// Comment 2
+class AroundMeta {}
+
+/// Doc comment.
+@Annotation()
+// Not doc comment.
+class DocBeforeMetaNotDocAfter {}
+
+class Annotation {
+  const Annotation();
+  const Annotation.named();
+}
+''');
+    checkElementText(
+        library,
+        r'''
+/// Comment 1
+/// Comment 2
+@Annotation()
+class BeforeMeta {
+}
+/// Comment 1
+/// Comment 2
+@Annotation.named()
+class BeforeMetaNamed {
+}
+/// Comment 1
+/// Comment 2
+@Annotation()
+class AfterMeta {
+}
+/// Comment 2
+@Annotation()
+class AroundMeta {
+}
+/// Doc comment.
+@Annotation()
+class DocBeforeMetaNotDocAfter {
+}
+class Annotation {
+  const Annotation();
+  const Annotation.named();
+}
+''',
+        withConstElements: false);
+  }
+
   test_class_field_const() async {
     var library = await checkLibrary('class C { static const int i = 0; }');
     checkElementText(library, r'''
@@ -2476,6 +2552,562 @@ unit: a.dart
 final dynamic f;
 ''');
     }
+  }
+
+  test_codeRange_class() async {
+    var library = await checkLibrary('''
+class Raw {}
+
+/// Comment 1.
+/// Comment 2.
+class HasDocComment {}
+
+@Object()
+class HasAnnotation {}
+
+@Object()
+/// Comment 1.
+/// Comment 2.
+class AnnotationThenComment {}
+
+/// Comment 1.
+/// Comment 2.
+@Object()
+class CommentThenAnnotation {}
+
+/// Comment 1.
+@Object()
+/// Comment 2.
+class CommentAroundAnnotation {}
+''');
+    checkElementText(
+        library,
+        r'''
+class Raw/*codeOffset=0, codeLength=12*/ {
+}
+/// Comment 1.
+/// Comment 2.
+class HasDocComment/*codeOffset=14, codeLength=52*/ {
+}
+@Object()
+class HasAnnotation/*codeOffset=68, codeLength=32*/ {
+}
+/// Comment 1.
+/// Comment 2.
+@Object()
+class AnnotationThenComment/*codeOffset=102, codeLength=70*/ {
+}
+/// Comment 1.
+/// Comment 2.
+@Object()
+class CommentThenAnnotation/*codeOffset=174, codeLength=70*/ {
+}
+/// Comment 2.
+@Object()
+class CommentAroundAnnotation/*codeOffset=261, codeLength=57*/ {
+}
+''',
+        withCodeRanges: true,
+        withConstElements: false);
+  }
+
+  test_codeRange_class_namedMixin() async {
+    var library = await checkLibrary('''
+class A {}
+
+class B {}
+    
+class Raw = Object with A, B;
+
+/// Comment 1.
+/// Comment 2.
+class HasDocComment = Object with A, B;
+
+@Object()
+class HasAnnotation = Object with A, B;
+
+@Object()
+/// Comment 1.
+/// Comment 2.
+class AnnotationThenComment = Object with A, B;
+
+/// Comment 1.
+/// Comment 2.
+@Object()
+class CommentThenAnnotation = Object with A, B;
+
+/// Comment 1.
+@Object()
+/// Comment 2.
+class CommentAroundAnnotation = Object with A, B;
+''');
+    checkElementText(
+        library,
+        r'''
+class A/*codeOffset=0, codeLength=10*/ {
+}
+class B/*codeOffset=12, codeLength=10*/ {
+}
+class alias Raw/*codeOffset=28, codeLength=29*/ extends Object with A, B {
+  synthetic Raw() = Object;
+}
+/// Comment 1.
+/// Comment 2.
+class alias HasDocComment/*codeOffset=59, codeLength=69*/ extends Object with A, B {
+  synthetic HasDocComment() = Object;
+}
+@Object()
+class alias HasAnnotation/*codeOffset=130, codeLength=49*/ extends Object with A, B {
+  synthetic HasAnnotation() = Object;
+}
+/// Comment 1.
+/// Comment 2.
+@Object()
+class alias AnnotationThenComment/*codeOffset=181, codeLength=87*/ extends Object with A, B {
+  synthetic AnnotationThenComment() = Object;
+}
+/// Comment 1.
+/// Comment 2.
+@Object()
+class alias CommentThenAnnotation/*codeOffset=270, codeLength=87*/ extends Object with A, B {
+  synthetic CommentThenAnnotation() = Object;
+}
+/// Comment 2.
+@Object()
+class alias CommentAroundAnnotation/*codeOffset=374, codeLength=74*/ extends Object with A, B {
+  synthetic CommentAroundAnnotation() = Object;
+}
+''',
+        withCodeRanges: true,
+        withConstElements: false);
+  }
+
+  test_codeRange_constructor() async {
+    var library = await checkLibrary('''
+class C {
+  C();
+
+  C.raw() {}
+
+  /// Comment 1.
+  /// Comment 2.
+  C.hasDocComment() {}
+
+  @Object()
+  C.hasAnnotation() {}
+
+  @Object()
+  /// Comment 1.
+  /// Comment 2.
+  C.annotationThenComment() {}
+
+  /// Comment 1.
+  /// Comment 2.
+  @Object()
+  C.commentThenAnnotation() {}
+
+  /// Comment 1.
+  @Object()
+  /// Comment 2.
+  C.commentAroundAnnotation() {}
+}
+''');
+    checkElementText(
+        library,
+        r'''
+class C/*codeOffset=0, codeLength=362*/ {
+  C/*codeOffset=12, codeLength=4*/();
+  C.raw/*codeOffset=20, codeLength=10*/();
+  /// Comment 1.
+  /// Comment 2.
+  C.hasDocComment/*codeOffset=34, codeLength=54*/();
+  @Object()
+  C.hasAnnotation/*codeOffset=92, codeLength=32*/();
+  /// Comment 1.
+  /// Comment 2.
+  @Object()
+  C.annotationThenComment/*codeOffset=128, codeLength=74*/();
+  /// Comment 1.
+  /// Comment 2.
+  @Object()
+  C.commentThenAnnotation/*codeOffset=206, codeLength=74*/();
+  /// Comment 2.
+  @Object()
+  C.commentAroundAnnotation/*codeOffset=301, codeLength=59*/();
+}
+''',
+        withCodeRanges: true,
+        withConstElements: false);
+  }
+
+  test_codeRange_constructor_factory() async {
+    var library = await checkLibrary('''
+class C {
+  factory C() => null;
+
+  factory C.raw() => null;
+
+  /// Comment 1.
+  /// Comment 2.
+  factory C.hasDocComment() => null;
+
+  @Object()
+  factory C.hasAnnotation() => null;
+
+  @Object()
+  /// Comment 1.
+  /// Comment 2.
+  factory C.annotationThenComment() => null;
+
+  /// Comment 1.
+  /// Comment 2.
+  @Object()
+  factory C.commentThenAnnotation() => null;
+
+  /// Comment 1.
+  @Object()
+  /// Comment 2.
+  factory C.commentAroundAnnotation() => null;
+}
+''');
+    checkElementText(
+        library,
+        r'''
+class C/*codeOffset=0, codeLength=462*/ {
+  factory C/*codeOffset=12, codeLength=20*/();
+  factory C.raw/*codeOffset=36, codeLength=24*/();
+  /// Comment 1.
+  /// Comment 2.
+  factory C.hasDocComment/*codeOffset=64, codeLength=68*/();
+  @Object()
+  factory C.hasAnnotation/*codeOffset=136, codeLength=46*/();
+  /// Comment 1.
+  /// Comment 2.
+  @Object()
+  factory C.annotationThenComment/*codeOffset=186, codeLength=88*/();
+  /// Comment 1.
+  /// Comment 2.
+  @Object()
+  factory C.commentThenAnnotation/*codeOffset=278, codeLength=88*/();
+  /// Comment 2.
+  @Object()
+  factory C.commentAroundAnnotation/*codeOffset=387, codeLength=73*/();
+}
+''',
+        withCodeRanges: true,
+        withConstElements: false);
+  }
+
+  test_codeRange_field() async {
+    var library = await checkLibrary('''
+class C {
+  int withInit = 1;
+
+  int withoutInit;
+
+  int multiWithInit = 2, multiWithoutInit, multiWithInit2 = 3; 
+}
+''');
+    checkElementText(
+        library,
+        r'''
+class C/*codeOffset=0, codeLength=116*/ {
+  int withInit/*codeOffset=12, codeLength=16*/;
+  int withoutInit/*codeOffset=33, codeLength=15*/;
+  int multiWithInit/*codeOffset=53, codeLength=21*/;
+  int multiWithoutInit/*codeOffset=76, codeLength=16*/;
+  int multiWithInit2/*codeOffset=94, codeLength=18*/;
+}
+''',
+        withCodeRanges: true,
+        withConstElements: false);
+  }
+
+  test_codeRange_field_annotations() async {
+    var library = await checkLibrary('''
+class C {
+  /// Comment 1.
+  /// Comment 2.
+  int hasDocComment, hasDocComment2;
+
+  @Object()
+  int hasAnnotation, hasAnnotation2;
+
+  @Object()
+  /// Comment 1.
+  /// Comment 2.
+  int annotationThenComment, annotationThenComment2;
+
+  /// Comment 1.
+  /// Comment 2.
+  @Object()
+  int commentThenAnnotation, commentThenAnnotation2;
+
+  /// Comment 1.
+  @Object()
+  /// Comment 2.
+  int commentAroundAnnotation, commentAroundAnnotation2;
+}
+''');
+    checkElementText(
+        library,
+        r'''
+class C/*codeOffset=0, codeLength=436*/ {
+  /// Comment 1.
+  /// Comment 2.
+  int hasDocComment/*codeOffset=12, codeLength=51*/;
+  /// Comment 1.
+  /// Comment 2.
+  int hasDocComment2/*codeOffset=65, codeLength=14*/;
+  @Object()
+  int hasAnnotation/*codeOffset=84, codeLength=29*/;
+  @Object()
+  int hasAnnotation2/*codeOffset=115, codeLength=14*/;
+  /// Comment 1.
+  /// Comment 2.
+  @Object()
+  int annotationThenComment/*codeOffset=134, codeLength=71*/;
+  /// Comment 1.
+  /// Comment 2.
+  @Object()
+  int annotationThenComment2/*codeOffset=207, codeLength=22*/;
+  /// Comment 1.
+  /// Comment 2.
+  @Object()
+  int commentThenAnnotation/*codeOffset=234, codeLength=71*/;
+  /// Comment 1.
+  /// Comment 2.
+  @Object()
+  int commentThenAnnotation2/*codeOffset=307, codeLength=22*/;
+  /// Comment 2.
+  @Object()
+  int commentAroundAnnotation/*codeOffset=351, codeLength=56*/;
+  /// Comment 2.
+  @Object()
+  int commentAroundAnnotation2/*codeOffset=409, codeLength=24*/;
+}
+''',
+        withCodeRanges: true,
+        withConstElements: false);
+  }
+
+  test_codeRange_function() async {
+    var library = await checkLibrary('''
+void raw() {}
+
+/// Comment 1.
+/// Comment 2.
+void hasDocComment() {}
+
+@Object()
+void hasAnnotation() {}
+
+@Object()
+/// Comment 1.
+/// Comment 2.
+void annotationThenComment() {}
+
+/// Comment 1.
+/// Comment 2.
+@Object()
+void commentThenAnnotation() {}
+
+/// Comment 1.
+@Object()
+/// Comment 2.
+void commentAroundAnnotation() {}
+''');
+    checkElementText(
+        library,
+        r'''
+void raw/*codeOffset=0, codeLength=13*/() {}
+/// Comment 1.
+/// Comment 2.
+void hasDocComment/*codeOffset=15, codeLength=53*/() {}
+@Object()
+void hasAnnotation/*codeOffset=70, codeLength=33*/() {}
+/// Comment 1.
+/// Comment 2.
+@Object()
+void annotationThenComment/*codeOffset=105, codeLength=71*/() {}
+/// Comment 1.
+/// Comment 2.
+@Object()
+void commentThenAnnotation/*codeOffset=178, codeLength=71*/() {}
+/// Comment 2.
+@Object()
+void commentAroundAnnotation/*codeOffset=266, codeLength=58*/() {}
+''',
+        withCodeRanges: true,
+        withConstElements: false);
+  }
+
+  test_codeRange_method() async {
+    var library = await checkLibrary('''
+class C {
+  void raw() {}
+
+  /// Comment 1.
+  /// Comment 2.
+  void hasDocComment() {}
+
+  @Object()
+  void hasAnnotation() {}
+
+  @Object()
+  /// Comment 1.
+  /// Comment 2.
+  void annotationThenComment() {}
+
+  /// Comment 1.
+  /// Comment 2.
+  @Object()
+  void commentThenAnnotation() {}
+
+  /// Comment 1.
+  @Object()
+  /// Comment 2.
+  void commentAroundAnnotation() {}
+}
+''');
+    checkElementText(
+        library,
+        r'''
+class C/*codeOffset=0, codeLength=372*/ {
+  void raw/*codeOffset=12, codeLength=13*/() {}
+  /// Comment 1.
+  /// Comment 2.
+  void hasDocComment/*codeOffset=29, codeLength=57*/() {}
+  @Object()
+  void hasAnnotation/*codeOffset=90, codeLength=35*/() {}
+  /// Comment 1.
+  /// Comment 2.
+  @Object()
+  void annotationThenComment/*codeOffset=129, codeLength=77*/() {}
+  /// Comment 1.
+  /// Comment 2.
+  @Object()
+  void commentThenAnnotation/*codeOffset=210, codeLength=77*/() {}
+  /// Comment 2.
+  @Object()
+  void commentAroundAnnotation/*codeOffset=308, codeLength=62*/() {}
+}
+''',
+        withCodeRanges: true,
+        withConstElements: false);
+  }
+
+  test_codeRange_parameter() async {
+    var library = await checkLibrary('''
+main({int a = 1, int b, int c = 2}) {}
+''');
+    checkElementText(
+        library,
+        'dynamic main/*codeOffset=0, codeLength=38*/('
+        '{int a/*codeOffset=6, codeLength=9*/: 1}, '
+        '{int b/*codeOffset=17, codeLength=5*/}, '
+        '{int c/*codeOffset=24, codeLength=9*/: 2}) {}\n',
+        withCodeRanges: true,
+        withConstElements: false);
+  }
+
+  test_codeRange_parameter_annotations() async {
+    var library = await checkLibrary('''
+main(@Object() int a, int b, @Object() int c) {}
+''');
+    checkElementText(
+        library,
+        'dynamic main/*codeOffset=0, codeLength=48*/('
+        '@Object() int a/*codeOffset=5, codeLength=15*/, '
+        'int b/*codeOffset=22, codeLength=5*/, '
+        '@Object() int c/*codeOffset=29, codeLength=15*/) {}\n',
+        withCodeRanges: true,
+        withConstElements: false);
+  }
+
+  test_codeRange_topLevelVariable() async {
+    var library = await checkLibrary('''
+int withInit = 1 + 2 * 3;
+
+int withoutInit;
+
+int multiWithInit = 2, multiWithoutInit, multiWithInit2 = 3; 
+''');
+    checkElementText(
+        library,
+        r'''
+int withInit/*codeOffset=0, codeLength=24*/;
+int withoutInit/*codeOffset=27, codeLength=15*/;
+int multiWithInit/*codeOffset=45, codeLength=21*/;
+int multiWithoutInit/*codeOffset=68, codeLength=16*/;
+int multiWithInit2/*codeOffset=86, codeLength=18*/;
+''',
+        withCodeRanges: true,
+        withConstElements: false);
+  }
+
+  test_codeRange_topLevelVariable_annotations() async {
+    var library = await checkLibrary('''
+/// Comment 1.
+/// Comment 2.
+int hasDocComment, hasDocComment2;
+
+@Object()
+int hasAnnotation, hasAnnotation2;
+
+@Object()
+/// Comment 1.
+/// Comment 2.
+int annotationThenComment, annotationThenComment2;
+
+/// Comment 1.
+/// Comment 2.
+@Object()
+int commentThenAnnotation, commentThenAnnotation2;
+
+/// Comment 1.
+@Object()
+/// Comment 2.
+int commentAroundAnnotation, commentAroundAnnotation2;
+''');
+    checkElementText(
+        library,
+        r'''
+/// Comment 1.
+/// Comment 2.
+int hasDocComment/*codeOffset=0, codeLength=47*/;
+/// Comment 1.
+/// Comment 2.
+int hasDocComment2/*codeOffset=49, codeLength=14*/;
+@Object()
+int hasAnnotation/*codeOffset=66, codeLength=27*/;
+@Object()
+int hasAnnotation2/*codeOffset=95, codeLength=14*/;
+/// Comment 1.
+/// Comment 2.
+@Object()
+int annotationThenComment/*codeOffset=112, codeLength=65*/;
+/// Comment 1.
+/// Comment 2.
+@Object()
+int annotationThenComment2/*codeOffset=179, codeLength=22*/;
+/// Comment 1.
+/// Comment 2.
+@Object()
+int commentThenAnnotation/*codeOffset=204, codeLength=65*/;
+/// Comment 1.
+/// Comment 2.
+@Object()
+int commentThenAnnotation2/*codeOffset=271, codeLength=22*/;
+/// Comment 2.
+@Object()
+int commentAroundAnnotation/*codeOffset=311, codeLength=52*/;
+/// Comment 2.
+@Object()
+int commentAroundAnnotation2/*codeOffset=365, codeLength=24*/;
+''',
+        withCodeRanges: true,
+        withConstElements: false);
   }
 
   test_const_constructor_inferred_args() async {
@@ -5230,6 +5862,28 @@ class D {
 ''');
   }
 
+  test_defaultValue_genericFunction() async {
+    var library = await checkLibrary('''
+typedef void F<T>(T v);
+
+void defaultF<T>(T v) {}
+
+class X {
+  final F f;
+  const X({this.f: defaultF});
+}
+''');
+    checkElementText(library, r'''
+typedef F<T> = void Function(T v);
+class X {
+  final (dynamic) → void f;
+  const X({(dynamic) → void this.f:
+        defaultF/*location: test.dart;defaultF*/});
+}
+void defaultF<T>(T v) {}
+''');
+  }
+
   test_defaultValue_refersToGenericClass_constructor() async {
     var library = await checkLibrary('''
 class B<T> {
@@ -6574,6 +7228,26 @@ dynamic main() {}
 ''');
   }
 
+  test_import_export() async {
+    addLibrary('dart:async');
+    var library = await checkLibrary('''
+import 'dart:async' as i1;
+export 'dart:math';
+import 'dart:async' as i2;
+export 'dart:math';
+import 'dart:async' as i3;
+export 'dart:math';
+''');
+    checkElementText(library, r'''
+import 'dart:async' as i1;
+import 'dart:async' as i2;
+import 'dart:async' as i3;
+export 'dart:math';
+export 'dart:math';
+export 'dart:math';
+''');
+  }
+
   test_import_hide() async {
     addLibrary('dart:async');
     var library = await checkLibrary('''
@@ -6613,6 +7287,10 @@ Future<dynamic> f;
   test_import_prefixed() async {
     addLibrarySource('/a.dart', 'library a; class C {}');
     var library = await checkLibrary('import "a.dart" as a; a.C c;');
+
+    expect(library.imports[0].prefix.nameOffset, 19);
+    expect(library.imports[0].prefix.nameLength, 1);
+
     checkElementText(library, r'''
 import 'a.dart' as a;
 C c;
@@ -8323,7 +9001,7 @@ const dynamic a = null;
 class C {
   dynamic x;
   C([@
-        a/*location: test.dart;a?*/ dynamic this.x]);
+        a/*location: test.dart;a?*/ dynamic this.x = null]);
 }
 const dynamic a = null;
 ''');
@@ -8396,7 +9074,7 @@ dynamic f(@
     checkElementText(library, r'''
 const dynamic a = null;
 dynamic f([@
-        a/*location: test.dart;a?*/ () → dynamic g]) {}
+        a/*location: test.dart;a?*/ () → dynamic g = null]) {}
 ''');
   }
 
@@ -8554,7 +9232,7 @@ dynamic f(@
     checkElementText(library, r'''
 const dynamic a = null;
 dynamic f([@
-        a/*location: test.dart;a?*/ dynamic x]) {}
+        a/*location: test.dart;a?*/ dynamic x = null]) {}
 ''');
   }
 
@@ -8745,6 +9423,48 @@ class B {
 dynamic c;
 ''');
     }
+  }
+
+  test_mixin() async {
+    var library = await checkLibrary(r'''
+class A {}
+class B {}
+class C {}
+class D {}
+
+mixin M<T extends num, U> on A, B implements C, D {
+  T f;
+  U get g => 0;
+  set s(int v) {}
+  int m(double v) => 0;
+}
+''');
+    checkElementText(library, r'''
+class A {
+}
+class B {
+}
+class C {
+}
+class D {
+}
+mixin M<T extends num, U> on A, B implements C, D {
+  T f;
+  U get g {}
+  void set s(int v) {}
+  int m(double v) {}
+}
+''');
+  }
+
+  test_mixin_implicitObjectSuperclassConstraint() async {
+    var library = await checkLibrary(r'''
+mixin M {}
+''');
+    checkElementText(library, r'''
+mixin M on Object {
+}
+''');
   }
 
   test_nameConflict_exportedAndLocal() async {
@@ -8975,6 +9695,16 @@ class C {
   bool <=(C other) {}
 }
 ''');
+  }
+
+  test_parameter() async {
+    var library = await checkLibrary('void main(int p) {}');
+    checkElementText(
+        library,
+        r'''
+void main@5(int p@14) {}
+''',
+        withOffsets: true);
   }
 
   test_parameter_checked() async {
@@ -10397,6 +11127,19 @@ C<int> c;
 dynamic v;
 ''');
     }
+  }
+
+  test_variable() async {
+    var library = await checkLibrary('int x = 0;');
+    checkElementText(
+        library,
+        r'''
+int x@4;
+synthetic int get x@4 {}
+synthetic void set x@4(int _x@4) {}
+''',
+        withOffsets: true,
+        withSyntheticAccessors: true);
   }
 
   test_variable_const() async {

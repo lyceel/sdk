@@ -133,12 +133,18 @@ class KernelLoader : public ValueObject {
   // was no main procedure, or a failure object if there was an error.
   RawObject* LoadProgram(bool process_pending_classes = true);
 
+  // Returns the function which will evaluate the expression, or a failure
+  // object if there was an error.
+  RawObject* LoadExpressionEvaluationFunction(const String& library_url,
+                                              const String& klass);
+
   // Finds all libraries that have been modified in this incremental
   // version of the kernel program file.
   static void FindModifiedLibraries(Program* program,
                                     Isolate* isolate,
                                     BitVector* modified_libs,
-                                    bool force_reload);
+                                    bool force_reload,
+                                    bool* is_empty_kernel);
 
   RawLibrary* LoadLibrary(intptr_t index);
 
@@ -160,10 +166,10 @@ class KernelLoader : public ValueObject {
   void AnnotateNativeProcedures(const Array& constant_table);
   void LoadNativeExtensionLibraries(const Array& constant_table);
 
-  void ReadProcedureAnnotations(intptr_t annotation_count,
-                                String* native_name,
-                                bool* is_potential_native,
-                                bool* has_pragma_annotation);
+  void ReadVMAnnotations(intptr_t annotation_count,
+                         String* native_name,
+                         bool* is_potential_native,
+                         bool* has_pragma_annotation);
 
   const String& DartSymbolPlain(StringIndex index) {
     return translation_helper_.DartSymbolPlain(index);
@@ -208,7 +214,8 @@ class KernelLoader : public ValueObject {
   void InitializeFields();
   static void index_programs(kernel::Reader* reader,
                              GrowableArray<intptr_t>* subprogram_file_starts);
-  void walk_incremental_kernel(BitVector* modified_libs);
+  void walk_incremental_kernel(BitVector* modified_libs,
+                               bool* is_empty_program);
 
   void LoadPreliminaryClass(ClassHelper* class_helper,
                             intptr_t type_parameter_count);
@@ -273,6 +280,15 @@ class KernelLoader : public ValueObject {
     }
   }
 
+  void EnsurePragmaClassIsLookedUp() {
+    if (pragma_class_.IsNull()) {
+      const Library& internal_lib =
+          Library::Handle(zone_, dart::Library::InternalLibrary());
+      pragma_class_ = internal_lib.LookupClass(Symbols::Pragma());
+      ASSERT(!pragma_class_.IsNull());
+    }
+  }
+
   void EnsurePotentialNatives() {
     potential_natives_ = kernel_program_info_.potential_natives();
     if (potential_natives_.IsNull()) {
@@ -317,8 +333,37 @@ class KernelLoader : public ValueObject {
   GrowableObjectArray& potential_natives_;
   GrowableObjectArray& potential_extension_libraries_;
 
+  Class& pragma_class_;
+
   Mapping<Library> libraries_;
   Mapping<Class> classes_;
+
+  // We "re-use" the normal .dill file format for encoding compiled evaluation
+  // expressions from the debugger.  This allows us to also reuse the normal
+  // a) kernel loader b) flow graph building code.  The encoding is either one
+  // of the following two options:
+  //
+  //   * Option a) The expression is evaluated inside an instance method call
+  //               context:
+  //
+  //   Program:
+  //   |> library "evaluate:source"
+  //      |> class "#DebugClass"
+  //         |> procedure ":Eval"
+  //
+  //   * Option b) The expression is evaluated outside an instance method call
+  //               context:
+  //
+  //   Program:
+  //   |> library "evaluate:source"
+  //      |> procedure ":Eval"
+  //
+  // See
+  //   * pkg/front_end/lib/src/fasta/incremental_compiler.dart:compileExpression
+  //   * pkg/front_end/lib/src/fasta/kernel/utils.dart:serializeProcedure
+  //
+  Library& expression_evaluation_library_;
+  Function& expression_evaluation_function_;
 
   GrowableArray<const Function*> functions_;
   GrowableArray<const Field*> fields_;

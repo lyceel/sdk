@@ -47,11 +47,14 @@ import '../fasta_codes.dart'
     show
         LocatedMessage,
         Message,
+        messageImplementsFutureOr,
         messagePatchClassOrigin,
         messagePatchClassTypeVariablesMismatch,
         messagePatchDeclarationMismatch,
         messagePatchDeclarationOrigin,
         noLength,
+        templateImplementsRepeated,
+        templateImplementsSuperClass,
         templateMissingImplementationCause,
         templateMissingImplementationNotAbstract,
         templateOverriddenMethodCause,
@@ -79,6 +82,7 @@ import 'kernel_builder.dart'
         KernelLibraryBuilder,
         KernelProcedureBuilder,
         KernelRedirectingFactoryBuilder,
+        KernelNamedTypeBuilder,
         KernelTypeBuilder,
         KernelTypeVariableBuilder,
         LibraryBuilder,
@@ -111,6 +115,9 @@ abstract class KernelClassBuilder
             scope, constructors, parent, charOffset);
 
   Class get cls;
+
+  @override
+  bool get hasTarget => true;
 
   Class get target => cls;
 
@@ -188,6 +195,64 @@ abstract class KernelClassBuilder
           new List<DartType>.filled(
               cls.typeParameters.length, const UnknownType(),
               growable: true));
+    }
+  }
+
+  void checkSupertypes(CoreTypes coreTypes) {
+    // This method determines whether the class (that's being built) its super
+    // class appears both in 'extends' and 'implements' clauses and whether any
+    // interface appears multiple times in the 'implements' clause.
+    if (interfaces == null) return;
+
+    // Extract super class (if it exists).
+    ClassBuilder superClass;
+    KernelTypeBuilder superClassType = supertype;
+    if (superClassType is KernelNamedTypeBuilder) {
+      Declaration decl = superClassType.declaration;
+      if (decl is ClassBuilder) {
+        superClass = decl;
+      }
+    }
+
+    // Validate interfaces.
+    Map<ClassBuilder, int> problems;
+    Map<ClassBuilder, int> problemsOffsets;
+    Set<ClassBuilder> implemented = new Set<ClassBuilder>();
+    for (KernelTypeBuilder type in interfaces) {
+      if (type is KernelNamedTypeBuilder) {
+        Declaration decl = type.declaration;
+        if (decl is ClassBuilder) {
+          ClassBuilder interface = decl;
+          if (superClass == interface) {
+            addCompileTimeError(
+                templateImplementsSuperClass.withArguments(interface.name),
+                type.charOffset,
+                noLength);
+          } else if (implemented.contains(interface)) {
+            // Aggregate repetitions.
+            problems ??= new Map<ClassBuilder, int>();
+            problems[interface] ??= 0;
+            problems[interface] += 1;
+
+            problemsOffsets ??= new Map<ClassBuilder, int>();
+            problemsOffsets[interface] ??= type.charOffset;
+          } else if (interface.target == coreTypes.futureOrClass) {
+            addCompileTimeError(messageImplementsFutureOr, type.charOffset,
+                interface.target.name.length);
+          } else {
+            implemented.add(interface);
+          }
+        }
+      }
+    }
+    if (problems != null) {
+      problems.forEach((ClassBuilder interface, int repetitions) {
+        addCompileTimeError(
+            templateImplementsRepeated.withArguments(
+                interface.name, repetitions),
+            problemsOffsets[interface],
+            noLength);
+      });
     }
   }
 
@@ -667,7 +732,12 @@ abstract class KernelClassBuilder
           ]);
     } else if (library.loader.target.backendTarget.strongMode &&
         declaredFunction?.typeParameters != null) {
-      var substitution = <TypeParameter, DartType>{};
+      var substitutionMap = <TypeParameter, DartType>{};
+      for (int i = 0; i < declaredFunction.typeParameters.length; ++i) {
+        substitutionMap[interfaceFunction.typeParameters[i]] =
+            new TypeParameterType(declaredFunction.typeParameters[i]);
+      }
+      Substitution substitution = Substitution.fromMap(substitutionMap);
       for (int i = 0; i < declaredFunction.typeParameters.length; ++i) {
         TypeParameter declaredParameter = declaredFunction.typeParameters[i];
         TypeParameter interfaceParameter = interfaceFunction.typeParameters[i];
@@ -679,7 +749,7 @@ abstract class KernelClassBuilder
             interfaceBound =
                 interfaceSubstitution.substituteType(interfaceBound);
           }
-          if (declaredBound != interfaceBound) {
+          if (declaredBound != substitution.substituteType(interfaceBound)) {
             addProblem(
                 templateOverrideTypeVariablesMismatch.withArguments(
                     "$name::${declaredMember.name.name}",
@@ -695,13 +765,10 @@ abstract class KernelClassBuilder
                 ]);
           }
         }
-        substitution[interfaceParameter] =
-            new TypeParameterType(declaredParameter);
       }
-      var newSubstitution = Substitution.fromMap(substitution);
       interfaceSubstitution = interfaceSubstitution == null
-          ? newSubstitution
-          : Substitution.combine(interfaceSubstitution, newSubstitution);
+          ? substitution
+          : Substitution.combine(interfaceSubstitution, substitution);
     }
     return interfaceSubstitution;
   }

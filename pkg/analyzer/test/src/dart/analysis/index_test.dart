@@ -197,6 +197,28 @@ class C = Object with A implements B; // 3
       ..isReferencedAt('B; // 3', false);
   }
 
+  test_isImplementedBy_MixinDeclaration_implementsClause() async {
+    await _indexTestUnit('''
+class A {} // 1
+mixin M implements A {} // 2
+''');
+    ClassElement elementA = findElement('A');
+    assertThat(elementA)
+      ..isImplementedAt('A {} // 2', false)
+      ..isReferencedAt('A {} // 2', false);
+  }
+
+  test_isImplementedBy_MixinDeclaration_onClause() async {
+    await _indexTestUnit('''
+class A {} // 1
+mixin M on A {} // 2
+''');
+    ClassElement elementA = findElement('A');
+    assertThat(elementA)
+      ..isImplementedAt('A {} // 2', false)
+      ..isReferencedAt('A {} // 2', false);
+  }
+
   test_isInvokedBy_FieldElement() async {
     await _indexTestUnit('''
 class A {
@@ -1250,7 +1272,7 @@ main() {
 
     AnalysisResult result = await driver.getResult(testFile);
     testUnit = result.unit;
-    testUnitElement = testUnit.element;
+    testUnitElement = testUnit.declaredElement;
     testLibraryElement = testUnitElement.library;
 
     AnalysisDriverUnitIndexBuilder indexBuilder = indexUnit(testUnit);

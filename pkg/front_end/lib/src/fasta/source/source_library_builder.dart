@@ -54,6 +54,7 @@ import '../fasta_codes.dart'
         templateDuplicatedDefinition,
         templateConstructorWithWrongNameContext,
         templateMissingPartOf,
+        templatePartOfInLibrary,
         templatePartOfLibraryNameMismatch,
         templatePartOfUriMismatch,
         templatePartOfUseUri,
@@ -64,6 +65,8 @@ import '../import.dart' show Import;
 import '../configuration.dart' show Configuration;
 
 import '../problems.dart' show unhandled;
+
+import '../source/outline_listener.dart' show OutlineListener;
 
 import 'source_loader.dart' show SourceLoader;
 
@@ -113,6 +116,8 @@ abstract class SourceLibraryBuilder<T extends TypeBuilder, R>
 
   bool canAddImplementationBuilders = false;
 
+  final OutlineListener outlineListener;
+
   SourceLibraryBuilder(SourceLoader loader, Uri fileUri, Scope scope)
       : this.fromScopes(loader, fileUri, new DeclarationBuilder<T>.library(),
             scope ?? new Scope.top());
@@ -121,6 +126,7 @@ abstract class SourceLibraryBuilder<T extends TypeBuilder, R>
       this.loader, this.fileUri, this.libraryDeclaration, this.importScope)
       : disableTypeInference = loader.target.disableTypeInference,
         currentDeclaration = libraryDeclaration,
+        outlineListener = loader.createOutlineListener(fileUri),
         super(
             fileUri, libraryDeclaration.toScope(importScope), new Scope.top());
 
@@ -290,27 +296,30 @@ abstract class SourceLibraryBuilder<T extends TypeBuilder, R>
       }
     }
 
-    const String nativeExtensionScheme = "dart-ext:";
-    bool isExternal = uri.startsWith(nativeExtensionScheme);
-    if (isExternal) {
-      uri = uri.substring(nativeExtensionScheme.length);
-      uriOffset += nativeExtensionScheme.length;
-    }
-
-    Uri resolvedUri = resolve(this.uri, uri, uriOffset);
-
     LibraryBuilder builder = null;
-    if (isExternal) {
-      if (resolvedUri.scheme == "package") {
+
+    Uri resolvedUri;
+    String nativePath;
+    const String nativeExtensionScheme = "dart-ext:";
+    if (uri.startsWith(nativeExtensionScheme)) {
+      String strippedUri = uri.substring(nativeExtensionScheme.length);
+      if (strippedUri.startsWith("package")) {
+        resolvedUri = resolve(
+            this.uri, strippedUri, uriOffset + nativeExtensionScheme.length);
         resolvedUri = loader.target.translateUri(resolvedUri);
+        nativePath = resolvedUri.toString();
+      } else {
+        resolvedUri = new Uri(scheme: "dart-ext", pathSegments: [uri]);
+        nativePath = uri;
       }
     } else {
+      resolvedUri = resolve(this.uri, uri, uriOffset);
       builder = loader.read(resolvedUri, charOffset, accessor: this);
     }
 
     imports.add(new Import(this, builder, deferred, prefix, combinators,
         configurations, charOffset, prefixCharOffset, importIndex,
-        nativeImportUri: builder == null ? resolvedUri : null));
+        nativeImportPath: nativePath));
   }
 
   void addPart(List<MetadataBuilder> metadata, String uri, int charOffset) {
@@ -341,7 +350,9 @@ abstract class SourceLibraryBuilder<T extends TypeBuilder, R>
       int startCharOffset,
       int charOffset,
       int charEndOffset,
-      int supertypeOffset);
+      int supertypeOffset,
+      int codeStartOffset,
+      int codeEndOffset);
 
   void addNamedMixinApplication(
       String documentationComment,
@@ -351,7 +362,9 @@ abstract class SourceLibraryBuilder<T extends TypeBuilder, R>
       int modifiers,
       T mixinApplication,
       List<T> interfaces,
-      int charOffset);
+      int charOffset,
+      int codeStartOffset,
+      int codeEndOffset);
 
   void addField(
       String documentationComment,
@@ -360,23 +373,47 @@ abstract class SourceLibraryBuilder<T extends TypeBuilder, R>
       T type,
       String name,
       int charOffset,
+      int codeStartOffset,
+      int codeEndOffset,
       Token initializerTokenForInference,
       bool hasInitializer);
 
-  void addFields(String documentationComment, List<MetadataBuilder> metadata,
-      int modifiers, T type, List<Object> fieldsInfo) {
+  void addFields(
+      String documentationComment,
+      List<MetadataBuilder> metadata,
+      int modifiers,
+      T type,
+      List<Object> fieldsInfo,
+      int firstFieldCodeStartOffset) {
     for (int i = 0; i < fieldsInfo.length; i += 4) {
       String name = fieldsInfo[i];
       int charOffset = fieldsInfo[i + 1];
       bool hasInitializer = fieldsInfo[i + 2] != null;
       Token initializerTokenForInference =
           type == null ? fieldsInfo[i + 2] : null;
+      Token beforeLast = fieldsInfo[i + 3];
       if (initializerTokenForInference != null) {
-        Token beforeLast = fieldsInfo[i + 3];
         beforeLast.setNext(new Token.eof(beforeLast.next.offset));
       }
-      addField(documentationComment, metadata, modifiers, type, name,
-          charOffset, initializerTokenForInference, hasInitializer);
+
+      int codeEndOffset;
+      if (beforeLast != null) {
+        codeEndOffset = beforeLast.next.offset;
+      } else {
+        codeEndOffset = charOffset + name.length;
+      }
+
+      addField(
+          documentationComment,
+          metadata,
+          modifiers,
+          type,
+          name,
+          charOffset,
+          i == 0 ? firstFieldCodeStartOffset : charOffset,
+          codeEndOffset,
+          initializerTokenForInference,
+          hasInitializer);
     }
   }
 
@@ -393,6 +430,8 @@ abstract class SourceLibraryBuilder<T extends TypeBuilder, R>
       int charOffset,
       int charOpenParenOffset,
       int charEndOffset,
+      int codeStartOffset,
+      int codeEndOffset,
       String nativeMethodName);
 
   void addProcedure(
@@ -409,6 +448,8 @@ abstract class SourceLibraryBuilder<T extends TypeBuilder, R>
       int charOpenParenOffset,
       int charEndOffset,
       String nativeMethodName,
+      int codeStartOffset,
+      int codeEndOffset,
       {bool isTopLevel});
 
   void addEnum(
@@ -444,6 +485,8 @@ abstract class SourceLibraryBuilder<T extends TypeBuilder, R>
       int charOffset,
       int charOpenParenOffset,
       int charEndOffset,
+      int codeStartOffset,
+      int codeEndOffset,
       String nativeMethodName);
 
   FormalParameterBuilder addFormalParameter(List<MetadataBuilder> metadata,
@@ -600,9 +643,7 @@ abstract class SourceLibraryBuilder<T extends TypeBuilder, R>
       if (part == this) {
         addCompileTimeError(messagePartOfSelf, -1, noLength, fileUri);
       } else if (seenParts.add(part.fileUri)) {
-        if (part.partOfLibrary != null &&
-            // TODO(askesc): Remove this hack when co19 fix is rolled in.
-            !part.fileUri.path.endsWith("/co19/src/Utils/expect_common.dart")) {
+        if (part.partOfLibrary != null) {
           addProblem(messagePartOfTwoLibraries, -1, noLength, part.fileUri,
               context: [
                 messagePartOfTwoLibrariesContext.withLocation(
@@ -685,6 +726,13 @@ abstract class SourceLibraryBuilder<T extends TypeBuilder, R>
     for (Import import in imports) {
       if (import.imported == loader.coreLibrary) {
         explicitCoreImport = true;
+      }
+      if (import.imported?.isPart ?? false) {
+        addProblem(
+            templatePartOfInLibrary.withArguments(import.imported.fileUri),
+            import.charOffset,
+            noLength,
+            fileUri);
       }
       import.finalizeImports(this);
     }

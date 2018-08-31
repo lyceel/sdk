@@ -27,6 +27,7 @@ import 'kernel_builder.dart' show KernelTypeBuilder, PrefixBuilder;
 import 'kernel_ast_api.dart'
     show
         Arguments,
+        ArgumentsJudgment,
         Constructor,
         DartType,
         Expression,
@@ -70,18 +71,21 @@ abstract class ExpressionGeneratorHelper implements InferenceHelper {
   scopeLookup(Scope scope, String name, Token token,
       {bool isQualified: false, PrefixBuilder prefix});
 
-  finishSend(Object receiver, Arguments arguments, int offset);
+  finishSend(Object receiver, ArgumentsJudgment arguments, int offset);
 
   Expression buildCompileTimeError(Message message, int charOffset, int length,
       {List<LocatedMessage> context});
+
+  Expression buildCompileTimeErrorExpression(Message message, int offset,
+      {int length, Expression original});
 
   Expression wrapInCompileTimeError(Expression expression, Message message);
 
   Expression wrapInProblem(Expression expression, Message message, int length,
       {List<LocatedMessage> context});
 
-  Expression deprecated_buildCompileTimeError(String error,
-      [int offset, Message message]);
+  Initializer buildInvalidFieldInitializer(int offset, bool isSynthetic,
+      Node target, Expression value, Expression error);
 
   Initializer buildInvalidInitializer(Expression expression, [int offset]);
 
@@ -97,7 +101,8 @@ abstract class ExpressionGeneratorHelper implements InferenceHelper {
       Constructor constructor, Arguments arguments,
       [int charOffset = -1]);
 
-  Expression buildStaticInvocation(Procedure target, Arguments arguments,
+  Expression buildStaticInvocation(
+      Procedure target, ArgumentsJudgment arguments,
       {Constness constness, int charOffset, Expression error});
 
   Expression buildProblemExpression(
@@ -112,18 +117,19 @@ abstract class ExpressionGeneratorHelper implements InferenceHelper {
       bool isStatic,
       LocatedMessage argMessage});
 
-  LocatedMessage checkArgumentsForFunction(FunctionNode function,
-      Arguments arguments, int offset, List<TypeParameter> typeParameters);
+  LocatedMessage checkArgumentsForFunction(
+      FunctionNode function,
+      ArgumentsJudgment arguments,
+      int offset,
+      List<TypeParameter> typeParameters);
 
   LocatedMessage checkArgumentsForType(
-      FunctionType function, Arguments arguments, int offset);
+      FunctionType function, ArgumentsJudgment arguments, int offset);
 
   StaticGet makeStaticGet(Member readTarget, Token token);
 
   Expression wrapInDeferredCheck(
       Expression expression, KernelPrefixBuilder prefix, int charOffset);
-
-  dynamic deprecated_addCompileTimeError(int charOffset, String message);
 
   bool isIdentical(Member member);
 
@@ -139,6 +145,7 @@ abstract class ExpressionGeneratorHelper implements InferenceHelper {
   Expression buildConstructorInvocation(
       TypeDeclarationBuilder<KernelTypeBuilder, DartType> type,
       Token nameToken,
+      Token nameLastToken,
       Arguments arguments,
       String name,
       List<DartType> typeArguments,

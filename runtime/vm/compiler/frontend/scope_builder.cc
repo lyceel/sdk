@@ -381,8 +381,11 @@ ScopeBuildingResult* ScopeBuilder::BuildScopes() {
     case RawFunction::kIrregexpFunction:
       UNREACHABLE();
   }
-  if (needs_expr_temp_ || function.is_no_such_method_forwarder()) {
+  if (needs_expr_temp_) {
     scope_->AddVariable(parsed_function_->EnsureExpressionTemp());
+  }
+  if (parsed_function_->function().MayHaveUncheckedEntryPoint(I)) {
+    scope_->AddVariable(parsed_function_->EnsureEntryPointsTemp());
   }
   parsed_function_->AllocateVariables();
 
@@ -549,6 +552,13 @@ void ScopeBuilder::VisitFunctionNode() {
     {
       LocalVariable* temp =
           scope_->LookupVariable(Symbols::AsyncCompleter(), true);
+      if (temp != NULL) {
+        scope_->CaptureVariable(temp);
+      }
+    }
+    {
+      LocalVariable* temp =
+          scope_->LookupVariable(Symbols::ControllerStream(), true);
       if (temp != NULL) {
         scope_->CaptureVariable(temp);
       }
@@ -1284,8 +1294,6 @@ void ScopeBuilder::VisitFunctionType(bool simple) {
     }
   }
 
-  helper_.SkipListOfStrings();  // read positional parameter names.
-
   if (!simple) {
     helper_.SkipCanonicalNameReference();  // read typedef reference.
   }
@@ -1477,8 +1485,7 @@ LocalVariable* ScopeBuilder::MakeVariable(
     const InferredTypeMetadata* param_type_md /* = NULL */) {
   CompileType* param_type = NULL;
   if ((param_type_md != NULL) && !param_type_md->IsTrivial()) {
-    param_type = new (Z) CompileType(CompileType::CreateNullable(
-        param_type_md->nullable, param_type_md->cid));
+    param_type = new (Z) CompileType(param_type_md->ToCompileType(Z));
   }
   return new (Z)
       LocalVariable(declaration_pos, token_pos, name, type, param_type);

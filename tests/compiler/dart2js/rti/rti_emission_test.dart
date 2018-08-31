@@ -23,23 +23,8 @@ main(List<String> args) {
     cacheRtiDataForTesting = true;
     Directory dataDir =
         new Directory.fromUri(Platform.script.resolve('emission'));
-    await checkTests(
-      dataDir,
-      const RtiEmissionDataComputer(),
-      args: args,
-      testOmit: true,
-      skipForStrong: [
-        // Dart 1 semantics:
-        'call.dart',
-        'call_typed.dart',
-        'call_typed_generic.dart',
-        'function_subtype_call2.dart',
-        'function_type_argument.dart',
-        'map_literal_checked.dart',
-        // TODO(johnniwinther): Optimize local function type signature need.
-        'subtype_named_args.dart',
-      ],
-    );
+    await checkTests(dataDir, const RtiEmissionDataComputer(),
+        args: args, testOmit: true);
   });
 }
 

@@ -304,6 +304,7 @@ var F = await;
     await assertNoFix(DartFixKind.ADD_ASYNC);
   }
 
+  @FailingTest(issue: 'https://github.com/dart-lang/sdk/issues/33992')
   test_addAsync_blockFunctionBody() async {
     await resolveTestUnit('''
 foo() {}
@@ -364,6 +365,7 @@ void doStuff() => takeFutureCallback(() async => await 1);
 ''');
   }
 
+  @FailingTest(issue: 'https://github.com/dart-lang/sdk/issues/33992')
   test_addAsync_expressionFunctionBody() async {
     errorFilter = (AnalysisError error) {
       return error.errorCode == StaticWarningCode.UNDEFINED_IDENTIFIER_AWAIT;
@@ -378,6 +380,7 @@ main() async => await foo();
 ''');
   }
 
+  @FailingTest(issue: 'https://github.com/dart-lang/sdk/issues/33992')
   test_addAsync_returnFuture() async {
     errorFilter = (AnalysisError error) {
       return error.errorCode == StaticWarningCode.UNDEFINED_IDENTIFIER_AWAIT;
@@ -400,6 +403,7 @@ Future<int> main() async {
 ''');
   }
 
+  @FailingTest(issue: 'https://github.com/dart-lang/sdk/issues/33992')
   test_addAsync_returnFuture_alreadyFuture() async {
     errorFilter = (AnalysisError error) {
       return error.errorCode == StaticWarningCode.UNDEFINED_IDENTIFIER_AWAIT;
@@ -422,6 +426,7 @@ Future<int> main() async {
 ''');
   }
 
+  @FailingTest(issue: 'https://github.com/dart-lang/sdk/issues/33992')
   test_addAsync_returnFuture_dynamic() async {
     errorFilter = (AnalysisError error) {
       return error.errorCode == StaticWarningCode.UNDEFINED_IDENTIFIER_AWAIT;
@@ -442,6 +447,7 @@ dynamic main() async {
 ''');
   }
 
+  @FailingTest(issue: 'https://github.com/dart-lang/sdk/issues/33992')
   test_addAsync_returnFuture_noType() async {
     errorFilter = (AnalysisError error) {
       return error.errorCode == StaticWarningCode.UNDEFINED_IDENTIFIER_AWAIT;
@@ -989,6 +995,44 @@ class Test {
   int b;
   final int c;
   Test(this.a, this.c);
+}
+''');
+  }
+
+  test_addMissingParameter_constructor_named_required_hasOne() async {
+    await resolveTestUnit('''
+class A {
+  A.named(int a) {}
+}
+main() {
+  new A.named(1, 2.0);
+}
+''');
+    await assertHasFix(DartFixKind.ADD_MISSING_PARAMETER_REQUIRED, '''
+class A {
+  A.named(int a, double d) {}
+}
+main() {
+  new A.named(1, 2.0);
+}
+''');
+  }
+
+  test_addMissingParameter_constructor_unnamed_required_hasOne() async {
+    await resolveTestUnit('''
+class A {
+  A(int a) {}
+}
+main() {
+  new A(1, 2.0);
+}
+''');
+    await assertHasFix(DartFixKind.ADD_MISSING_PARAMETER_REQUIRED, '''
+class A {
+  A(int a, double d) {}
+}
+main() {
+  new A(1, 2.0);
 }
 ''');
   }
@@ -3852,7 +3896,7 @@ abstract class A {
   String m3(int p1, double p2, Map<int, List<String>> p3);
   String m4(p1, p2);
   String m5(p1, [int p2 = 2, int p3, p4 = 4]);
-  String m6(p1, {int p2: 2, int p3, p4: 4});
+  String m6(p1, {int p2 = 2, int p3, p4: 4});
 }
 
 class B extends A {
@@ -3865,7 +3909,7 @@ abstract class A {
   String m3(int p1, double p2, Map<int, List<String>> p3);
   String m4(p1, p2);
   String m5(p1, [int p2 = 2, int p3, p4 = 4]);
-  String m6(p1, {int p2: 2, int p3, p4: 4});
+  String m6(p1, {int p2 = 2, int p3, p4: 4});
 }
 
 class B extends A {
@@ -3895,7 +3939,7 @@ class B extends A {
   }
 
   @override
-  String m6(p1, {int p2: 2, int p3, p4: 4}) {
+  String m6(p1, {int p2 = 2, int p3, p4 = 4}) {
     // TODO: implement m6
   }
 }
@@ -4551,6 +4595,7 @@ main() {
     testFile = '/project/lib/test.dart';
     packageMap['project'] = [newFolder('/project/lib')];
     addSource('/project/lib/src/lib.dart', 'class Test {}');
+    configureDriver();
     await resolveTestUnit('''
 main() {
   Test t;
@@ -5143,28 +5188,6 @@ main() {
 ''');
   }
 
-  test_invokeConstructorUsingNew() async {
-    if (previewDart2) {
-      return;
-    }
-    await resolveTestUnit('''
-class C {
-  C.c();
-}
-main() {
-  C c = C.c();
-}
-''');
-    await assertHasFix(DartFixKind.INVOKE_CONSTRUCTOR_USING_NEW, '''
-class C {
-  C.c();
-}
-main() {
-  C c = new C.c();
-}
-''');
-  }
-
   test_isNotNull() async {
     await resolveTestUnit('''
 main(p) {
@@ -5613,6 +5636,7 @@ main() {
 ''');
   }
 
+  @FailingTest(issue: 'https://github.com/dart-lang/sdk/issues/33992')
   test_replaceVarWithDynamic() async {
     errorFilter = (AnalysisError error) {
       return error.errorCode == ParserErrorCode.VAR_AS_TYPE_NAME;
@@ -7071,7 +7095,7 @@ class LintFixTest extends BaseFixProcessorTest {
     await _assertNoFix(kind, error);
   }
 
-  Future<Null> findLint(String src, String lintCode, {int length: 1}) async {
+  Future<void> findLint(String src, String lintCode, {int length: 1}) async {
     int errorOffset = src.indexOf('/*LINT*/');
     await resolveTestUnit(src.replaceAll('/*LINT*/', ''));
     error = new AnalysisError(

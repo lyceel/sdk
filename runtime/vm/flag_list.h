@@ -12,6 +12,13 @@
 #define USING_DBC false
 #endif
 
+// Don't use USING_KBC outside of this file.
+#if defined(DART_USE_INTERPRETER)
+#define USING_KBC true
+#else
+#define USING_KBC false
+#endif
+
 // Don't use USING_MULTICORE outside of this file.
 #if defined(ARCH_IS_MULTI_CORE)
 #define USING_MULTICORE true
@@ -48,6 +55,9 @@ constexpr bool kDartPrecompiledRuntime = false;
 //   D(name, type, default_value, comment)
 //   C(name, precompiled_value, product_value, type, default_value, comment)
 #define FLAG_LIST(P, R, D, C)                                                  \
+  P(experimental_unsafe_mode_use_at_your_own_risk, bool, false,                \
+    "Omit runtime strong mode type checks and disable optimizations based on " \
+    "types.")                                                                  \
   P(abort_on_oom, bool, false,                                                 \
     "Abort if memory allocation fails - use only with --old-gen-heap-size")    \
   C(async_debugger, false, false, bool, true,                                  \
@@ -122,8 +132,7 @@ constexpr bool kDartPrecompiledRuntime = false;
     "Max size of new gen semi space in MB")                                    \
   P(new_gen_semi_initial_size, int, (kWordSize <= 4) ? 1 : 2,                  \
     "Initial size of new gen semi space in MB")                                \
-  P(omit_strong_type_checks, bool, false, "Omit strong mode type checks.")     \
-  P(optimization_counter_threshold, int, 30000,                                \
+  P(optimization_counter_threshold, int, USING_KBC ? -1 : 30000,               \
     "Function's usage-counter value before it is optimized, -1 means never")   \
   P(old_gen_heap_size, int, kDefaultMaxOldGenHeapSize,                         \
     "Max size of old gen heap size in MB, or 0 for unlimited,"                 \
@@ -169,7 +178,7 @@ constexpr bool kDartPrecompiledRuntime = false;
   R(support_service, false, bool, true, "Support the service protocol.")       \
   R(support_timeline, false, bool, true, "Support timeline.")                  \
   D(trace_cha, bool, false, "Trace CHA operations")                            \
-  D(trace_field_guards, bool, false, "Trace changes in field's cids.")         \
+  R(trace_field_guards, false, bool, false, "Trace changes in field's cids.")  \
   C(trace_irregexp, false, false, bool, false, "Trace irregexps.")             \
   D(trace_isolates, bool, false, "Trace isolate creation and shut down.")      \
   D(trace_handles, bool, false, "Traces allocation of handles.")               \
@@ -186,7 +195,7 @@ constexpr bool kDartPrecompiledRuntime = false;
   P(use_compactor, bool, false, "Compact the heap during old-space GC.")       \
   P(use_cha_deopt, bool, true,                                                 \
     "Use class hierarchy analysis even if it can cause deoptimization.")       \
-  P(use_field_guards, bool, !USING_DBC,                                        \
+  P(use_field_guards, bool, !USING_DBC && !USING_KBC,                          \
     "Use field guards and track field types")                                  \
   C(use_osr, false, true, bool, true, "Use OSR")                               \
   P(use_strong_mode_types, bool, true, "Optimize based on strong mode types.") \
@@ -201,6 +210,10 @@ constexpr bool kDartPrecompiledRuntime = false;
   D(verify_on_transition, bool, false, "Verify on dart <==> VM.")              \
   P(enable_slow_path_sharing, bool, true, "Enable sharing of slow-path code.") \
   P(shared_slow_path_triggers_gc, bool, false,                                 \
-    "TESTING: slow-path triggers a GC.")
+    "TESTING: slow-path triggers a GC.")                                       \
+  P(enable_multiple_entrypoints, bool, true,                                   \
+    "Enable multiple entrypoints per-function and related optimizations.")     \
+  R(enable_testing_pragmas, false, bool, false,                                \
+    "Enable magical pragmas for testing purposes. Use at your own risk!")
 
 #endif  // RUNTIME_VM_FLAG_LIST_H_

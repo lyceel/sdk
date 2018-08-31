@@ -283,7 +283,7 @@ bool AotCallSpecializer::IsSupportedIntOperandForStaticDoubleOp(
 Value* AotCallSpecializer::PrepareStaticOpInput(Value* input,
                                                 intptr_t cid,
                                                 Instruction* call) {
-  ASSERT(I->strong() && FLAG_use_strong_mode_types);
+  ASSERT(I->can_use_strong_mode_types());
   ASSERT((cid == kDoubleCid) || (cid == kMintCid));
 
   const String& function_name =
@@ -320,7 +320,7 @@ Value* AotCallSpecializer::PrepareStaticOpInput(Value* input,
 
 Value* AotCallSpecializer::PrepareReceiverOfDevirtualizedCall(Value* input,
                                                               intptr_t cid) {
-  ASSERT(I->strong() && FLAG_use_strong_mode_types);
+  ASSERT(I->can_use_strong_mode_types());
   ASSERT((cid == kDoubleCid) || (cid == kMintCid));
 
   // Can't assert !input->Type()->is_nullable() here as PushArgument receives
@@ -351,7 +351,7 @@ static void RefineUseTypes(Definition* instr) {
 
 bool AotCallSpecializer::TryOptimizeInstanceCallUsingStaticTypes(
     InstanceCallInstr* instr) {
-  ASSERT(I->strong() && FLAG_use_strong_mode_types);
+  ASSERT(I->can_use_strong_mode_types());
 
   const intptr_t receiver_index = instr->FirstArgIndex();
   const Token::Kind op_kind = instr->token_kind();
@@ -498,7 +498,7 @@ bool AotCallSpecializer::TryOptimizeInstanceCallUsingStaticTypes(
 
 bool AotCallSpecializer::TryOptimizeStaticCallUsingStaticTypes(
     StaticCallInstr* instr) {
-  ASSERT(I->strong() && FLAG_use_strong_mode_types);
+  ASSERT(I->can_use_strong_mode_types());
   Definition* replacement = NULL;
 
   const String& name = String::Handle(Z, instr->function().name());
@@ -565,13 +565,17 @@ bool AotCallSpecializer::TryOptimizeStaticCallUsingStaticTypes(
         }
         break;
       }
-      // TODO(dartbug.com/30480): Enable 64-bit integer shifts (SHL, SHR).
       case Token::kBIT_OR:
       case Token::kBIT_XOR:
       case Token::kBIT_AND:
       case Token::kADD:
       case Token::kSUB:
       case Token::kMUL:
+#if defined(TARGET_ARCH_X64) || defined(TARGET_ARCH_ARM64)
+      // TODO(ajcbik): 32-bit archs too?
+      case Token::kMOD:
+      case Token::kTRUNCDIV:
+#endif
       case Token::kDIV: {
         if ((op_kind == Token::kDIV) &&
             !FlowGraphCompiler::SupportsHardwareDivision()) {
@@ -603,7 +607,16 @@ bool AotCallSpecializer::TryOptimizeStaticCallUsingStaticTypes(
         }
         break;
       }
-
+#ifndef TARGET_ARCH_DBC
+      case Token::kNEGATE: {
+        Value* left_value = instr->PushArgumentAt(receiver_index)->value();
+        left_value = PrepareReceiverOfDevirtualizedCall(left_value, kMintCid);
+        replacement = new (Z)
+            UnaryInt64OpInstr(Token::kNEGATE, left_value, Thread::kNoDeoptId,
+                              Instruction::kNotSpeculative);
+        break;
+      }
+#endif
       case Token::kSHL:
       case Token::kSHR: {
         Value* left_value = instr->PushArgumentAt(receiver_index)->value();
@@ -617,7 +630,6 @@ bool AotCallSpecializer::TryOptimizeStaticCallUsingStaticTypes(
         }
         break;
       }
-
       default:
         break;
     }
@@ -750,7 +762,7 @@ void AotCallSpecializer::VisitInstanceCall(InstanceCallInstr* instr) {
   const ICData& unary_checks =
       ICData::ZoneHandle(Z, instr->ic_data()->AsUnaryClassChecks());
   const intptr_t number_of_checks = unary_checks.NumberOfChecks();
-  if (FLAG_use_strong_mode_types && I->strong()) {
+  if (I->can_use_strong_mode_types()) {
     // In AOT strong mode, we avoid deopting speculation.
     // TODO(ajcbik): replace this with actual analysis phase
     //               that determines if checks are removed later.
@@ -787,7 +799,7 @@ void AotCallSpecializer::VisitInstanceCall(InstanceCallInstr* instr) {
     }
   }
 
-  if (I->strong() && FLAG_use_strong_mode_types &&
+  if (I->can_use_strong_mode_types() &&
       TryOptimizeInstanceCallUsingStaticTypes(instr)) {
     return;
   }

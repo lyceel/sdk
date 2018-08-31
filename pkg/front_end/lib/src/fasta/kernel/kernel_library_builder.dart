@@ -158,6 +158,9 @@ class KernelLibraryBuilder
   KernelLibraryBuilder get origin => actualOrigin ?? this;
 
   @override
+  bool get hasTarget => true;
+
+  @override
   Library get target => library;
 
   Uri get uri => library.importUri;
@@ -174,7 +177,10 @@ class KernelLibraryBuilder
 
   KernelTypeBuilder addNamedType(
       Object name, List<KernelTypeBuilder> arguments, int charOffset) {
-    return addType(new KernelNamedTypeBuilder(name, arguments), charOffset);
+    return addType(
+        new KernelNamedTypeBuilder(
+            outlineListener, charOffset, name, arguments),
+        charOffset);
   }
 
   KernelTypeBuilder addMixinApplication(KernelTypeBuilder supertype,
@@ -200,7 +206,9 @@ class KernelLibraryBuilder
       int startCharOffset,
       int charOffset,
       int charEndOffset,
-      int supertypeOffset) {
+      int supertypeOffset,
+      int codeStartOffset,
+      int codeEndOffset) {
     // Nested declaration began in `OutlineBuilder.beginClassDeclaration`.
     var declaration = endNestedDeclaration(className)
       ..resolveTypes(typeVariables, this);
@@ -234,6 +242,8 @@ class KernelLibraryBuilder
         charEndOffset);
     loader.target.metadataCollector
         ?.setDocumentationComment(cls.target, documentationComment);
+    loader.target.metadataCollector
+        ?.setCodeStartEnd(cls.target, codeStartOffset, codeEndOffset);
 
     constructorReferences.clear();
     Map<String, TypeVariableBuilder> typeVariablesByName =
@@ -264,9 +274,7 @@ class KernelLibraryBuilder
 
     members.forEach(setParentAndCheckConflicts);
     constructors.forEach(setParentAndCheckConflicts);
-    // Formally, a setter has the name `id=`, so it can never conflict with a
-    // type variable.
-    setters.forEach(setParent);
+    setters.forEach(setParentAndCheckConflicts);
     addBuilder(className, cls, charOffset);
   }
 
@@ -308,7 +316,9 @@ class KernelLibraryBuilder
       String name,
       List<TypeVariableBuilder> typeVariables,
       int modifiers,
-      List<KernelTypeBuilder> interfaces}) {
+      List<KernelTypeBuilder> interfaces,
+      int codeStartOffset,
+      int codeEndOffset}) {
     if (name == null) {
       // The following parameters should only be used when building a named
       // mixin application.
@@ -488,6 +498,8 @@ class KernelLibraryBuilder
         if (isNamedMixinApplication) {
           loader.target.metadataCollector?.setDocumentationComment(
               application.target, documentationComment);
+          loader.target.metadataCollector?.setCodeStartEnd(
+              application.target, codeStartOffset, codeEndOffset);
         }
         // TODO(ahe, kmillikin): Should always be true?
         // pkg/analyzer/test/src/summary/resynthesize_kernel_test.dart can't
@@ -511,7 +523,9 @@ class KernelLibraryBuilder
       int modifiers,
       KernelTypeBuilder mixinApplication,
       List<KernelTypeBuilder> interfaces,
-      int charOffset) {
+      int charOffset,
+      int codeStartOffset,
+      int codeEndOffset) {
     // Nested declaration began in `OutlineBuilder.beginNamedMixinApplication`.
     endNestedDeclaration(name).resolveTypes(typeVariables, this);
     KernelNamedTypeBuilder supertype = applyMixins(
@@ -521,7 +535,9 @@ class KernelLibraryBuilder
         name: name,
         typeVariables: typeVariables,
         modifiers: modifiers,
-        interfaces: interfaces);
+        interfaces: interfaces,
+        codeStartOffset: codeStartOffset,
+        codeEndOffset: codeEndOffset);
     checkTypeVariables(typeVariables, supertype.declaration);
   }
 
@@ -533,13 +549,19 @@ class KernelLibraryBuilder
       KernelTypeBuilder type,
       String name,
       int charOffset,
+      int codeStartOffset,
+      int codeEndOffset,
       Token initializerTokenForInference,
       bool hasInitializer) {
     var builder = new KernelFieldBuilder(metadata, type, name, modifiers, this,
         charOffset, initializerTokenForInference, hasInitializer);
     addBuilder(name, builder, charOffset);
-    loader.target.metadataCollector
-        ?.setDocumentationComment(builder.target, documentationComment);
+
+    var metadataCollector = loader.target.metadataCollector;
+    metadataCollector?.setDocumentationComment(
+        builder.target, documentationComment);
+    metadataCollector?.setCodeStartEnd(
+        builder.target, codeStartOffset, codeEndOffset);
   }
 
   void addConstructor(
@@ -555,6 +577,8 @@ class KernelLibraryBuilder
       int charOffset,
       int charOpenParenOffset,
       int charEndOffset,
+      int codeStartOffset,
+      int codeEndOffset,
       String nativeMethodName) {
     MetadataCollector metadataCollector = loader.target.metadataCollector;
     ProcedureBuilder procedure = new KernelConstructorBuilder(
@@ -573,6 +597,8 @@ class KernelLibraryBuilder
     metadataCollector?.setDocumentationComment(
         procedure.target, documentationComment);
     metadataCollector?.setConstructorNameOffset(procedure.target, name);
+    metadataCollector?.setCodeStartEnd(
+        procedure.target, codeStartOffset, codeEndOffset);
     checkTypeVariables(typeVariables, procedure);
     addBuilder(constructorName, procedure, charOffset);
     if (nativeMethodName != null) {
@@ -594,6 +620,8 @@ class KernelLibraryBuilder
       int charOpenParenOffset,
       int charEndOffset,
       String nativeMethodName,
+      int codeStartOffset,
+      int codeEndOffset,
       {bool isTopLevel}) {
     MetadataCollector metadataCollector = loader.target.metadataCollector;
     ProcedureBuilder procedure = new KernelProcedureBuilder(
@@ -612,6 +640,8 @@ class KernelLibraryBuilder
         nativeMethodName);
     metadataCollector?.setDocumentationComment(
         procedure.target, documentationComment);
+    metadataCollector?.setCodeStartEnd(
+        procedure.target, codeStartOffset, codeEndOffset);
     checkTypeVariables(typeVariables, procedure);
     addBuilder(name, procedure, charOffset);
     if (nativeMethodName != null) {
@@ -630,6 +660,8 @@ class KernelLibraryBuilder
       int charOffset,
       int charOpenParenOffset,
       int charEndOffset,
+      int codeStartOffset,
+      int codeEndOffset,
       String nativeMethodName) {
     KernelTypeBuilder returnType = addNamedType(
         currentDeclaration.parent.name, <KernelTypeBuilder>[], charOffset);
@@ -688,6 +720,8 @@ class KernelLibraryBuilder
     metadataCollector?.setDocumentationComment(
         procedure.target, documentationComment);
     metadataCollector?.setConstructorNameOffset(procedure.target, name);
+    metadataCollector?.setCodeStartEnd(
+        procedure.target, codeStartOffset, codeEndOffset);
 
     DeclarationBuilder<TypeBuilder> savedDeclaration = currentDeclaration;
     currentDeclaration = factoryDeclaration;
@@ -747,8 +781,8 @@ class KernelLibraryBuilder
       List<TypeVariableBuilder> typeVariables,
       List<FormalParameterBuilder> formals,
       int charOffset) {
-    var builder =
-        new KernelFunctionTypeBuilder(returnType, typeVariables, formals);
+    var builder = new KernelFunctionTypeBuilder(
+        outlineListener, charOffset, returnType, typeVariables, formals);
     checkTypeVariables(typeVariables, null);
     // Nested declaration began in `OutlineBuilder.beginFunctionType` or
     // `OutlineBuilder.beginFunctionTypedFormalParameter`.
@@ -817,10 +851,10 @@ class KernelLibraryBuilder
     }
   }
 
-  void addNativeDependency(Uri nativeImportUri) {
+  void addNativeDependency(String nativeImportPath) {
     Declaration constructor = loader.getNativeAnnotation();
     Arguments arguments =
-        new Arguments(<Expression>[new StringLiteral("$nativeImportUri")]);
+        new Arguments(<Expression>[new StringLiteral(nativeImportPath)]);
     Expression annotation;
     if (constructor.isConstructor) {
       annotation = new ConstructorInvocation(constructor.target, arguments)
@@ -841,6 +875,7 @@ class KernelLibraryBuilder
     // This is required for the DietListener to correctly match up metadata.
     int importIndex = 0;
     int exportIndex = 0;
+    MetadataCollector metadataCollector = loader.target.metadataCollector;
     while (importIndex < imports.length || exportIndex < exports.length) {
       if (exportIndex >= exports.length ||
           (importIndex < imports.length &&
@@ -850,20 +885,23 @@ class KernelLibraryBuilder
         Import import = imports[importIndex++];
 
         // Rather than add a LibraryDependency, we attach an annotation.
-        if (import.nativeImportUri != null) {
-          addNativeDependency(import.nativeImportUri);
+        if (import.nativeImportPath != null) {
+          addNativeDependency(import.nativeImportPath);
           continue;
         }
 
+        LibraryDependency dependency;
         if (import.deferred && import.prefixBuilder?.dependency != null) {
-          library.addDependency(import.prefixBuilder.dependency);
+          dependency = import.prefixBuilder.dependency;
         } else {
-          library.addDependency(new LibraryDependency.import(
-              import.imported.target,
+          dependency = new LibraryDependency.import(import.imported.target,
               name: import.prefix,
               combinators: toKernelCombinators(import.combinators))
-            ..fileOffset = import.charOffset);
+            ..fileOffset = import.charOffset;
         }
+        library.addDependency(dependency);
+        metadataCollector?.setImportPrefixOffset(
+            dependency, import.prefixCharOffset);
       } else {
         // Add export
         Export export = exports[exportIndex++];

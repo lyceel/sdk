@@ -36,13 +36,11 @@ import 'package:telemetry/telemetry.dart' as telemetry;
 /// flags for the analysis server.
 class CommandLineParser {
   final List<String> _knownFlags;
-  final bool _alwaysIgnoreUnrecognized;
   final ArgParser _parser;
 
   /// Creates a new command line parser
-  CommandLineParser({bool alwaysIgnoreUnrecognized: false})
+  CommandLineParser()
       : _knownFlags = <String>[],
-        _alwaysIgnoreUnrecognized = alwaysIgnoreUnrecognized,
         _parser = new ArgParser(allowTrailingOptions: true);
 
   ArgParser get parser => _parser;
@@ -117,10 +115,11 @@ class CommandLineParser {
   }
 
   List<String> _filterUnknowns(List<String> args) {
-    // Only filter args if the ignore flag is specified, or if
-    // _alwaysIgnoreUnrecognized was set to true
-    if (_alwaysIgnoreUnrecognized ||
-        args.contains('--ignore-unrecognized-flags')) {
+    // TODO(devoncarew): Consider dropping support for the
+    // --ignore-unrecognized-flags option.
+
+    // Only filter args if the ignore flag is specified.
+    if (args.contains('--ignore-unrecognized-flags')) {
       // Filter all unrecognized flags and options.
       List<String> filtered = <String>[];
       for (int i = 0; i < args.length; ++i) {
@@ -256,16 +255,6 @@ class Driver implements ServerStarter {
   static const String CACHE_FOLDER = "cache";
 
   /**
-   * Whether to enable the Dart 2.0 preview.
-   */
-  static const String PREVIEW_DART2 = "preview-dart-2";
-
-  /**
-   * Whether to enable the Dart 2.0 Common Front End implementation.
-   */
-  static const String USE_CFE = "use-cfe";
-
-  /**
    * Whether to enable parsing via the Fasta parser.
    */
   static const String USE_FASTA_PARSER = "use-fasta-parser";
@@ -318,17 +307,16 @@ class Driver implements ServerStarter {
     analysisServerOptions.clientId = results[CLIENT_ID];
     analysisServerOptions.clientVersion = results[CLIENT_VERSION];
     analysisServerOptions.cacheFolder = results[CACHE_FOLDER];
-    if (results.wasParsed(PREVIEW_DART2)) {
-      analysisServerOptions.previewDart2 = results[PREVIEW_DART2];
-    } else {
-      analysisServerOptions.previewDart2 = true;
-    }
-    analysisServerOptions.useCFE = results[USE_CFE];
     analysisServerOptions.useFastaParser = results[USE_FASTA_PARSER];
+
+    bool disableAnalyticsForSession = results[SUPPRESS_ANALYTICS_FLAG];
+    if (results.wasParsed(TRAIN_USING)) {
+      disableAnalyticsForSession = true;
+    }
 
     telemetry.Analytics analytics = telemetry.createAnalyticsInstance(
         'UA-26406144-29', 'analysis-server',
-        disableForSession: results[SUPPRESS_ANALYTICS_FLAG]);
+        disableForSession: disableAnalyticsForSession);
     analysisServerOptions.analytics = analytics;
 
     if (analysisServerOptions.clientId != null) {
@@ -452,14 +440,39 @@ class Driver implements ServerStarter {
     }
 
     if (trainDirectory != null) {
+      Directory tempDriverDir =
+          Directory.systemTemp.createTempSync('analysis_server_');
+      analysisServerOptions.cacheFolder = tempDriverDir.path;
+
       DevAnalysisServer devServer = new DevAnalysisServer(socketServer);
-      devServer.processDirectories([trainDirectory]).then((int exitCode) async {
+      devServer.initServer();
+
+      () async {
+        // We first analyze code with an empty driver cache.
+        print('Analyzing with an empty driver cache:');
+        int exitCode = await devServer.processDirectories([trainDirectory]);
+        if (exitCode != 0) exit(exitCode);
+
+        print('');
+
+        // Then again with a populated cache.
+        print('Analyzing with a populated driver cache:');
+        exitCode = await devServer.processDirectories([trainDirectory]);
+        if (exitCode != 0) exit(exitCode);
+
         if (serve_http) {
           httpServer.close();
         }
         await instrumentationService.shutdown();
+
+        try {
+          tempDriverDir.deleteSync(recursive: true);
+        } catch (_) {
+          // ignore any exception
+        }
+
         exit(exitCode);
-      });
+      }();
     } else {
       _captureExceptions(instrumentationService, () {
         StdioAnalysisServer stdioServer = new StdioAnalysisServer(socketServer);
@@ -514,8 +527,7 @@ class Driver implements ServerStarter {
    * Create and return the parser used to parse the command-line arguments.
    */
   CommandLineParser _createArgParser() {
-    CommandLineParser parser =
-        new CommandLineParser(alwaysIgnoreUnrecognized: true);
+    CommandLineParser parser = new CommandLineParser();
     parser.addOption(CLIENT_ID,
         help: "an identifier used to identify the client");
     parser.addOption(CLIENT_VERSION, help: "the version of the client");
@@ -568,10 +580,10 @@ class Driver implements ServerStarter {
         defaultsTo: "as-is");
     parser.addOption(CACHE_FOLDER,
         help: "[path] path to the location where to cache data");
-    parser.addFlag(PREVIEW_DART2, help: "Enable the Dart 2.0 preview");
-    parser.addFlag(USE_CFE,
-        help: "Enable the Dart 2.0 Common Front End implementation");
+    parser.addFlag("preview-dart-2",
+        help: "Enable the Dart 2.0 preview (deprecated)", hide: true);
     parser.addFlag(USE_FASTA_PARSER,
+        defaultsTo: true,
         help: "Whether to enable parsing via the Fasta parser");
     parser.addOption(TRAIN_USING,
         help: "Pass in a directory to analyze for purposes of training an "

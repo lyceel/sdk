@@ -93,6 +93,7 @@ abstract class AnalysisContext {
   /**
    * An empty list of contexts.
    */
+  @deprecated
   static const List<AnalysisContext> EMPTY_LIST = const <AnalysisContext>[];
 
   /**
@@ -1291,7 +1292,11 @@ abstract class AnalysisOptions {
 
   /**
    * Return `true` if analyzer should enable the use of Dart 2.0 features.
+   *
+   * This getter is deprecated, and is hard-coded to always return true.
    */
+  @Deprecated(
+      'This getter is deprecated and is hard-coded to always return true.')
   bool get previewDart2;
 
   /**
@@ -1304,10 +1309,10 @@ abstract class AnalysisOptions {
   /**
    * Return `true` if strong mode analysis should be used.
    *
-   * This field is deprecated, and is hard-coded to always return true.
+   * This getter is deprecated, and is hard-coded to always return true.
    */
   @Deprecated(
-      'This field is deprecated and is hard-coded to always return true.')
+      'This getter is deprecated and is hard-coded to always return true.')
   bool get strongMode;
 
   /**
@@ -1456,14 +1461,12 @@ class AnalysisOptionsImpl implements AnalysisOptions {
   bool trackCacheDependencies = true;
 
   @override
-  bool useFastaParser = false;
-
-  @override
-  bool previewDart2 = true;
+  bool useFastaParser = true;
 
   @override
   bool disableCacheFlushing = false;
 
+  // A no-op setter.
   /**
    * A flag indicating whether implicit casts are allowed in [strongMode]
    * (they are always allowed in Dart 1.0 mode).
@@ -1491,6 +1494,12 @@ class AnalysisOptionsImpl implements AnalysisOptions {
   bool implicitDynamic = true;
 
   /**
+   * Return `true` to enable mixin declarations.
+   * https://github.com/dart-lang/language/issues/12
+   */
+  bool isMixinSupportEnabled = false;
+
+  /**
    * Initialize a newly created set of analysis options to have their default
    * values.
    */
@@ -1516,13 +1525,13 @@ class AnalysisOptionsImpl implements AnalysisOptions {
     lintRules = options.lintRules;
     preserveComments = options.preserveComments;
     useFastaParser = options.useFastaParser;
-    previewDart2 = options.previewDart2;
     if (options is AnalysisOptionsImpl) {
       declarationCasts = options.declarationCasts;
       strongModeHints = options.strongModeHints;
       implicitCasts = options.implicitCasts;
       nonnullableTypes = options.nonnullableTypes;
       implicitDynamic = options.implicitDynamic;
+      isMixinSupportEnabled = options.isMixinSupportEnabled;
     }
     trackCacheDependencies = options.trackCacheDependencies;
     disableCacheFlushing = options.disableCacheFlushing;
@@ -1644,6 +1653,11 @@ class AnalysisOptionsImpl implements AnalysisOptions {
   }
 
   @override
+  bool get previewDart2 => true;
+
+  set previewDart2(bool value) {}
+
+  @override
   Uint32List get signature {
     if (_signature == null) {
       ApiSignature buffer = new ApiSignature();
@@ -1657,6 +1671,7 @@ class AnalysisOptionsImpl implements AnalysisOptions {
       buffer.addBool(strongModeHints);
       buffer.addBool(useFastaParser);
       buffer.addBool(previewDart2);
+      buffer.addBool(isMixinSupportEnabled);
 
       // Append error processors.
       buffer.addInt(errorProcessors.length);
@@ -1971,6 +1986,7 @@ class ChangeNoticeImpl implements ChangeNotice {
   /**
    * An empty list of change notices.
    */
+  @deprecated
   static const List<ChangeNoticeImpl> EMPTY_LIST = const <ChangeNoticeImpl>[];
 
   /**

@@ -484,7 +484,7 @@ class ErrorVerifier extends RecursiveAstVisitor<Object> {
     ClassElementImpl outerClass = _enclosingClass;
     try {
       _isInNativeClass = node.nativeClause != null;
-      _enclosingClass = AbstractClassElementImpl.getImpl(node.element);
+      _enclosingClass = AbstractClassElementImpl.getImpl(node.declaredElement);
       _checkDuplicateClassMembers(node);
       _checkForBuiltInIdentifierAsName(
           node.name, CompileTimeErrorCode.BUILT_IN_IDENTIFIER_AS_TYPE_NAME);
@@ -520,7 +520,7 @@ class ErrorVerifier extends RecursiveAstVisitor<Object> {
    */
   void visitClassDeclarationIncrementally(ClassDeclaration node) {
     _isInNativeClass = node.nativeClause != null;
-    _enclosingClass = AbstractClassElementImpl.getImpl(node.element);
+    _enclosingClass = AbstractClassElementImpl.getImpl(node.declaredElement);
     // initialize initialFieldElementsMap
     if (_enclosingClass != null) {
       List<FieldElement> fieldElements = _enclosingClass.fields;
@@ -542,7 +542,7 @@ class ErrorVerifier extends RecursiveAstVisitor<Object> {
         node.name, CompileTimeErrorCode.BUILT_IN_IDENTIFIER_AS_TYPEDEF_NAME);
     ClassElementImpl outerClassElement = _enclosingClass;
     try {
-      _enclosingClass = AbstractClassElementImpl.getImpl(node.element);
+      _enclosingClass = AbstractClassElementImpl.getImpl(node.declaredElement);
       _checkClassInheritance(
           node, node.superclass, node.withClause, node.implementsClause);
     } finally {
@@ -581,7 +581,7 @@ class ErrorVerifier extends RecursiveAstVisitor<Object> {
   Object visitConstructorDeclaration(ConstructorDeclaration node) {
     ExecutableElement outerFunction = _enclosingFunction;
     try {
-      ConstructorElement constructorElement = node.element;
+      ConstructorElement constructorElement = node.declaredElement;
       _enclosingFunction = constructorElement;
       _isEnclosingConstructorConst = node.constKeyword != null;
       _isInFactory = node.factoryKeyword != null;
@@ -655,7 +655,7 @@ class ErrorVerifier extends RecursiveAstVisitor<Object> {
   Object visitEnumDeclaration(EnumDeclaration node) {
     ClassElement outerEnum = _enclosingEnum;
     try {
-      _enclosingEnum = node.element;
+      _enclosingEnum = node.declaredElement;
       _checkDuplicateEnumMembers(node);
       return super.visitEnumDeclaration(node);
     } finally {
@@ -756,7 +756,7 @@ class ErrorVerifier extends RecursiveAstVisitor<Object> {
 
   @override
   Object visitFunctionDeclaration(FunctionDeclaration node) {
-    ExecutableElement functionElement = node.element;
+    ExecutableElement functionElement = node.declaredElement;
     if (functionElement != null &&
         functionElement.enclosingElement is! CompilationUnitElement) {
       _hiddenElements.declare(functionElement);
@@ -787,7 +787,7 @@ class ErrorVerifier extends RecursiveAstVisitor<Object> {
       }
       _checkForTypeAnnotationDeferredClass(returnType);
       _checkForIllegalReturnType(returnType);
-      _checkForImplicitDynamicReturn(node.name, node.element);
+      _checkForImplicitDynamicReturn(node.name, node.declaredElement);
       return super.visitFunctionDeclaration(node);
     } finally {
       _enclosingFunction = outerFunction;
@@ -801,7 +801,7 @@ class ErrorVerifier extends RecursiveAstVisitor<Object> {
     if (node.parent is! FunctionDeclaration) {
       ExecutableElement outerFunction = _enclosingFunction;
       try {
-        _enclosingFunction = node.element;
+        _enclosingFunction = node.declaredElement;
         return super.visitFunctionExpression(node);
       } finally {
         _enclosingFunction = outerFunction;
@@ -873,7 +873,7 @@ class ErrorVerifier extends RecursiveAstVisitor<Object> {
 
   @override
   Object visitGenericTypeAlias(GenericTypeAlias node) {
-    if (_hasTypedefSelfReference(node.element)) {
+    if (_hasTypedefSelfReference(node.declaredElement)) {
       _errorReporter.reportErrorForNode(
           CompileTimeErrorCode.TYPE_ALIAS_CANNOT_REFERENCE_ITSELF, node);
     }
@@ -996,7 +996,7 @@ class ErrorVerifier extends RecursiveAstVisitor<Object> {
     ExecutableElement previousFunction = _enclosingFunction;
     try {
       _isInStaticMethod = node.isStatic;
-      _enclosingFunction = node.element;
+      _enclosingFunction = node.declaredElement;
       SimpleIdentifier identifier = node.name;
       String methodName = "";
       if (identifier != null) {
@@ -1022,7 +1022,7 @@ class ErrorVerifier extends RecursiveAstVisitor<Object> {
       _checkForConcreteClassWithAbstractMember(node);
       _checkForTypeAnnotationDeferredClass(returnType);
       _checkForIllegalReturnType(returnType);
-      _checkForImplicitDynamicReturn(node, node.element);
+      _checkForImplicitDynamicReturn(node, node.declaredElement);
       _checkForMustCallSuper(node);
       return super.visitMethodDeclaration(node);
     } finally {
@@ -1045,6 +1045,40 @@ class ErrorVerifier extends RecursiveAstVisitor<Object> {
     _checkTypeArguments(node);
     _checkForImplicitDynamicInvoke(node);
     return super.visitMethodInvocation(node);
+  }
+
+  @override
+  Object visitMixinDeclaration(MixinDeclaration node) {
+    // TODO(scheglov) Verify for all mixin errors.
+//    ClassElementImpl outerClass = _enclosingClass;
+    try {
+//      _isInNativeClass = node.nativeClause != null;
+//      _enclosingClass = AbstractClassElementImpl.getImpl(node.declaredElement);
+//      _checkDuplicateClassMembers(node);
+//      _checkForBuiltInIdentifierAsName(
+//          node.name, CompileTimeErrorCode.BUILT_IN_IDENTIFIER_AS_TYPE_NAME);
+//      _checkForMemberWithClassName();
+//      _checkForNoDefaultSuperConstructorImplicit(node);
+//      _checkForConflictingTypeVariableErrorCodes(node);
+
+      OnClause onClause = node.onClause;
+      ImplementsClause implementsClause = node.implementsClause;
+
+      // Only do error checks only if there is a non-null clause.
+      if (onClause != null || implementsClause != null) {
+        _checkMixinInheritance(node, onClause, implementsClause);
+      }
+//      visitClassDeclarationIncrementally(node);
+//      _checkForFinalNotInitializedInClass(node);
+//      _checkForDuplicateDefinitionInheritance();
+//      _checkForConflictingInstanceMethodSetter(node);
+//      _checkForBadFunctionUse(node);
+      return super.visitMixinDeclaration(node);
+    } finally {
+//      _isInNativeClass = false;
+//      _initialFieldElementsMap = null;
+//      _enclosingClass = outerClass;
+    }
   }
 
   @override
@@ -1273,7 +1307,7 @@ class ErrorVerifier extends RecursiveAstVisitor<Object> {
     AstNode grandparent = node.parent.parent;
     if (grandparent is! TopLevelVariableDeclaration &&
         grandparent is! FieldDeclaration) {
-      VariableElement element = node.element;
+      VariableElement element = node.declaredElement;
       if (element != null) {
         _hiddenElements.declare(element);
       }
@@ -1466,7 +1500,7 @@ class ErrorVerifier extends RecursiveAstVisitor<Object> {
    */
   void _checkDuplicateEnumMembers(EnumDeclaration node) {
     Map<String, Element> definedNames = new HashMap<String, Element>();
-    ClassElement element = node.element;
+    ClassElement element = node.declaredElement;
     String indexName = 'index';
     String valuesName = 'values';
     definedNames[indexName] = element.getField(indexName);
@@ -1559,7 +1593,7 @@ class ErrorVerifier extends RecursiveAstVisitor<Object> {
         definedNames[prefix.name] = prefix;
       }
     }
-    CompilationUnitElement element = node.element;
+    CompilationUnitElement element = node.declaredElement;
     if (element != _currentLibrary.definingCompilationUnit) {
       addWithoutChecking(_currentLibrary.definingCompilationUnit);
       for (CompilationUnitElement part in _currentLibrary.parts) {
@@ -1678,7 +1712,8 @@ class ErrorVerifier extends RecursiveAstVisitor<Object> {
       FormalParameter parameter = baseParameter(formalParameter);
       if (parameter is FieldFormalParameter) {
         FieldElement fieldElement =
-            (parameter.element as FieldFormalParameterElementImpl).field;
+            (parameter.declaredElement as FieldFormalParameterElementImpl)
+                .field;
         INIT_STATE state = fieldElementsMap[fieldElement];
         if (state == INIT_STATE.NOT_INIT) {
           fieldElementsMap[fieldElement] = INIT_STATE.INIT_IN_FIELD_FORMAL;
@@ -1982,17 +2017,6 @@ class ErrorVerifier extends RecursiveAstVisitor<Object> {
       libraryNames.sort();
       _errorReporter.reportErrorForNode(StaticWarningCode.AMBIGUOUS_IMPORT,
           node, [name, StringUtilities.printListOfQuotedNames(libraryNames)]);
-    } else if (element != null) {
-      List<Element> sdkElements =
-          node.getProperty(LibraryImportScope.conflictingSdkElements);
-      if (sdkElements != null) {
-        _errorReporter.reportErrorForNode(
-            StaticWarningCode.CONFLICTING_DART_IMPORT, node, [
-          element.displayName,
-          _getLibraryName(sdkElements[0]),
-          _getLibraryName(element)
-        ]);
-      }
     }
   }
 
@@ -3290,8 +3314,7 @@ class ErrorVerifier extends RecursiveAstVisitor<Object> {
       return false;
     }
     if (typeName.isDeferred) {
-      _errorReporter
-          .reportErrorForNode(errorCode, typeName, [typeName.name.name]);
+      _errorReporter.reportErrorForNode(errorCode, typeName);
       return true;
     }
     return false;
@@ -3330,10 +3353,10 @@ class ErrorVerifier extends RecursiveAstVisitor<Object> {
           // Note: this is a corner case that won't happen often, so adding a
           // field currentClass (see currentFunction) to ErrorVerifier isn't
           // worth if for this case, but if the field currentClass is added,
-          // then this message should become a todo to not lookup the
+          // then this message should become a to-do to not lookup the
           // grandparent node.
           if (grandParent is ClassDeclaration) {
-            ClassElement classElement = grandParent.element;
+            ClassElement classElement = grandParent.declaredElement;
             DartType classType = classElement.type;
             if (classType != null &&
                 (classType == _intType ||
@@ -3896,8 +3919,10 @@ class ErrorVerifier extends RecursiveAstVisitor<Object> {
    * assigned variable in a for-in statement.
    */
   void _checkForInIterable(ForEachStatement node) {
+    DeclaredIdentifier loopVariable = node.loopVariable;
+
     // Ignore malformed for statements.
-    if (node.identifier == null && node.loopVariable == null) {
+    if (node.identifier == null && loopVariable == null) {
       return;
     }
 
@@ -3911,7 +3936,7 @@ class ErrorVerifier extends RecursiveAstVisitor<Object> {
     }
 
     // The type of the loop variable.
-    SimpleIdentifier variable = node.identifier ?? node.loopVariable.identifier;
+    SimpleIdentifier variable = node.identifier ?? loopVariable.identifier;
     DartType variableType = getStaticType(variable);
 
     // TODO(mfairhurst) Check and guard against `for(void x in _)`?
@@ -3936,6 +3961,19 @@ class ErrorVerifier extends RecursiveAstVisitor<Object> {
     if (bestIterableType == null) {
       if (_typeSystem.isSubtypeOf(loopType, iterableType)) {
         bestIterableType = DynamicTypeImpl.instance;
+      }
+    }
+
+    if (loopVariable != null) {
+      if (loopVariable.isConst) {
+        _errorReporter.reportErrorForNode(
+            CompileTimeErrorCode.FOR_IN_WITH_CONST_VARIABLE, loopVariable);
+      }
+    } else if (node.identifier != null) {
+      Element variableElement = node.identifier.staticElement;
+      if (variableElement is VariableElement && variableElement.isConst) {
+        _errorReporter.reportErrorForNode(
+            CompileTimeErrorCode.FOR_IN_WITH_CONST_VARIABLE, node.identifier);
       }
     }
 
@@ -4248,7 +4286,7 @@ class ErrorVerifier extends RecursiveAstVisitor<Object> {
   void _checkForMismatchedAccessorTypes(
       Declaration accessorDeclaration, String accessorTextName) {
     ExecutableElement accessorElement =
-        accessorDeclaration.element as ExecutableElement;
+        accessorDeclaration.declaredElement as ExecutableElement;
     if (accessorElement is PropertyAccessorElement) {
       PropertyAccessorElement counterpartAccessor = null;
       ClassElement enclosingClassForCounterpart = null;
@@ -4914,6 +4952,39 @@ class ErrorVerifier extends RecursiveAstVisitor<Object> {
   }
 
   /**
+   * Verify that all classes of the given [onClause] are valid.
+   *
+   * See [CompileTimeErrorCode.MIXIN_DECLARES_CONSTRUCTOR],
+   * [CompileTimeErrorCode.MIXIN_INHERITS_FROM_NOT_OBJECT], and
+   * [CompileTimeErrorCode.MIXIN_REFERENCES_SUPER].
+   */
+  bool _checkForOnClauseErrorCodes(OnClause onClause) {
+    if (onClause == null) {
+      return false;
+    }
+    bool problemReported = false;
+    for (TypeName typeName in onClause.superclassConstraints) {
+      DartType type = typeName.type;
+      if (type is InterfaceType) {
+        if (_checkForExtendsOrImplementsDisallowedClass(
+            typeName,
+            CompileTimeErrorCode
+                .MIXIN_SUPER_CLASS_CONSTRAINT_DISALLOWED_CLASS)) {
+          problemReported = true;
+        } else {
+          if (_checkForExtendsOrImplementsDeferredClass(
+              typeName,
+              CompileTimeErrorCode
+                  .MIXIN_SUPER_CLASS_CONSTRAINT_DEFERRED_CLASS)) {
+            problemReported = true;
+          }
+        }
+      }
+    }
+    return problemReported;
+  }
+
+  /**
    * Verify the given operator-method [declaration], does not have an optional
    * parameter. This method assumes that the method declaration was tested to be
    * an operator declaration before being called.
@@ -5256,19 +5327,18 @@ class ErrorVerifier extends RecursiveAstVisitor<Object> {
       return;
     }
 
-    // Anything can be returned to `dynamic`, or to `Future<dynamic>` in
-    // an async function.
-    if (toType.isDynamic) {
-      return;
+    if (toType.isVoid) {
+      if (fromType.isVoid ||
+          fromType.isDynamic ||
+          fromType.isDartCoreNull ||
+          fromType.isBottom) {
+        return;
+      }
+    } else if (fromType.isVoid) {
+      if (toType.isDynamic || toType.isDartCoreNull || toType.isBottom) {
+        return;
+      }
     }
-
-    // Anything can be return to `Future<Null>` in an async function
-    if (_inAsync && toType.isDartCoreNull) {
-      return;
-    }
-
-    // If we're not in one of the `void` related special cases
-    // just check assignability.
     if (!expectedType.isVoid && !fromType.isVoid) {
       var checkWithType = (!_inAsync)
           ? fromType
@@ -5279,31 +5349,6 @@ class ErrorVerifier extends RecursiveAstVisitor<Object> {
       }
     }
 
-    // Void related special cases.  If the expression type flattens
-    // to `void`, and the expected type doesn't, then it's an error.
-    // Otherwise:
-    if (toType.isVoid) {
-      // In the case that the expected type is `void`
-      if (expectedType.isVoid) {
-        // Valid if the expression type is void, dynamic or Null
-        if (expressionType.isVoid ||
-            expressionType.isDynamic ||
-            expressionType.isDartCoreNull ||
-            expressionType.isBottom) {
-          return;
-        }
-      } else {
-        // The expected type is Future<void> or FutureOr<void>,
-        // and the return is valid if the expression type flattens
-        // to void, dynamic, or Null.
-        if (fromType.isVoid ||
-            fromType.isDynamic ||
-            fromType.isDartCoreNull ||
-            fromType.isBottom) {
-          return;
-        }
-      }
-    }
     reportTypeError();
   }
 
@@ -5382,7 +5427,7 @@ class ErrorVerifier extends RecursiveAstVisitor<Object> {
    */
   void _checkForTypeAliasCannotReferenceItself_function(
       FunctionTypeAlias alias) {
-    if (_hasTypedefSelfReference(alias.element)) {
+    if (_hasTypedefSelfReference(alias.declaredElement)) {
       _errorReporter.reportErrorForNode(
           CompileTimeErrorCode.TYPE_ALIAS_CANNOT_REFERENCE_ITSELF, alias);
     }
@@ -5503,7 +5548,7 @@ class ErrorVerifier extends RecursiveAstVisitor<Object> {
    * See [StaticTypeWarningCode.TYPE_PARAMETER_SUPERTYPE_OF_ITS_BOUND].
    */
   void _checkForTypeParameterSupertypeOfItsBound(TypeParameter parameter) {
-    TypeParameterElement element = parameter.element;
+    TypeParameterElement element = parameter.declaredElement;
     // prepare bound
     DartType bound = element.bound;
     if (bound == null) {
@@ -5652,7 +5697,7 @@ class ErrorVerifier extends RecursiveAstVisitor<Object> {
         parent2?.parent is! ConstructorDeclaration) {
       return;
     }
-    ParameterElement element = parameter.element;
+    ParameterElement element = parameter.declaredElement;
     if (element is FieldFormalParameterElement) {
       FieldElement fieldElement = element.field;
       if (fieldElement == null || fieldElement.isSynthetic) {
@@ -5661,7 +5706,7 @@ class ErrorVerifier extends RecursiveAstVisitor<Object> {
             parameter,
             [parameter.identifier.name]);
       } else {
-        ParameterElement parameterElement = parameter.element;
+        ParameterElement parameterElement = parameter.declaredElement;
         if (parameterElement is FieldFormalParameterElementImpl) {
           DartType declaredType = parameterElement.type;
           DartType fieldType = fieldElement.type;
@@ -5868,7 +5913,7 @@ class ErrorVerifier extends RecursiveAstVisitor<Object> {
     if (withClause == null || !_options.enableSuperMixins) {
       return;
     }
-    ClassElement classElement = node.element;
+    ClassElement classElement = node.declaredElement;
     var type = classElement.type;
     var supertype = classElement.supertype;
     List<InterfaceType> supertypesForMixinInference = <InterfaceType>[];
@@ -5906,6 +5951,35 @@ class ErrorVerifier extends RecursiveAstVisitor<Object> {
         ClassElementImpl.collectAllSupertypes(
             supertypesForMixinInference, mixinElement.type, type);
       }
+    }
+  }
+
+  /**
+   * Checks the class for problems with the superclass, mixins, or implemented
+   * interfaces.
+   */
+  void _checkMixinInheritance(MixinDeclaration node, OnClause onClause,
+      ImplementsClause implementsClause) {
+    // TODO(scheglov) Verify for all mixin errors.
+    // Only check for all of the inheritance logic around clauses if there
+    // isn't an error code such as "Cannot implement double" already.
+    if (!_checkForOnClauseErrorCodes(onClause) &&
+        !_checkForImplementsDisallowedClass(implementsClause)) {
+//      _checkForImplicitDynamicType(superclass);
+//      _checkForExtendsDeferredClass(superclass);
+      _checkForImplementsDeferredClass(implementsClause);
+//      _checkForNonAbstractClassInheritsAbstractMember(node.name);
+//      _checkForInconsistentMethodInheritance();
+//      _checkForRecursiveInterfaceInheritance(_enclosingClass);
+//      _checkForConflictingGetterAndMethod();
+//      _checkForConflictingInstanceGetterAndSuperclassMember();
+//      _checkImplementsSuperClass(implementsClause);
+//      _checkForMixinHasNoConstructors(node);
+//      _checkMixinInference(node, onClause);
+//      _checkForMixinWithConflictingPrivateMember(onClause, superclass);
+//      if (!disableConflictingGenericsCheck) {
+//        _checkForConflictingGenerics(node);
+//      }
     }
   }
 
@@ -6036,7 +6110,8 @@ class ErrorVerifier extends RecursiveAstVisitor<Object> {
   }
 
   MethodElement _findOverriddenMemberThatMustCallSuper(MethodDeclaration node) {
-    ExecutableElement overriddenMember = _getOverriddenMember(node.element);
+    ExecutableElement overriddenMember =
+        _getOverriddenMember(node.declaredElement);
     List<ExecutableElement> seen = <ExecutableElement>[];
     while (
         overriddenMember is MethodElement && !seen.contains(overriddenMember)) {
@@ -6476,7 +6551,7 @@ class ErrorVerifier extends RecursiveAstVisitor<Object> {
       if (fieldDeclaration is FieldDeclaration) {
         for (VariableDeclaration field in fieldDeclaration.fields.variables) {
           if (field.initializer == null) {
-            fields.add(field.element);
+            fields.add(field.declaredElement);
           }
         }
       }

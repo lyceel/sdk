@@ -122,7 +122,7 @@ class ResolutionVerifier extends RecursiveAstVisitor<Object> {
   Object visitCompilationUnit(CompilationUnit node) {
     node.visitChildren(this);
     return _checkResolved(
-        node, node.element, (node) => node is CompilationUnitElement);
+        node, node.declaredElement, (node) => node is CompilationUnitElement);
   }
 
   @override
@@ -132,7 +132,7 @@ class ResolutionVerifier extends RecursiveAstVisitor<Object> {
   @override
   Object visitFunctionDeclaration(FunctionDeclaration node) {
     node.visitChildren(this);
-    if (node.element is LibraryElement) {
+    if (node.declaredElement is LibraryElement) {
       _wrongTypedNodes.add(node);
     }
     return null;
@@ -282,7 +282,7 @@ class ResolutionVerifier extends RecursiveAstVisitor<Object> {
       AstNode root = node.root;
       if (root is CompilationUnit) {
         CompilationUnit rootCU = root;
-        if (rootCU.element != null) {
+        if (rootCU.declaredElement != null) {
           return resolutionMap
               .elementDeclaredByCompilationUnit(rootCU)
               .source
@@ -348,11 +348,10 @@ class ResolverTestCase extends EngineTestCase {
    */
   AnalysisOptions get defaultAnalysisOptions => new AnalysisOptionsImpl();
 
-  bool get enableKernelDriver => false;
-
   bool get enableNewAnalysisDriver => false;
 
-  bool get previewDart2 => analysisOptions.previewDart2;
+  /// TODO(brianwilkerson) Remove this getter.
+  bool get previewDart2 => true;
 
   /**
    * Return a type provider that can be used to test the results of resolution.
@@ -365,7 +364,8 @@ class ResolverTestCase extends EngineTestCase {
       if (analysisResults.isEmpty) {
         fail('typeProvider can be called after computing an analysis result.');
       }
-      return analysisResults.values.first.unit.element.context.typeProvider;
+      return analysisResults
+          .values.first.unit.declaredElement.context.typeProvider;
     } else {
       return analysisContext2.typeProvider;
     }
@@ -377,8 +377,6 @@ class ResolverTestCase extends EngineTestCase {
    * @return a type system
    */
   TypeSystem get typeSystem => analysisContext2.typeSystem;
-
-  bool get useCFE => false;
 
   /**
    * Add a source file with the given [filePath] in the root of the file system.
@@ -589,7 +587,7 @@ class ResolverTestCase extends EngineTestCase {
     Source definingCompilationUnitSource = createNamedSource(fileName);
     List<CompilationUnitElement> sourcedCompilationUnits;
     if (typeNames == null) {
-      sourcedCompilationUnits = CompilationUnitElement.EMPTY_LIST;
+      sourcedCompilationUnits = const <CompilationUnitElement>[];
     } else {
       int count = typeNames.length;
       sourcedCompilationUnits = new List<CompilationUnitElement>(count);
@@ -663,9 +661,6 @@ class ResolverTestCase extends EngineTestCase {
     }
     options ??= defaultAnalysisOptions;
     if (enableNewAnalysisDriver) {
-      if (useCFE) {
-        (options as AnalysisOptionsImpl)..useFastaParser = true;
-      }
       DartSdk sdk = new MockSdk(resourceProvider: resourceProvider)
         ..context.analysisOptions = options;
 
@@ -697,8 +692,7 @@ class ResolverTestCase extends EngineTestCase {
           fileContentOverlay,
           null,
           sourceFactory,
-          options,
-          enableKernelDriver: enableKernelDriver);
+          options);
       scheduler.start();
     } else {
       if (packages != null) {

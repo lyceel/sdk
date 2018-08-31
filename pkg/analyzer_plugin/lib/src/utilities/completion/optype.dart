@@ -124,9 +124,8 @@ class OpType {
     // If a value should be suggested, suggest also constructors.
     if (optype.includeReturnValueSuggestions) {
       // Careful: in angular plugin, `target.unit` may be null!
-      CompilationUnitElement unitElement = target.unit?.element;
-      if (unitElement != null &&
-          unitElement.context.analysisOptions.previewDart2) {
+      CompilationUnitElement unitElement = target.unit?.declaredElement;
+      if (unitElement != null) {
         optype.includeConstructorSuggestions = true;
       }
     }
@@ -198,7 +197,7 @@ class OpType {
         _requiredType = parent.expression?.staticType;
       }
     } else if (node is VariableDeclaration && node.initializer == entity) {
-      _requiredType = node.element?.type;
+      _requiredType = node.declaredElement?.type;
     } else if (entity is Expression && entity.staticParameterElement != null) {
       _requiredType = entity.staticParameterElement.type;
     }
@@ -319,7 +318,7 @@ class _OpTypeAstVisitor extends GeneralizingAstVisitor {
           index = node.arguments.length - 1;
         }
       } else {
-        index = node.arguments.indexOf(entity);
+        index = node.arguments.indexOf(entity as Expression);
       }
       if (0 <= index && index < parameters.length) {
         ParameterElement param = parameters[index];

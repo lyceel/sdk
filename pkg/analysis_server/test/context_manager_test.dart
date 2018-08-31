@@ -35,7 +35,6 @@ import 'package:test_reflective_loader/test_reflective_loader.dart';
 import 'package:watcher/watcher.dart';
 
 import 'mock_sdk.dart';
-import 'mocks.dart';
 import 'src/plugin/plugin_manager_test.dart';
 
 main() {
@@ -445,10 +444,6 @@ test_pack:lib/''');
     newFile('$examplePath/${ContextManagerImpl.PACKAGE_SPEC_NAME}');
     newFile('$examplePath/example.dart');
 
-    packageMapProvider.packageMap['proj'] = <Folder>[
-      resourceProvider.getResource(libPath)
-    ];
-
     manager.setRoots(<String>[projPath], <String>[], <String, String>{});
 
     expect(callbacks.currentContextRoots, hasLength(2));
@@ -495,7 +490,6 @@ test_pack:lib/''');
   }
 
   void test_setRoots_addFolderWithoutPubspec() {
-    packageMapProvider.packageMap = null;
     manager.setRoots(<String>[projPath], <String>[], <String, String>{});
     // verify
     expect(callbacks.currentContextRoots, unorderedEquals([projPath]));
@@ -981,7 +975,6 @@ test_pack:lib/''');
   }
 
   void test_setRoots_removeFolderWithoutPubspec() {
-    packageMapProvider.packageMap = null;
     // add one root - there is a context
     manager.setRoots(<String>[projPath], <String>[], <String, String>{});
     expect(callbacks.currentContextRoots, hasLength(1));
@@ -1613,26 +1606,6 @@ test_pack:lib/''');
     });
   }
 
-  test_watch_modifyPackageMapDependency_fail() async {
-    // create a dependency file
-    String dependencyPath = join(projPath, 'dep');
-    resourceProvider.newFile(dependencyPath, 'contents');
-    packageMapProvider.dependencies.add(dependencyPath);
-    // create a Dart file
-    String dartFilePath = join(projPath, 'main.dart');
-    resourceProvider.newFile(dartFilePath, 'contents');
-    // the created context has the expected empty package map
-    manager.setRoots(<String>[projPath], <String>[], <String, String>{});
-    expect(_currentPackageMap, isEmpty);
-    // Change the package map dependency so that the packageMapProvider is
-    // re-run, and arrange for it to return null from computePackageMap().
-    packageMapProvider.packageMap = null;
-    resourceProvider.modifyFile(dependencyPath, 'new contents');
-    await pumpEventQueue();
-    // The package map should have been changed to null.
-    expect(_currentPackageMap, isEmpty);
-  }
-
   test_watch_modifyPackagespec() {
     String packagesPath = convertPath('$projPath/.packages');
     String filePath = convertPath('$projPath/bin/main.dart');
@@ -1700,8 +1673,6 @@ abstract class ContextManagerTest extends Object with ResourceProviderMixin {
   ContextManagerImpl manager;
 
   TestContextManagerCallbacks callbacks;
-
-  MockPackageMapProvider packageMapProvider;
 
   UriResolver packageResolver = null;
 
@@ -1771,7 +1742,6 @@ abstract class ContextManagerTest extends Object with ResourceProviderMixin {
     processRequiredPlugins();
     projPath = convertPath('/my/proj');
     resourceProvider.newFolder(projPath);
-    packageMapProvider = new MockPackageMapProvider();
     // Create an SDK in the mock file system.
     new MockSdk(generateSummaryFiles: true, resourceProvider: resourceProvider);
     DartSdkManager sdkManager = new DartSdkManager(convertPath('/'), true);
@@ -1780,7 +1750,6 @@ abstract class ContextManagerTest extends Object with ResourceProviderMixin {
         new FileContentOverlay(),
         sdkManager,
         providePackageResolver,
-        packageMapProvider,
         analysisFilesGlobs,
         InstrumentationService.NULL_SERVICE,
         new AnalysisOptionsImpl());
@@ -1908,7 +1877,6 @@ linter:
 
     // Verify options were set.
     expect(analysisOptions.enableSuperMixins, isTrue);
-    expect(analysisOptions.previewDart2, isTrue);
     expect(errorProcessors, hasLength(2));
     expect(lints, hasLength(2));
 
@@ -2036,7 +2004,7 @@ include: package:boo/other_options.yaml
     String sdkExtPath = '$projPath/sdk_ext';
     newFile('$projPath/test', content: 'test.dart');
     newFile('$sdkExtPath/entry.dart');
-    List<int> bytes = new SummaryBuilder([], null, true).build();
+    List<int> bytes = new SummaryBuilder([], null).build();
     newFileWithBytes('$projPath/sdk.ds', bytes);
     // Setup _embedder.yaml.
     newFile('$libPath/_embedder.yaml', content: r'''
@@ -2618,11 +2586,6 @@ class TestContextManagerCallbacks extends ContextManagerCallbacks {
   @override
   void broadcastWatchEvent(WatchEvent event) {
     watchEvents.add(event);
-  }
-
-  @override
-  void computingPackageMap(bool computing) {
-    // Do nothing.
   }
 
   @override

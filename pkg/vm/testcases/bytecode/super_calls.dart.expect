@@ -190,7 +190,7 @@ Bytecode {
   PushConstant         CP#2
   IndirectStaticCall   1, CP#1
   PushConstant         CP#3
-  InstanceCall1        3, CP#5
+  InstanceCall         3, CP#5
   ReturnTOS
   PushConstant         CP#6
   ReturnTOS
@@ -205,7 +205,7 @@ ConstantPool {
   [6] = Null
 }
 ]  method testSuperCallViaGetter() → dynamic
-    return super.{self::Base1::bar}.call<core::int>("param");
+    return [@vm.call-site-attributes.metadata=receiverType:dynamic] super.{self::Base1::bar}.call<core::int>("param");
 [@vm.bytecode=
 Bytecode {
   Entry                1
@@ -444,7 +444,7 @@ Bytecode {
   PushConstant         CP#10
   IndirectStaticCall   2, CP#9
   PushConstant         CP#11
-  InstanceCall1        3, CP#13
+  InstanceCall         3, CP#13
   ReturnTOS
   PushConstant         CP#14
   ReturnTOS
@@ -467,7 +467,7 @@ ConstantPool {
   [14] = Null
 }
 ]  method testSuperCallViaGetter() → dynamic
-    return super.{self::Base2::bar}.call<core::int>("param");
+    return [@vm.call-site-attributes.metadata=receiverType:dynamic] super.{self::Base2::bar}.call<core::int>("param");
 [@vm.bytecode=
 Bytecode {
   Entry                1

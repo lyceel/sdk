@@ -10,8 +10,12 @@ import "dart:io" show File;
 
 import "dart:typed_data" show Uint8List;
 
+import "package:kernel/target/targets.dart" show TargetFlags;
+
 import "package:testing/testing.dart"
     show Chain, ChainContext, Result, Step, TestDescription, runMe;
+
+import "package:vm/target/vm.dart" show VmTarget;
 
 import "package:yaml/yaml.dart" show YamlList, YamlMap, YamlNode, loadYamlNode;
 
@@ -86,7 +90,6 @@ class MessageTestSuite extends ChainContext {
       String externalTest;
       bool frontendInternal = false;
       String analyzerCode;
-      String dart2jsCode;
       Severity severity;
       YamlNode badSeverity;
 
@@ -111,10 +114,6 @@ class MessageTestSuite extends ChainContext {
 
           case "analyzerCode":
             analyzerCode = value;
-            break;
-
-          case "dart2jsCode":
-            dart2jsCode = value;
             break;
 
           case "bytes":
@@ -256,17 +255,6 @@ class MessageTestSuite extends ChainContext {
                   " on an example to find the code."
                   " The code is printed just before the file name."
               : null);
-
-      yield createDescription(
-          "dart2jsCode",
-          null,
-          exampleAndAnalyzerCodeRequired &&
-                  !frontendInternal &&
-                  analyzerCode != null &&
-                  dart2jsCode == null
-              ? "No dart2js code for $name."
-                  " Try using *ignored* or *fatal*"
-              : null);
     }
   }
 
@@ -318,7 +306,7 @@ class BytesExample extends Example {
   final Uint8List bytes;
 
   BytesExample(String name, String code, this.node)
-      : bytes = new Uint8List.fromList(node.value),
+      : bytes = new Uint8List.fromList(node.cast<int>()),
         super(name, code);
 }
 
@@ -455,6 +443,7 @@ class Compile extends Step<Example, Null, MessageTestSuite> {
         new CompilerOptions()
           ..sdkSummary = computePlatformBinariesLocation()
               .resolve("vm_platform_strong.dill")
+          ..target = new VmTarget(new TargetFlags(strongMode: true))
           ..fileSystem = new HybridFileSystem(suite.fileSystem)
           ..onProblem = (FormattedMessage problem, Severity severity,
               List<FormattedMessage> context) {

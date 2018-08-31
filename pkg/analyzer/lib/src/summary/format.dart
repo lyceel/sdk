@@ -3921,7 +3921,6 @@ class PackageBundleBuilder extends Object
   List<String> _linkedLibraryUris;
   int _majorVersion;
   int _minorVersion;
-  List<String> _unlinkedUnitHashes;
   List<UnlinkedUnitBuilder> _unlinkedUnits;
   List<String> _unlinkedUnitUris;
 
@@ -3995,15 +3994,8 @@ class PackageBundleBuilder extends Object
   }
 
   @override
-  List<String> get unlinkedUnitHashes => _unlinkedUnitHashes ??= <String>[];
-
-  /**
-   * List of MD5 hashes of the files listed in [unlinkedUnitUris].  Each hash
-   * is encoded as a hexadecimal string using lower case letters.
-   */
-  void set unlinkedUnitHashes(List<String> value) {
-    this._unlinkedUnitHashes = value;
-  }
+  List<String> get unlinkedUnitHashes =>
+      throw new UnimplementedError('attempt to access deprecated field');
 
   @override
   List<UnlinkedUnitBuilder> get unlinkedUnits =>
@@ -4033,7 +4025,6 @@ class PackageBundleBuilder extends Object
       List<String> linkedLibraryUris,
       int majorVersion,
       int minorVersion,
-      List<String> unlinkedUnitHashes,
       List<UnlinkedUnitBuilder> unlinkedUnits,
       List<String> unlinkedUnitUris})
       : _apiSignature = apiSignature,
@@ -4042,7 +4033,6 @@ class PackageBundleBuilder extends Object
         _linkedLibraryUris = linkedLibraryUris,
         _majorVersion = majorVersion,
         _minorVersion = minorVersion,
-        _unlinkedUnitHashes = unlinkedUnitHashes,
         _unlinkedUnits = unlinkedUnits,
         _unlinkedUnitUris = unlinkedUnitUris;
 
@@ -4052,7 +4042,6 @@ class PackageBundleBuilder extends Object
   void flushInformative() {
     _dependencies = null;
     _linkedLibraries?.forEach((b) => b.flushInformative());
-    _unlinkedUnitHashes = null;
     _unlinkedUnits?.forEach((b) => b.flushInformative());
   }
 
@@ -4107,7 +4096,6 @@ class PackageBundleBuilder extends Object
     fb.Offset offset_dependencies;
     fb.Offset offset_linkedLibraries;
     fb.Offset offset_linkedLibraryUris;
-    fb.Offset offset_unlinkedUnitHashes;
     fb.Offset offset_unlinkedUnits;
     fb.Offset offset_unlinkedUnitUris;
     if (_apiSignature != null) {
@@ -4124,10 +4112,6 @@ class PackageBundleBuilder extends Object
     if (!(_linkedLibraryUris == null || _linkedLibraryUris.isEmpty)) {
       offset_linkedLibraryUris = fbBuilder.writeList(
           _linkedLibraryUris.map((b) => fbBuilder.writeString(b)).toList());
-    }
-    if (!(_unlinkedUnitHashes == null || _unlinkedUnitHashes.isEmpty)) {
-      offset_unlinkedUnitHashes = fbBuilder.writeList(
-          _unlinkedUnitHashes.map((b) => fbBuilder.writeString(b)).toList());
     }
     if (!(_unlinkedUnits == null || _unlinkedUnits.isEmpty)) {
       offset_unlinkedUnits = fbBuilder
@@ -4155,9 +4139,6 @@ class PackageBundleBuilder extends Object
     }
     if (_minorVersion != null && _minorVersion != 0) {
       fbBuilder.addUint32(6, _minorVersion);
-    }
-    if (offset_unlinkedUnitHashes != null) {
-      fbBuilder.addOffset(4, offset_unlinkedUnitHashes);
     }
     if (offset_unlinkedUnits != null) {
       fbBuilder.addOffset(2, offset_unlinkedUnits);
@@ -4196,7 +4177,6 @@ class _PackageBundleImpl extends Object
   List<String> _linkedLibraryUris;
   int _majorVersion;
   int _minorVersion;
-  List<String> _unlinkedUnitHashes;
   List<idl.UnlinkedUnit> _unlinkedUnits;
   List<String> _unlinkedUnitUris;
 
@@ -4242,11 +4222,8 @@ class _PackageBundleImpl extends Object
   }
 
   @override
-  List<String> get unlinkedUnitHashes {
-    _unlinkedUnitHashes ??= const fb.ListReader<String>(const fb.StringReader())
-        .vTableGet(_bc, _bcOffset, 4, const <String>[]);
-    return _unlinkedUnitHashes;
-  }
+  List<String> get unlinkedUnitHashes =>
+      throw new UnimplementedError('attempt to access deprecated field');
 
   @override
   List<idl.UnlinkedUnit> get unlinkedUnits {
@@ -4279,8 +4256,6 @@ abstract class _PackageBundleMixin implements idl.PackageBundle {
       _result["linkedLibraryUris"] = linkedLibraryUris;
     if (majorVersion != 0) _result["majorVersion"] = majorVersion;
     if (minorVersion != 0) _result["minorVersion"] = minorVersion;
-    if (unlinkedUnitHashes.isNotEmpty)
-      _result["unlinkedUnitHashes"] = unlinkedUnitHashes;
     if (unlinkedUnits.isNotEmpty)
       _result["unlinkedUnits"] =
           unlinkedUnits.map((_value) => _value.toJson()).toList();
@@ -4297,7 +4272,6 @@ abstract class _PackageBundleMixin implements idl.PackageBundle {
         "linkedLibraryUris": linkedLibraryUris,
         "majorVersion": majorVersion,
         "minorVersion": minorVersion,
-        "unlinkedUnitHashes": unlinkedUnitHashes,
         "unlinkedUnits": unlinkedUnits,
         "unlinkedUnitUris": unlinkedUnitUris,
       };
@@ -5748,6 +5722,7 @@ class UnlinkedClassBuilder extends Object
   List<EntityRefBuilder> _mixins;
   String _name;
   int _nameOffset;
+  List<EntityRefBuilder> _superclassConstraints;
   EntityRefBuilder _supertype;
   List<UnlinkedTypeParamBuilder> _typeParameters;
 
@@ -5879,6 +5854,19 @@ class UnlinkedClassBuilder extends Object
   }
 
   @override
+  List<EntityRefBuilder> get superclassConstraints =>
+      _superclassConstraints ??= <EntityRefBuilder>[];
+
+  /**
+   * Superclass constraints for this mixin declaration. The list will be empty
+   * if this class is not a mixin declaration, or if the declaration does not
+   * have an `on` clause (in which case the type `Object` is implied).
+   */
+  void set superclassConstraints(List<EntityRefBuilder> value) {
+    this._superclassConstraints = value;
+  }
+
+  @override
   EntityRefBuilder get supertype => _supertype;
 
   /**
@@ -5914,6 +5902,7 @@ class UnlinkedClassBuilder extends Object
       List<EntityRefBuilder> mixins,
       String name,
       int nameOffset,
+      List<EntityRefBuilder> superclassConstraints,
       EntityRefBuilder supertype,
       List<UnlinkedTypeParamBuilder> typeParameters})
       : _annotations = annotations,
@@ -5928,6 +5917,7 @@ class UnlinkedClassBuilder extends Object
         _mixins = mixins,
         _name = name,
         _nameOffset = nameOffset,
+        _superclassConstraints = superclassConstraints,
         _supertype = supertype,
         _typeParameters = typeParameters;
 
@@ -5943,6 +5933,7 @@ class UnlinkedClassBuilder extends Object
     _interfaces?.forEach((b) => b.flushInformative());
     _mixins?.forEach((b) => b.flushInformative());
     _nameOffset = null;
+    _superclassConstraints?.forEach((b) => b.flushInformative());
     _supertype?.flushInformative();
     _typeParameters?.forEach((b) => b.flushInformative());
   }
@@ -6005,6 +5996,14 @@ class UnlinkedClassBuilder extends Object
     }
     signature.addBool(this._isMixinApplication == true);
     signature.addBool(this._hasNoSupertype == true);
+    if (this._superclassConstraints == null) {
+      signature.addInt(0);
+    } else {
+      signature.addInt(this._superclassConstraints.length);
+      for (var x in this._superclassConstraints) {
+        x?.collectApiSignature(signature);
+      }
+    }
   }
 
   fb.Offset finish(fb.Builder fbBuilder) {
@@ -6016,6 +6015,7 @@ class UnlinkedClassBuilder extends Object
     fb.Offset offset_interfaces;
     fb.Offset offset_mixins;
     fb.Offset offset_name;
+    fb.Offset offset_superclassConstraints;
     fb.Offset offset_supertype;
     fb.Offset offset_typeParameters;
     if (!(_annotations == null || _annotations.isEmpty)) {
@@ -6046,6 +6046,10 @@ class UnlinkedClassBuilder extends Object
     }
     if (_name != null) {
       offset_name = fbBuilder.writeString(_name);
+    }
+    if (!(_superclassConstraints == null || _superclassConstraints.isEmpty)) {
+      offset_superclassConstraints = fbBuilder.writeList(
+          _superclassConstraints.map((b) => b.finish(fbBuilder)).toList());
     }
     if (_supertype != null) {
       offset_supertype = _supertype.finish(fbBuilder);
@@ -6091,6 +6095,9 @@ class UnlinkedClassBuilder extends Object
     if (_nameOffset != null && _nameOffset != 0) {
       fbBuilder.addUint32(1, _nameOffset);
     }
+    if (offset_superclassConstraints != null) {
+      fbBuilder.addOffset(14, offset_superclassConstraints);
+    }
     if (offset_supertype != null) {
       fbBuilder.addOffset(3, offset_supertype);
     }
@@ -6129,6 +6136,7 @@ class _UnlinkedClassImpl extends Object
   List<idl.EntityRef> _mixins;
   String _name;
   int _nameOffset;
+  List<idl.EntityRef> _superclassConstraints;
   idl.EntityRef _supertype;
   List<idl.UnlinkedTypeParam> _typeParameters;
 
@@ -6216,6 +6224,14 @@ class _UnlinkedClassImpl extends Object
   }
 
   @override
+  List<idl.EntityRef> get superclassConstraints {
+    _superclassConstraints ??=
+        const fb.ListReader<idl.EntityRef>(const _EntityRefReader())
+            .vTableGet(_bc, _bcOffset, 14, const <idl.EntityRef>[]);
+    return _superclassConstraints;
+  }
+
+  @override
   idl.EntityRef get supertype {
     _supertype ??= const _EntityRefReader().vTableGet(_bc, _bcOffset, 3, null);
     return _supertype;
@@ -6256,6 +6272,9 @@ abstract class _UnlinkedClassMixin implements idl.UnlinkedClass {
       _result["mixins"] = mixins.map((_value) => _value.toJson()).toList();
     if (name != '') _result["name"] = name;
     if (nameOffset != 0) _result["nameOffset"] = nameOffset;
+    if (superclassConstraints.isNotEmpty)
+      _result["superclassConstraints"] =
+          superclassConstraints.map((_value) => _value.toJson()).toList();
     if (supertype != null) _result["supertype"] = supertype.toJson();
     if (typeParameters.isNotEmpty)
       _result["typeParameters"] =
@@ -6277,6 +6296,7 @@ abstract class _UnlinkedClassMixin implements idl.UnlinkedClass {
         "mixins": mixins,
         "name": name,
         "nameOffset": nameOffset,
+        "superclassConstraints": superclassConstraints,
         "supertype": supertype,
         "typeParameters": typeParameters,
       };
@@ -11411,6 +11431,7 @@ class UnlinkedUnitBuilder extends Object
   int _libraryNameLength;
   int _libraryNameOffset;
   List<int> _lineStarts;
+  List<UnlinkedClassBuilder> _mixins;
   List<UnlinkedPartBuilder> _parts;
   UnlinkedPublicNamespaceBuilder _publicNamespace;
   List<UnlinkedReferenceBuilder> _references;
@@ -11580,6 +11601,16 @@ class UnlinkedUnitBuilder extends Object
   }
 
   @override
+  List<UnlinkedClassBuilder> get mixins => _mixins ??= <UnlinkedClassBuilder>[];
+
+  /**
+   * Mixins declared in the compilation unit.
+   */
+  void set mixins(List<UnlinkedClassBuilder> value) {
+    this._mixins = value;
+  }
+
+  @override
   List<UnlinkedPartBuilder> get parts => _parts ??= <UnlinkedPartBuilder>[];
 
   /**
@@ -11651,6 +11682,7 @@ class UnlinkedUnitBuilder extends Object
       int libraryNameLength,
       int libraryNameOffset,
       List<int> lineStarts,
+      List<UnlinkedClassBuilder> mixins,
       List<UnlinkedPartBuilder> parts,
       UnlinkedPublicNamespaceBuilder publicNamespace,
       List<UnlinkedReferenceBuilder> references,
@@ -11670,6 +11702,7 @@ class UnlinkedUnitBuilder extends Object
         _libraryNameLength = libraryNameLength,
         _libraryNameOffset = libraryNameOffset,
         _lineStarts = lineStarts,
+        _mixins = mixins,
         _parts = parts,
         _publicNamespace = publicNamespace,
         _references = references,
@@ -11691,6 +11724,7 @@ class UnlinkedUnitBuilder extends Object
     _libraryNameLength = null;
     _libraryNameOffset = null;
     _lineStarts = null;
+    _mixins?.forEach((b) => b.flushInformative());
     _parts?.forEach((b) => b.flushInformative());
     _publicNamespace?.flushInformative();
     _references?.forEach((b) => b.flushInformative());
@@ -11794,6 +11828,14 @@ class UnlinkedUnitBuilder extends Object
         signature.addInt(x);
       }
     }
+    if (this._mixins == null) {
+      signature.addInt(0);
+    } else {
+      signature.addInt(this._mixins.length);
+      for (var x in this._mixins) {
+        x?.collectApiSignature(signature);
+      }
+    }
   }
 
   List<int> toBuffer() {
@@ -11813,6 +11855,7 @@ class UnlinkedUnitBuilder extends Object
     fb.Offset offset_libraryDocumentationComment;
     fb.Offset offset_libraryName;
     fb.Offset offset_lineStarts;
+    fb.Offset offset_mixins;
     fb.Offset offset_parts;
     fb.Offset offset_publicNamespace;
     fb.Offset offset_references;
@@ -11857,6 +11900,10 @@ class UnlinkedUnitBuilder extends Object
     }
     if (!(_lineStarts == null || _lineStarts.isEmpty)) {
       offset_lineStarts = fbBuilder.writeListUint32(_lineStarts);
+    }
+    if (!(_mixins == null || _mixins.isEmpty)) {
+      offset_mixins =
+          fbBuilder.writeList(_mixins.map((b) => b.finish(fbBuilder)).toList());
     }
     if (!(_parts == null || _parts.isEmpty)) {
       offset_parts =
@@ -11920,6 +11967,9 @@ class UnlinkedUnitBuilder extends Object
     if (offset_lineStarts != null) {
       fbBuilder.addOffset(17, offset_lineStarts);
     }
+    if (offset_mixins != null) {
+      fbBuilder.addOffset(20, offset_mixins);
+    }
     if (offset_parts != null) {
       fbBuilder.addOffset(11, offset_parts);
     }
@@ -11974,6 +12024,7 @@ class _UnlinkedUnitImpl extends Object
   int _libraryNameLength;
   int _libraryNameOffset;
   List<int> _lineStarts;
+  List<idl.UnlinkedClass> _mixins;
   List<idl.UnlinkedPart> _parts;
   idl.UnlinkedPublicNamespace _publicNamespace;
   List<idl.UnlinkedReference> _references;
@@ -12086,6 +12137,14 @@ class _UnlinkedUnitImpl extends Object
   }
 
   @override
+  List<idl.UnlinkedClass> get mixins {
+    _mixins ??=
+        const fb.ListReader<idl.UnlinkedClass>(const _UnlinkedClassReader())
+            .vTableGet(_bc, _bcOffset, 20, const <idl.UnlinkedClass>[]);
+    return _mixins;
+  }
+
+  @override
   List<idl.UnlinkedPart> get parts {
     _parts ??=
         const fb.ListReader<idl.UnlinkedPart>(const _UnlinkedPartReader())
@@ -12155,6 +12214,8 @@ abstract class _UnlinkedUnitMixin implements idl.UnlinkedUnit {
     if (libraryNameOffset != 0)
       _result["libraryNameOffset"] = libraryNameOffset;
     if (lineStarts.isNotEmpty) _result["lineStarts"] = lineStarts;
+    if (mixins.isNotEmpty)
+      _result["mixins"] = mixins.map((_value) => _value.toJson()).toList();
     if (parts.isNotEmpty)
       _result["parts"] = parts.map((_value) => _value.toJson()).toList();
     if (publicNamespace != null)
@@ -12186,6 +12247,7 @@ abstract class _UnlinkedUnitMixin implements idl.UnlinkedUnit {
         "libraryNameLength": libraryNameLength,
         "libraryNameOffset": libraryNameOffset,
         "lineStarts": lineStarts,
+        "mixins": mixins,
         "parts": parts,
         "publicNamespace": publicNamespace,
         "references": references,

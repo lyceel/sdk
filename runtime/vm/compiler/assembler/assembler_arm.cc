@@ -85,6 +85,7 @@ void Assembler::EmitType5(Condition cond, int32_t offset, bool link) {
   ASSERT(cond != kNoCondition);
   int32_t encoding = static_cast<int32_t>(cond) << kConditionShift |
                      5 << kTypeShift | (link ? 1 : 0) << kLinkShift;
+  BailoutIfInvalidBranchOffset(offset);
   Emit(Assembler::EncodeBranchOffset(offset, encoding));
 }
 
@@ -1376,7 +1377,7 @@ void Assembler::Drop(intptr_t stack_elements) {
 }
 
 intptr_t Assembler::FindImmediate(int32_t imm) {
-  return object_pool_wrapper_.FindImmediate(imm);
+  return object_pool_wrapper().FindImmediate(imm);
 }
 
 // Uses a code sequence that can easily be decoded.
@@ -1433,7 +1434,7 @@ void Assembler::CheckCodePointer() {
 }
 
 void Assembler::RestoreCodePointer() {
-  ldr(CODE_REG, Address(FP, kPcMarkerSlotFromFp * kWordSize));
+  ldr(CODE_REG, Address(FP, compiler_frame_layout.code_from_fp * kWordSize));
   CheckCodePointer();
 }
 
@@ -1479,8 +1480,8 @@ void Assembler::LoadObjectHelper(Register rd,
     // Make sure that class CallPattern is able to decode this load from the
     // object pool.
     const int32_t offset = ObjectPool::element_offset(
-        is_unique ? object_pool_wrapper_.AddObject(object)
-                  : object_pool_wrapper_.FindObject(object));
+        is_unique ? object_pool_wrapper().AddObject(object)
+                  : object_pool_wrapper().FindObject(object));
     LoadWordFromPoolOffset(rd, offset - kHeapObjectTag, pp, cond);
   } else {
     UNREACHABLE();
@@ -1501,16 +1502,16 @@ void Assembler::LoadFunctionFromCalleePool(Register dst,
                                            const Function& function,
                                            Register new_pp) {
   const int32_t offset =
-      ObjectPool::element_offset(object_pool_wrapper_.FindObject(function));
+      ObjectPool::element_offset(object_pool_wrapper().FindObject(function));
   LoadWordFromPoolOffset(dst, offset - kHeapObjectTag, new_pp, AL);
 }
 
 void Assembler::LoadNativeEntry(Register rd,
                                 const ExternalLabel* label,
-                                Patchability patchable,
+                                ObjectPool::Patchability patchable,
                                 Condition cond) {
   const int32_t offset = ObjectPool::element_offset(
-      object_pool_wrapper_.FindNativeFunction(label, patchable));
+      object_pool_wrapper().FindNativeFunction(label, patchable));
   LoadWordFromPoolOffset(rd, offset - kHeapObjectTag, PP, cond);
 }
 
@@ -1548,10 +1549,18 @@ void Assembler::StoreIntoObjectFilter(Register object,
     // And the result with the negated space bit of the object.
     bic(IP, IP, Operand(object));
   } else {
+#if defined(DEBUG)
+    Label okay;
+    BranchIfNotSmi(value, &okay);
+    Stop("Unexpected Smi!");
+    Bind(&okay);
+#endif
     bic(IP, value, Operand(object));
   }
   tst(IP, Operand(kNewObjectAlignmentOffset));
-  b(label, how_to_jump == kJumpToNoUpdate ? EQ : NE);
+  if (how_to_jump != kNoJump) {
+    b(label, how_to_jump == kJumpToNoUpdate ? EQ : NE);
+  }
 }
 
 Register UseRegister(Register reg, RegList* used) {
@@ -1576,37 +1585,47 @@ Register AllocateRegister(RegList* used) {
 void Assembler::StoreIntoObject(Register object,
                                 const Address& dest,
                                 Register value,
-                                CanBeSmi can_be_smi) {
+                                CanBeSmi can_be_smi,
+                                bool lr_reserved) {
   ASSERT(object != value);
   str(value, dest);
-  Label done;
-  StoreIntoObjectFilter(object, value, &done, can_be_smi, kJumpToNoUpdate);
   // A store buffer update is required.
-  RegList regs = (1 << LR);
-  if (value != R0) {
-    regs |= (1 << R0);  // Preserve R0.
+  if (lr_reserved) {
+    StoreIntoObjectFilter(object, value, nullptr, can_be_smi, kNoJump);
+    ldr(LR, Address(THR, Thread::update_store_buffer_wrappers_offset(object)),
+        NE);
+    blx(LR, NE);
+  } else {
+    Label done;
+    StoreIntoObjectFilter(object, value, &done, can_be_smi, kJumpToNoUpdate);
+    RegList regs = 0;
+    regs |= (1 << LR);
+    if (value != R0) {
+      regs |= (1 << R0);  // Preserve R0.
+    }
+    PushList(regs);
+    if (object != R0) {
+      mov(R0, Operand(object));
+    }
+    ldr(LR, Address(THR, Thread::update_store_buffer_entry_point_offset()));
+    blx(LR);
+    PopList(regs);
+    Bind(&done);
   }
-  PushList(regs);
-  if (object != R0) {
-    mov(R0, Operand(object));
-  }
-  ldr(LR, Address(THR, Thread::update_store_buffer_entry_point_offset()));
-  blx(LR);
-  PopList(regs);
-  Bind(&done);
 }
 
 void Assembler::StoreIntoObjectOffset(Register object,
                                       int32_t offset,
                                       Register value,
-                                      CanBeSmi can_value_be_smi) {
+                                      CanBeSmi can_value_be_smi,
+                                      bool lr_reserved) {
   int32_t ignored = 0;
   if (Address::CanHoldStoreOffset(kWord, offset - kHeapObjectTag, &ignored)) {
     StoreIntoObject(object, FieldAddress(object, offset), value,
-                    can_value_be_smi);
+                    can_value_be_smi, lr_reserved);
   } else {
     AddImmediate(IP, object, offset - kHeapObjectTag);
-    StoreIntoObject(object, Address(IP), value, can_value_be_smi);
+    StoreIntoObject(object, Address(IP), value, can_value_be_smi, lr_reserved);
   }
 }
 
@@ -1772,19 +1791,16 @@ void Assembler::LoadTaggedClassIdMayBeSmi(Register result, Register object) {
   SmiTag(result);
 }
 
-static bool CanEncodeBranchOffset(int32_t offset) {
-  ASSERT(Utils::IsAligned(offset, 4));
-  return Utils::IsInt(Utils::CountOneBits32(kBranchOffsetMask), offset);
+void Assembler::BailoutIfInvalidBranchOffset(int32_t offset) {
+  if (!CanEncodeBranchDistance(offset)) {
+    ASSERT(!use_far_branches());
+    Thread::Current()->long_jump_base()->Jump(1, Object::branch_offset_error());
+  }
 }
 
 int32_t Assembler::EncodeBranchOffset(int32_t offset, int32_t inst) {
   // The offset is off by 8 due to the way the ARM CPUs read PC.
   offset -= Instr::kPCReadOffset;
-
-  if (!CanEncodeBranchOffset(offset)) {
-    ASSERT(!use_far_branches());
-    Thread::Current()->long_jump_base()->Jump(1, Object::branch_offset_error());
-  }
 
   // Properly preserve only the bits supported in the instruction.
   offset >>= 2;
@@ -1912,7 +1928,7 @@ void Assembler::EmitFarBranch(Condition cond, int32_t offset, bool link) {
 void Assembler::EmitBranch(Condition cond, Label* label, bool link) {
   if (label->IsBound()) {
     const int32_t dest = label->Position() - buffer_.Size();
-    if (use_far_branches() && !CanEncodeBranchOffset(dest)) {
+    if (use_far_branches() && !CanEncodeBranchDistance(dest)) {
       EmitFarBranch(cond, label->Position(), link);
     } else {
       EmitType5(cond, dest, link);
@@ -1936,7 +1952,7 @@ void Assembler::BindARMv6(Label* label) {
   while (label->IsLinked()) {
     const int32_t position = label->Position();
     int32_t dest = bound_pc - position;
-    if (use_far_branches() && !CanEncodeBranchOffset(dest)) {
+    if (use_far_branches() && !CanEncodeBranchDistance(dest)) {
       // Far branches are enabled and we can't encode the branch offset.
 
       // Grab instructions that load the offset.
@@ -1966,7 +1982,7 @@ void Assembler::BindARMv6(Label* label) {
       buffer_.Store<int32_t>(position + 2 * Instr::kInstrSize, patched_or2);
       buffer_.Store<int32_t>(position + 3 * Instr::kInstrSize, patched_or3);
       label->position_ = DecodeARMv6LoadImmediate(mov, or1, or2, or3);
-    } else if (use_far_branches() && CanEncodeBranchOffset(dest)) {
+    } else if (use_far_branches() && CanEncodeBranchDistance(dest)) {
       // Grab instructions that load the offset, and the branch.
       const int32_t mov = buffer_.Load<int32_t>(position);
       const int32_t or1 =
@@ -1999,6 +2015,7 @@ void Assembler::BindARMv6(Label* label) {
 
       label->position_ = DecodeARMv6LoadImmediate(mov, or1, or2, or3);
     } else {
+      BailoutIfInvalidBranchOffset(dest);
       int32_t next = buffer_.Load<int32_t>(position);
       int32_t encoded = Assembler::EncodeBranchOffset(dest, next);
       buffer_.Store<int32_t>(position, encoded);
@@ -2014,7 +2031,7 @@ void Assembler::BindARMv7(Label* label) {
   while (label->IsLinked()) {
     const int32_t position = label->Position();
     int32_t dest = bound_pc - position;
-    if (use_far_branches() && !CanEncodeBranchOffset(dest)) {
+    if (use_far_branches() && !CanEncodeBranchDistance(dest)) {
       // Far branches are enabled and we can't encode the branch offset.
 
       // Grab instructions that load the offset.
@@ -2037,7 +2054,7 @@ void Assembler::BindARMv7(Label* label) {
       buffer_.Store<int32_t>(position + 0 * Instr::kInstrSize, patched_movw);
       buffer_.Store<int32_t>(position + 1 * Instr::kInstrSize, patched_movt);
       label->position_ = DecodeARMv7LoadImmediate(movt, movw);
-    } else if (use_far_branches() && CanEncodeBranchOffset(dest)) {
+    } else if (use_far_branches() && CanEncodeBranchDistance(dest)) {
       // Far branches are enabled, but we can encode the branch offset.
 
       // Grab instructions that load the offset, and the branch.
@@ -2065,6 +2082,7 @@ void Assembler::BindARMv7(Label* label) {
 
       label->position_ = DecodeARMv7LoadImmediate(movt, movw);
     } else {
+      BailoutIfInvalidBranchOffset(dest);
       int32_t next = buffer_.Load<int32_t>(position);
       int32_t encoded = Assembler::EncodeBranchOffset(dest, next);
       buffer_.Store<int32_t>(position, encoded);
@@ -2431,37 +2449,40 @@ void Assembler::Vdivqs(QRegister qd, QRegister qn, QRegister qm) {
 }
 
 void Assembler::Branch(const StubEntry& stub_entry,
-                       Patchability patchable,
+                       ObjectPool::Patchability patchable,
                        Register pp,
                        Condition cond) {
   const Code& target_code = Code::ZoneHandle(stub_entry.code());
   const int32_t offset = ObjectPool::element_offset(
-      object_pool_wrapper_.FindObject(target_code, patchable));
+      object_pool_wrapper().FindObject(target_code, patchable));
   LoadWordFromPoolOffset(CODE_REG, offset - kHeapObjectTag, pp, cond);
   ldr(IP, FieldAddress(CODE_REG, Code::entry_point_offset()), cond);
   bx(IP, cond);
 }
 
-void Assembler::BranchLink(const Code& target, Patchability patchable) {
+void Assembler::BranchLink(const Code& target,
+                           ObjectPool::Patchability patchable,
+                           Code::EntryKind entry_kind) {
   // Make sure that class CallPattern is able to patch the label referred
   // to by this code sequence.
   // For added code robustness, use 'blx lr' in a patchable sequence and
   // use 'blx ip' in a non-patchable sequence (see other BranchLink flavors).
   const int32_t offset = ObjectPool::element_offset(
-      object_pool_wrapper_.FindObject(target, patchable));
+      object_pool_wrapper().FindObject(target, patchable));
   LoadWordFromPoolOffset(CODE_REG, offset - kHeapObjectTag, PP, AL);
-  ldr(LR, FieldAddress(CODE_REG, Code::entry_point_offset()));
+  ldr(LR, FieldAddress(CODE_REG, Code::entry_point_offset(entry_kind)));
   blx(LR);  // Use blx instruction so that the return branch prediction works.
 }
 
 void Assembler::BranchLink(const StubEntry& stub_entry,
-                           Patchability patchable) {
+                           ObjectPool::Patchability patchable) {
   const Code& code = Code::ZoneHandle(stub_entry.code());
   BranchLink(code, patchable);
 }
 
-void Assembler::BranchLinkPatchable(const Code& target) {
-  BranchLink(target, kPatchable);
+void Assembler::BranchLinkPatchable(const Code& target,
+                                    Code::EntryKind entry_kind) {
+  BranchLink(target, ObjectPool::kPatchable, entry_kind);
 }
 
 void Assembler::BranchLinkToRuntime() {
@@ -2480,16 +2501,17 @@ void Assembler::CallNullErrorShared(bool save_fpu_registers) {
 }
 
 void Assembler::BranchLinkWithEquivalence(const StubEntry& stub_entry,
-                                          const Object& equivalence) {
+                                          const Object& equivalence,
+                                          Code::EntryKind entry_kind) {
   const Code& target = Code::ZoneHandle(stub_entry.code());
   // Make sure that class CallPattern is able to patch the label referred
   // to by this code sequence.
   // For added code robustness, use 'blx lr' in a patchable sequence and
   // use 'blx ip' in a non-patchable sequence (see other BranchLink flavors).
   const int32_t offset = ObjectPool::element_offset(
-      object_pool_wrapper_.FindObject(target, equivalence));
+      object_pool_wrapper().FindObject(target, equivalence));
   LoadWordFromPoolOffset(CODE_REG, offset - kHeapObjectTag, PP, AL);
-  ldr(LR, FieldAddress(CODE_REG, Code::entry_point_offset()));
+  ldr(LR, FieldAddress(CODE_REG, Code::entry_point_offset(entry_kind)));
   blx(LR);  // Use blx instruction so that the return branch prediction works.
 }
 
@@ -2498,8 +2520,9 @@ void Assembler::BranchLink(const ExternalLabel* label) {
   blx(LR);  // Use blx instruction so that the return branch prediction works.
 }
 
-void Assembler::BranchLinkPatchable(const StubEntry& stub_entry) {
-  BranchLinkPatchable(Code::ZoneHandle(stub_entry.code()));
+void Assembler::BranchLinkPatchable(const StubEntry& stub_entry,
+                                    Code::EntryKind entry_kind) {
+  BranchLinkPatchable(Code::ZoneHandle(stub_entry.code()), entry_kind);
 }
 
 void Assembler::BranchLinkOffset(Register base, int32_t offset) {
@@ -2984,8 +3007,8 @@ void Assembler::EnterFrame(RegList regs, intptr_t frame_size) {
   }
 }
 
-void Assembler::LeaveFrame(RegList regs) {
-  ASSERT((regs & (1 << PC)) == 0);  // Must not pop PC.
+void Assembler::LeaveFrame(RegList regs, bool allow_pop_pc) {
+  ASSERT(allow_pop_pc || (regs & (1 << PC)) == 0);  // Must not pop PC.
   if ((regs & (1 << FP)) != 0) {
     // Use FP to set SP.
     sub(SP, FP, Operand(4 * NumRegsBelowFP(regs)));
@@ -3099,15 +3122,24 @@ void Assembler::EnterOsrFrame(intptr_t extra_size) {
   AddImmediate(SP, -extra_size);
 }
 
-void Assembler::LeaveDartFrame(RestorePP restore_pp) {
-  if (restore_pp == kRestoreCallerPP) {
-    ldr(PP, Address(FP, kSavedCallerPpSlotFromFp * kWordSize));
-    set_constant_pool_allowed(false);
-  }
+void Assembler::LeaveDartFrame() {
+  ldr(PP,
+      Address(FP, compiler_frame_layout.saved_caller_pp_from_fp * kWordSize));
+  set_constant_pool_allowed(false);
 
   // This will implicitly drop saved PP, PC marker due to restoring SP from FP
   // first.
   LeaveFrame((1 << FP) | (1 << LR));
+}
+
+void Assembler::LeaveDartFrameAndReturn() {
+  ldr(PP,
+      Address(FP, compiler_frame_layout.saved_caller_pp_from_fp * kWordSize));
+  set_constant_pool_allowed(false);
+
+  // This will implicitly drop saved PP, PC marker due to restoring SP from FP
+  // first.
+  LeaveFrame((1 << FP) | (1 << PC), /*allow_pop_pc=*/true);
 }
 
 void Assembler::EnterStubFrame() {
@@ -3248,6 +3280,7 @@ void Assembler::TryAllocate(const Class& cls,
     tags = RawObject::SizeTag::update(instance_size, tags);
     ASSERT(cls.id() != kIllegalCid);
     tags = RawObject::ClassIdTag::update(cls.id(), tags);
+    tags = RawObject::NewBit::update(true, tags);
     LoadImmediate(IP, tags);
     str(IP, FieldAddress(instance_reg, Object::tags_offset()));
 
@@ -3294,6 +3327,7 @@ void Assembler::TryAllocateArray(intptr_t cid,
     uint32_t tags = 0;
     tags = RawObject::ClassIdTag::update(cid, tags);
     tags = RawObject::SizeTag::update(instance_size, tags);
+    tags = RawObject::NewBit::update(true, tags);
     LoadImmediate(temp2, tags);
     str(temp2, FieldAddress(instance, Array::tags_offset()));  // Store tags.
 

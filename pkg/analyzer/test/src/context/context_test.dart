@@ -258,7 +258,8 @@ int b = aa;''';
     expect(partUnit, isNotNull);
     TopLevelVariableDeclaration declaration =
         libraryUnit.declarations[0] as TopLevelVariableDeclaration;
-    Element declarationElement = declaration.variables.variables[0].element;
+    Element declarationElement =
+        declaration.variables.variables[0].declaredElement;
     TopLevelVariableDeclaration use =
         partUnit.declarations[0] as TopLevelVariableDeclaration;
     Element useElement =
@@ -2383,7 +2384,6 @@ import 'package:crypto/crypto.dart';
     _assertNoExceptions();
   }
 
-  @failingTest // TODO(paulberry): Remove the annotation when dartbug.com/28515 is fixed.
   void test_resolveCompilationUnit_existingElementModel() {
     prepareAnalysisContext(new AnalysisOptionsImpl());
     Source source = addSource('/test.dart', r'''
@@ -2505,7 +2505,7 @@ void functionWithClosureAsDefaultParam([x = () => null]) {}
     CompilationUnit compilationUnit =
         context.resolveCompilationUnit(source, library);
     expect(compilationUnit, isNotNull);
-    expect(compilationUnit.element, isNotNull);
+    expect(compilationUnit.declaredElement, isNotNull);
   }
 
   void test_resolveCompilationUnit_source() {
@@ -2797,7 +2797,7 @@ int aa = 0;''';
     Source source = resourceProvider.newFile(path, code).createSource();
     context.applyChanges(new ChangeSet()..addedSource(source));
     CompilationUnitElement unitElement =
-        context.resolveCompilationUnit2(source, source).element;
+        context.resolveCompilationUnit2(source, source).declaredElement;
     validate(unitElement, 'initial state');
     for (ResultDescriptor<CompilationUnit> descriptor
         in RESOLVED_UNIT_RESULTS) {

@@ -4,6 +4,7 @@
 
 // part of "core_patch.dart";
 
+@pragma("vm:entry-point")
 class _List<E> extends FixedLengthListBase<E> {
   factory _List(length) native "List_allocate";
 
@@ -121,6 +122,7 @@ class _List<E> extends FixedLengthListBase<E> {
 // classes (and inline cache misses) versus a field in the native
 // implementation (checks when modifying). We should keep watching
 // the inline cache misses.
+@pragma("vm:entry-point")
 class _ImmutableList<E> extends UnmodifiableListBase<E> {
   factory _ImmutableList._uninstantiable() {
     throw new UnsupportedError(
@@ -199,11 +201,11 @@ class _FixedSizeArrayIterator<E> implements Iterator<E> {
   int _index;
   E _current;
 
-  _FixedSizeArrayIterator(List array)
+  _FixedSizeArrayIterator(List<E> array)
       : _array = array,
         _length = array.length,
         _index = 0 {
-    assert(array is _List || array is _ImmutableList);
+    assert(array is _List<E> || array is _ImmutableList<E>);
   }
 
   E get current => _current;

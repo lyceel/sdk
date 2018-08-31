@@ -2,8 +2,6 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-library analyzer.test.generated.non_error_resolver_test;
-
 import 'dart:async';
 
 import 'package:analyzer/dart/ast/ast.dart';
@@ -189,6 +187,23 @@ class N {}''');
     await computeAnalysisResult(source);
     assertNoErrors(source);
     verify([source]);
+  }
+
+  test_ambiguousImport_dart_implicitHide() async {
+    Source source = addSource(r'''
+import 'dart:async';
+import 'lib.dart';
+main() {
+  print(Future.zero);
+}
+''');
+    addNamedSource('/lib.dart', r'''
+class Future {
+  static const zero = 0;
+}
+''');
+    await computeAnalysisResult(source);
+    assertNoErrors(source);
   }
 
   test_ambiguousImport_hideCombinator() async {
@@ -1257,6 +1272,7 @@ class A {
     verify([source]);
   }
 
+  @failingTest
   test_conflictingStaticSetterAndInstanceMember_thisClass_method() async {
     Source source = addSource(r'''
 class A {
@@ -1264,7 +1280,7 @@ class A {
   static set x(int p) {}
 }''');
     await computeAnalysisResult(source);
-    assertNoErrors(source);
+    assertErrors(source, [CompileTimeErrorCode.CONFLICTING_GETTER_AND_METHOD]);
     verify([source]);
   }
 
@@ -1308,7 +1324,23 @@ const int value = 12345;
     verify([source]);
   }
 
-  test_constConstructorWithMixinWithField() async {
+  @failingTest
+  test_constConstructorWithMixinWithField_withoutSuperMixins() async {
+    Source source = addSource(r'''
+class M {
+}
+class A extends Object with M {
+  const A();
+}''');
+    await computeAnalysisResult(source);
+    assertErrors(source, [
+      CompileTimeErrorCode.CONST_CONSTRUCTOR_IN_SUBCLASS_OF_MIXIN_APPLICATION
+    ]);
+    verify([source]);
+  }
+
+  test_constConstructorWithMixinWithField_withSuperMixins() async {
+    resetWith(options: new AnalysisOptionsImpl()..enableSuperMixins = true);
     Source source = addSource(r'''
 class M {
 }
@@ -1460,9 +1492,6 @@ foo() {}''');
 
   test_constEvalTypeBoolNumString_equal() async {
     Source source = addSource(r'''
-class A {
-  const A();
-}
 class B {
   final v;
   const B.a1(bool p) : v = p == true;
@@ -1482,6 +1511,8 @@ class B {
   const B.c5(String p) : v = p == '';
   const B.n1(num p) : v = p == null;
   const B.n2(num p) : v = null == p;
+  const B.n3(Object p) : v = p == null;
+  const B.n4(Object p) : v = null == p;
 }''');
     await computeAnalysisResult(source);
     assertNoErrors(source);
@@ -1489,9 +1520,6 @@ class B {
 
   test_constEvalTypeBoolNumString_notEqual() async {
     Source source = addSource(r'''
-class A {
-  const A();
-}
 class B {
   final v;
   const B.a1(bool p) : v = p != true;
@@ -1511,13 +1539,15 @@ class B {
   const B.c5(String p) : v = p != '';
   const B.n1(num p) : v = p != null;
   const B.n2(num p) : v = null != p;
+  const B.n3(Object p) : v = p != null;
+  const B.n4(Object p) : v = null != p;
 }''');
     await computeAnalysisResult(source);
     assertNoErrors(source);
     verify([source]);
   }
 
-  test_constEvelTypeNum_String() async {
+  test_constEvAlTypeNum_String() async {
     Source source = addSource(r'''
 const String A = 'a';
 const String B = A + 'b';
@@ -3624,7 +3654,7 @@ void main() {
 }
 ''');
     var result = await computeAnalysisResult(source);
-    var z = result.unit.element.topLevelVariables
+    var z = result.unit.declaredElement.topLevelVariables
         .where((e) => e.name == 'z')
         .single;
     expect(z.type.toString(), 'List<String>');
@@ -4003,7 +4033,7 @@ class Foo {
   const factory Foo.foo() native 'Foo_Foo_foo';
 }''');
     await computeAnalysisResult(source);
-    assertNoErrors(source);
+    assertErrors(source, [ParserErrorCode.CONST_CONSTRUCTOR_WITH_BODY]);
     // Cannot verify the AST because the import's URI cannot be resolved.
   }
 
@@ -4772,15 +4802,17 @@ class A {
     verify([source]);
   }
 
+  @failingTest
   test_null_callMethod() async {
     Source source = addSource(r'''
 main() {
   null.m();
 }''');
     await computeAnalysisResult(source);
-    assertNoErrors(source);
+    assertErrors(source, [StaticTypeWarningCode.UNDEFINED_METHOD]);
   }
 
+  @failingTest
   test_null_callOperator() async {
     Source source = addSource(r'''
 main() {
@@ -4789,7 +4821,10 @@ main() {
   null[0];
 }''');
     await computeAnalysisResult(source);
-    assertNoErrors(source);
+    assertErrors(source, [
+      StaticTypeWarningCode.UNDEFINED_METHOD,
+      StaticTypeWarningCode.UNDEFINED_METHOD
+    ]);
   }
 
   test_optionalNew_rewrite() async {
@@ -5941,7 +5976,11 @@ main(int p) {
   p.();
 }''');
     await computeAnalysisResult(source);
-    assertErrors(source, [ParserErrorCode.MISSING_IDENTIFIER]);
+    assertErrors(source, [
+      ParserErrorCode.MISSING_IDENTIFIER,
+      ParserErrorCode.MISSING_IDENTIFIER,
+      StaticTypeWarningCode.UNDEFINED_GETTER
+    ]);
   }
 
   test_undefinedMethod_functionExpression_callMethod() async {

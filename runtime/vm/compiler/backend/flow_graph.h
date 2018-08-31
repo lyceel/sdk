@@ -144,6 +144,10 @@ class FlowGraph : public ZoneAllocated {
     return num_direct_parameters_ - variable->index().value();
   }
 
+  bool IsEntryPoint(BlockEntryInstr* target) const {
+    return graph_entry()->IsEntryPoint(target);
+  }
+
   // Flow graph orders.
   const GrowableArray<BlockEntryInstr*>& preorder() const { return preorder_; }
   const GrowableArray<BlockEntryInstr*>& postorder() const {
@@ -173,6 +177,8 @@ class FlowGraph : public ZoneAllocated {
                                 const Cids& cids,
                                 intptr_t deopt_id,
                                 TokenPosition token_pos);
+
+  void AddExactnessGuard(InstanceCallInstr* call, intptr_t receiver_cid);
 
   intptr_t current_ssa_temp_index() const { return current_ssa_temp_index_; }
   void set_current_ssa_temp_index(intptr_t index) {

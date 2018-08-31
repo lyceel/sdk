@@ -11,7 +11,6 @@
 # to add them.
 
 [ $compiler == app_jitk ]
-io/directory_test: RuntimeError
 io/file_error_test: RuntimeError
 io/file_test: RuntimeError
 io/http_auth_digest_test: RuntimeError
@@ -35,6 +34,9 @@ io/zlib_test: RuntimeError
 oom_error_stacktrace_test: RuntimeError
 out_of_memory_test: RuntimeError
 
+[ $compiler == dartkb ]
+no_lazy_dispatchers_test: SkipByDesign # KBC interpreter doesn't support --no_lazy_dispatchers
+
 [ $compiler == fasta ]
 io/arguments_test: CompileTimeError
 
@@ -44,7 +46,7 @@ package/package1_test: CompileTimeError
 package/package_test: CompileTimeError
 package/scenarios/invalid/same_package_twice_test: CompileTimeError
 
-[ $arch != simarm && $arch != simarm64 && $arch != simdbc64 && $fasta ]
+[ $arch != simarm && $arch != simarm64 && $arch != simdbc64 && $compiler != dartkb && $fasta ]
 package/scenarios/invalid/invalid_utf8_test: CompileTimeError # Issue 32085
 package/scenarios/invalid/non_existent_packages_file_test: CompileTimeError # Issue 32085
 
@@ -59,7 +61,6 @@ dart_developer_disabled_env_test: RuntimeError
 
 [ $compiler == dartkp && $mode == debug && $runtime == dart_precompiled && $strong ]
 io/compile_all_test: Crash # Issue 32373
-io/directory_test: Crash # Issue 33475
 io/raw_socket_test: Crash
 io/skipping_dart2js_compilations_test: Crash
 io/socket_exception_test: Pass, Crash
@@ -67,6 +68,9 @@ io/socket_finalizer_test: Pass, Crash
 io/socket_info_ipv4_test: Pass, Crash
 io/socket_info_ipv6_test: Pass, Crash
 io/socket_port_test: Pass, Crash
+
+[ $compiler == dartkp && $mode == product && $runtime == dart_precompiled && $strong ]
+io/compile_all_test: Pass
 
 # ===== dartkp + dart_precompiled status lines =====
 [ $compiler == dartkp && $runtime == dart_precompiled && $system != windows && $strong ]

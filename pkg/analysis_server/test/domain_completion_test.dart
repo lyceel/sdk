@@ -50,15 +50,6 @@ class A {
     expect(suggestions, hasLength(2));
   }
 
-  test_is_asPrefixedIdentifierStart() async {
-    addTestFile('''
-class A { var isVisible;}
-main(A p) { var v1 = p.is^; }''');
-    await getSuggestions();
-    assertHasResult(CompletionSuggestionKind.INVOCATION, 'isVisible',
-        relevance: DART_RELEVANCE_DEFAULT);
-  }
-
   test_ArgumentList_factory_named_param_label() async {
     addTestFile('main() { new A(^);}'
         'class A { factory A({one, two}) => null; }');
@@ -189,6 +180,7 @@ main(A p) { var v1 = p.is^; }''');
     expect(suggestions, hasLength(2));
   }
 
+  @FailingTest(issue: 'https://github.com/dart-lang/sdk/issues/33992')
   test_constructor() async {
     addTestFile('class A {bool foo; A() : ^;}');
     await getSuggestions();
@@ -198,6 +190,7 @@ main(A p) { var v1 = p.is^; }''');
         relevance: DART_RELEVANCE_LOCAL_FIELD);
   }
 
+  @FailingTest(issue: 'https://github.com/dart-lang/sdk/issues/33992')
   test_constructor2() async {
     addTestFile('class A {bool foo; A() : s^;}');
     await getSuggestions();
@@ -207,6 +200,7 @@ main(A p) { var v1 = p.is^; }''');
         relevance: DART_RELEVANCE_LOCAL_FIELD);
   }
 
+  @FailingTest(issue: 'https://github.com/dart-lang/sdk/issues/33992')
   test_constructor3() async {
     addTestFile('class A {bool foo; A() : a=7,^;}');
     await getSuggestions();
@@ -216,6 +210,7 @@ main(A p) { var v1 = p.is^; }''');
         relevance: DART_RELEVANCE_LOCAL_FIELD);
   }
 
+  @FailingTest(issue: 'https://github.com/dart-lang/sdk/issues/33992')
   test_constructor4() async {
     addTestFile('class A {bool foo; A() : a=7,s^;}');
     await getSuggestions();
@@ -225,6 +220,7 @@ main(A p) { var v1 = p.is^; }''');
         relevance: DART_RELEVANCE_LOCAL_FIELD);
   }
 
+  @FailingTest(issue: 'https://github.com/dart-lang/sdk/issues/33992')
   test_constructor5() async {
     addTestFile('class A {bool foo; A() : a=7,s^}');
     await getSuggestions();
@@ -234,6 +230,7 @@ main(A p) { var v1 = p.is^; }''');
         relevance: DART_RELEVANCE_LOCAL_FIELD);
   }
 
+  @FailingTest(issue: 'https://github.com/dart-lang/sdk/issues/33992')
   test_constructor6() async {
     addTestFile('class A {bool foo; A() : a=7,^ void bar() {}}');
     await getSuggestions();
@@ -541,6 +538,7 @@ main(A p) { var v1 = p.is^; }''');
         relevance: DART_RELEVANCE_LOCAL_FUNCTION);
   }
 
+  @FailingTest(issue: 'https://github.com/dart-lang/sdk/issues/33992')
   test_inherited() {
     newFile('/libA.dart', content: 'class A {m() {}}');
     addTestFile('''
@@ -597,6 +595,15 @@ class B extends A {
     });
   }
 
+  test_is_asPrefixedIdentifierStart() async {
+    addTestFile('''
+class A { var isVisible;}
+main(A p) { var v1 = p.is^; }''');
+    await getSuggestions();
+    assertHasResult(CompletionSuggestionKind.INVOCATION, 'isVisible',
+        relevance: DART_RELEVANCE_DEFAULT);
+  }
+
   test_keyword() {
     addTestFile('library A; cl^');
     return getSuggestions().then((_) {
@@ -648,7 +655,7 @@ main() {
   test_local_override() {
     newFile('/libA.dart', content: 'class A {m() {}}');
     addTestFile('''
-import '/libA.dart';
+import '../../libA.dart';
 class B extends A {
   m() {}
   x() {^}
@@ -719,7 +726,7 @@ main() {
   test_overrides() {
     newFile('/libA.dart', content: 'class A {m() {}}');
     addTestFile('''
-import '/libA.dart';
+import '../../libA.dart';
 class B extends A {m() {^}}
 ''');
     return getSuggestions().then((_) {

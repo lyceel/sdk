@@ -10,9 +10,10 @@
 #include "platform/atomic.h"
 #include "platform/safe_stack.h"
 #include "vm/bitfield.h"
+#include "vm/constants.h"
 #include "vm/globals.h"
 #include "vm/handles.h"
-#include "vm/heap/store_buffer.h"
+#include "vm/heap/pointer_block.h"
 #include "vm/os_thread.h"
 #include "vm/runtime_entry_list.h"
 
@@ -522,6 +523,21 @@ class Thread : public BaseThread {
   CACHED_CONSTANTS_LIST(DEFINE_OFFSET_METHOD)
 #undef DEFINE_OFFSET_METHOD
 
+#if defined(TARGET_ARCH_ARM) || defined(TARGET_ARCH_ARM64) ||                  \
+    defined(TARGET_ARCH_X64)
+  static intptr_t update_store_buffer_wrappers_offset(Register reg) {
+    ASSERT((kDartAvailableCpuRegs & (1 << reg)) != 0);
+    intptr_t index = 0;
+    for (intptr_t i = 0; i < kNumberOfCpuRegisters; ++i) {
+      if ((kDartAvailableCpuRegs & (1 << i)) == 0) continue;
+      if (i == reg) break;
+      ++index;
+    }
+    return OFFSET_OF(Thread, update_store_buffer_wrappers_entry_points_) +
+           index * sizeof(uword);
+  }
+#endif
+
 #define DEFINE_OFFSET_METHOD(name)                                             \
   static intptr_t name##_entry_point_offset() {                                \
     return OFFSET_OF(Thread, name##_entry_point_);                             \
@@ -709,6 +725,12 @@ class Thread : public BaseThread {
     safepoint_state_ =
         BlockedForSafepointField::update(value, safepoint_state_);
   }
+  bool BypassSafepoints() const {
+    return BypassSafepointsField::decode(safepoint_state_);
+  }
+  static uint32_t SetBypassSafepoints(bool value, uint32_t state) {
+    return BypassSafepointsField::update(value, state);
+  }
 
   enum ExecutionState {
     kThreadInVM = 0,
@@ -831,6 +853,12 @@ class Thread : public BaseThread {
   LEAF_RUNTIME_ENTRY_LIST(DECLARE_MEMBERS)
 #undef DECLARE_MEMBERS
 
+#if defined(TARGET_ARCH_ARM) || defined(TARGET_ARCH_ARM64) ||                  \
+    defined(TARGET_ARCH_X64)
+  uword
+      update_store_buffer_wrappers_entry_points_[kNumberOfDartAvailableCpuRegs];
+#endif
+
   TimelineStream* dart_stream_;
   OSThread* os_thread_;
   Monitor* thread_lock_;
@@ -885,6 +913,7 @@ class Thread : public BaseThread {
   class AtSafepointField : public BitField<uint32_t, bool, 0, 1> {};
   class SafepointRequestedField : public BitField<uint32_t, bool, 1, 1> {};
   class BlockedForSafepointField : public BitField<uint32_t, bool, 2, 1> {};
+  class BypassSafepointsField : public BitField<uint32_t, bool, 3, 1> {};
   uint32_t safepoint_state_;
   uint32_t execution_state_;
 

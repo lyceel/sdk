@@ -18,18 +18,16 @@ import 'test_suite.dart';
 /// shared between multiple test cases, it should not be mutated after
 /// construction.
 abstract class RuntimeConfiguration {
-  Configuration _configuration;
+  TestConfiguration _configuration;
 
-  static RuntimeConfiguration _makeInstance(Configuration configuration) {
+  static RuntimeConfiguration _makeInstance(TestConfiguration configuration) {
     switch (configuration.runtime) {
-      case Runtime.contentShellOnAndroid:
       case Runtime.chrome:
       case Runtime.chromeOnAndroid:
       case Runtime.firefox:
       case Runtime.ie11:
       case Runtime.ie10:
       case Runtime.ie9:
-      case Runtime.opera:
       case Runtime.safari:
         // TODO(ahe): Replace this with one or more browser runtimes.
         return new DummyRuntimeConfiguration();
@@ -59,18 +57,14 @@ abstract class RuntimeConfiguration {
         }
         break;
 
-      case Runtime.drt:
-        return new DrtRuntimeConfiguration();
-
       case Runtime.selfCheck:
         return new SelfCheckRuntimeConfiguration();
     }
     throw "unreachable";
   }
 
-  factory RuntimeConfiguration(Configuration configuration) {
-    return _makeInstance(configuration)
-           .._configuration = configuration;
+  factory RuntimeConfiguration(TestConfiguration configuration) {
+    return _makeInstance(configuration).._configuration = configuration;
   }
 
   RuntimeConfiguration._subclass();
@@ -206,25 +200,7 @@ class DartVmRuntimeConfiguration extends RuntimeConfiguration {
   }
 }
 
-/// Runtime configuration for Content Shell.  We previously used a similar
-/// program named Dump Render Tree, hence the name.
-class DrtRuntimeConfiguration extends DartVmRuntimeConfiguration {
-  int timeoutMultiplier(
-      {Mode mode,
-      bool isChecked: false,
-      bool isReload: false,
-      Architecture arch}) {
-    return 4 // Allow additional time for browser testing to run.
-        // TODO(ahe): We might need to distinguish between DRT for running
-        // JavaScript and Dart code.  I'm not convinced the inherited timeout
-        // multiplier is relevant for JavaScript.
-        *
-        super.timeoutMultiplier(
-            mode: mode, isChecked: isChecked, isReload: isReload);
-  }
-}
-
-/// The standalone Dart VM binary, "dart" or "dart.exe".
+//// The standalone Dart VM binary, "dart" or "dart.exe".
 class StandaloneDartRuntimeConfiguration extends DartVmRuntimeConfiguration {
   List<Command> computeRuntimeCommands(
       TestSuite suite,
@@ -245,6 +221,8 @@ class StandaloneDartRuntimeConfiguration extends DartVmRuntimeConfiguration {
     if (suite.configuration.compiler == Compiler.dartkb) {
       args.removeWhere(
           (String arg) => arg.startsWith('--optimization-counter-threshold'));
+      args.removeWhere(
+          (String arg) => arg.startsWith('--optimization_counter_threshold'));
       args = <String>['--optimization-counter-threshold=-1']..addAll(args);
     }
 
